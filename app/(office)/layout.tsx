@@ -1,17 +1,10 @@
-import { ThemeSwitcher } from "@/components/theme-switcher";
 import { GeistSans } from "geist/font/sans";
 import { ThemeProvider } from "next-themes";
-import Link from "next/link";
-import "./globals.css";
-
-const defaultUrl = process.env.VERCEL_URL
-  ? `https://${process.env.VERCEL_URL}`
-  : "http://localhost:3000";
+import { TopNav } from "@/components/Nav/topNav";
 
 export const metadata = {
-  metadataBase: new URL(defaultUrl),
-  title: "Next.js and Supabase Starter Kit",
-  description: "The fastest way to build apps with Next.js and Supabase",
+  title: "Office Dashboard",
+  description: "Uno Star Solutions Office Dashboard",
 };
 
 export default function RootLayout({
@@ -28,6 +21,7 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
+          <TopNav />
           {children}
         </ThemeProvider>
       </body>
