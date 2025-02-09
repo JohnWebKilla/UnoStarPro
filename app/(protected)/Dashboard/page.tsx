@@ -1,6 +1,6 @@
 "use client";
 import React, { useEffect, useState } from "react";
-import { signOutAction } from "@/app/actions";
+import { signOutAction } from "@/app/Actions/auth-actions";
 import {
   Card,
   CardContent,
