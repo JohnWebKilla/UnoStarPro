@@ -1,42 +1,28 @@
 "use client";
 import React, { useEffect, useState } from "react";
-import { signOutAction } from "@/app/Actions/auth-actions";
+import { KeyMetrics } from "./components/KeyMetrics";
+import { MonthlyTrend } from "./components/MonthlyTrend";
+import { StatusChanges } from "./components/StatusChanges";
+import { TeamPerformance } from "./components/TeamPerformance";
+import { BadRatings } from "./components/BadRatings";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { RefreshCw } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-} from "recharts";
-
-interface TicketMetrics {
-  totalTickets: number;
-  closedTickets: number;
-  badRatings: number;
-  systemIssues: number;
-  newDrivers: number;
-  deactivatedDrivers: number;
-}
+  TicketMetrics,
+  MonthlyTickets,
+  UserPerformance,
+  DriverRating,
+} from "./types";
 
 interface CompanyMetrics {
   companyName: string;
-  driverCalls: number;
-}
-
-interface UserPerformance {
-  userName: string;
-  closedTickets: number;
-  badRatings: number;
+  activeDrivers: number;
+  avgRating: number;
+  ratingDistribution: {
+    "5": number;
+    "4": number;
+    "3": number;
+    "2": number;
+    "1": number;
+  };
 }
 
 export default function Dashboard() {
@@ -47,15 +33,54 @@ export default function Dashboard() {
     systemIssues: 0,
     newDrivers: 0,
     deactivatedDrivers: 0,
+    avgResponseTime: 0,
+    ticketTrend: 0, // percentage change from last month
+    customerSatisfaction: 0,
+    avgCloseTime: 0, // in minutes
+    newCompanies: 0,
+    deactivatedCompanies: 0,
   });
 
   const [companyMetrics, setCompanyMetrics] = useState<CompanyMetrics[]>([]);
   const [userPerformance, setUserPerformance] = useState<UserPerformance[]>([]);
+  const [monthlyTickets, setMonthlyTickets] = useState<MonthlyTickets[]>([]);
+  const [recentBadRatings, setRecentBadRatings] = useState<DriverRating[]>([]);
+
+  const [isLoading, setIsLoading] = useState({
+    metrics: false,
+    companyMetrics: false,
+    userPerformance: false,
+    monthlyTickets: false,
+    recentBadRatings: false,
+  });
+
+  // Add new state for last updated time
+  const [lastUpdated, setLastUpdated] = useState<string>("");
+
+  // Add useEffect to handle time updates
+  useEffect(() => {
+    setLastUpdated(new Date().toLocaleTimeString());
+  }, []);
 
   // Fetch data when component mounts
   useEffect(() => {
-    // TODO: Replace with actual API calls
-    // Simulated data for demonstration
+    fetchAllData();
+  }, []);
+
+  const fetchAllData = async () => {
+    setIsLoading({
+      metrics: true,
+      companyMetrics: true,
+      userPerformance: true,
+      monthlyTickets: true,
+      recentBadRatings: true,
+    });
+
+    // Update last updated time
+    setLastUpdated(new Date().toLocaleTimeString());
+
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
     setMetrics({
       totalTickets: 150,
       closedTickets: 120,
@@ -63,139 +88,180 @@ export default function Dashboard() {
       systemIssues: 8,
       newDrivers: 25,
       deactivatedDrivers: 5,
+      avgResponseTime: 8.5, // minutes
+      ticketTrend: 12.5, // 12.5% increase from last month
+      customerSatisfaction: 87,
+      avgCloseTime: 45.5, // Add average close time
+      newCompanies: 3,
+      deactivatedCompanies: 1,
     });
+    setIsLoading((prev) => ({ ...prev, metrics: false }));
 
+    await new Promise((resolve) => setTimeout(resolve, 500));
     setCompanyMetrics([
-      { companyName: "Company A", driverCalls: 45 },
-      { companyName: "Company B", driverCalls: 32 },
-      { companyName: "Company C", driverCalls: 28 },
+      {
+        companyName: "Company A",
+        activeDrivers: 120,
+        avgRating: 4.5,
+        ratingDistribution: {
+          "5": 60,
+          "4": 40,
+          "3": 15,
+          "2": 3,
+          "1": 2,
+        },
+      },
+      {
+        companyName: "Company B",
+        activeDrivers: 85,
+        avgRating: 4.2,
+        ratingDistribution: {
+          "5": 35,
+          "4": 30,
+          "3": 12,
+          "2": 5,
+          "1": 3,
+        },
+      },
+      {
+        companyName: "Company C",
+        activeDrivers: 65,
+        avgRating: 4.7,
+        ratingDistribution: {
+          "5": 40,
+          "4": 20,
+          "3": 3,
+          "2": 1,
+          "1": 1,
+        },
+      },
     ]);
+    setIsLoading((prev) => ({ ...prev, companyMetrics: false }));
 
+    await new Promise((resolve) => setTimeout(resolve, 500));
     setUserPerformance([
-      { userName: "John Doe", closedTickets: 45, badRatings: 3 },
-      { userName: "Jane Smith", closedTickets: 38, badRatings: 2 },
-      { userName: "Mike Johnson", closedTickets: 37, badRatings: 4 },
+      {
+        userName: "John Doe",
+        email: "john.doe@unostar.com",
+        closedTickets: 45,
+        ticketsTrend: 12,
+        avgCloseTime: 32.5,
+        badRatingTickets: [
+          { ticketId: "TKT-2024-001", rating: "bad" },
+          { ticketId: "TKT-2024-003", rating: "bad" },
+        ],
+        onlineStatus: "online",
+      },
+      {
+        userName: "Jane Smith",
+        email: "jane.smith@unostar.com",
+        closedTickets: 38,
+        ticketsTrend: -5,
+        avgCloseTime: 28.4,
+        badRatingTickets: [
+          { ticketId: "TKT-2024-002", rating: "bad" },
+          { ticketId: "TKT-2024-005", rating: "good" },
+        ],
+        onlineStatus: "busy",
+      },
+      {
+        userName: "Mike Johnson",
+        email: "mike.johnson@unostar.com",
+        closedTickets: 37,
+        ticketsTrend: 8,
+        avgCloseTime: 35.2,
+        badRatingTickets: [
+          { ticketId: "TKT-2024-004", rating: "bad" },
+          { ticketId: "TKT-2024-006", rating: "good" },
+          { ticketId: "TKT-2024-007", rating: "good" },
+        ],
+        onlineStatus: "offline",
+      },
     ]);
-  }, []);
+    setIsLoading((prev) => ({ ...prev, userPerformance: false }));
 
-  const handleRefresh = async () => {
-    console.log("Refreshing data...");
+    // Update monthly tickets data to only show closed tickets with trend
+    const last12Months = Array.from({ length: 12 }, (_, i) => {
+      const d = new Date();
+      d.setMonth(d.getMonth() - i);
+      return d.toLocaleString("default", { month: "short" });
+    }).reverse();
+
+    const monthlyClosedTickets = last12Months.map((month) => ({
+      month,
+      closedTickets: Math.floor(Math.random() * 150) + 50, // 50-200 closed tickets
+      trend: Math.round(Math.random() * 40 - 20), // -20% to +20% trend
+    }));
+
+    setMonthlyTickets(monthlyClosedTickets);
+    setIsLoading((prev) => ({ ...prev, monthlyTickets: false }));
+
+    // Add mock bad ratings data
+    setRecentBadRatings([
+      {
+        driverName: "John Smith",
+        companyName: "Company A",
+        rating: 2,
+        comment: "Driver was late and unprofessional",
+        timestamp: "2 hours ago",
+        ticketId: "TKT-2024-001",
+      },
+      {
+        driverName: "Mike Wilson",
+        companyName: "Company B",
+        rating: 1,
+        comment: "No-show without notification",
+        timestamp: "3 hours ago",
+        ticketId: "TKT-2024-002",
+      },
+      {
+        driverName: "Sarah Davis",
+        companyName: "Company A",
+        rating: 2,
+        comment: "Poor communication and late delivery",
+        timestamp: "5 hours ago",
+        ticketId: "TKT-2024-003",
+      },
+      {
+        driverName: "Robert Johnson",
+        companyName: "Company C",
+        rating: 1,
+        comment: "Refused to follow delivery instructions",
+        timestamp: "6 hours ago",
+        ticketId: "TKT-2024-004",
+      },
+    ]);
+    setIsLoading((prev) => ({ ...prev, recentBadRatings: false }));
   };
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold">Support Dashboard</h1>
-        <Button onClick={handleRefresh} variant="outline">
-          <RefreshCw className="mr-2" />
-          Refresh
-        </Button>
+    <div className="space-y-4 bg-background/30 dark:bg-background/10">
+      <KeyMetrics metrics={metrics} isLoading={isLoading.metrics} />
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <MonthlyTrend
+          monthlyTickets={monthlyTickets}
+          isLoading={isLoading.monthlyTickets}
+        />
+        <StatusChanges metrics={metrics} isLoading={isLoading.metrics} />
       </div>
 
-      {/* Overview Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card>
-          <CardHeader>
-            <CardTitle>Total Tickets</CardTitle>
-            <CardDescription>This month</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-bold">{metrics.totalTickets}</p>
-            <p className="text-sm text-gray-500">
-              {metrics.closedTickets} closed (
-              {Math.round((metrics.closedTickets / metrics.totalTickets) * 100)}
-              %)
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Driver Status</CardTitle>
-            <CardDescription>This month</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              <p className="text-green-600">
-                +{metrics.newDrivers} New Drivers
-              </p>
-              <p className="text-red-600">
-                -{metrics.deactivatedDrivers} Deactivated
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>System Health</CardTitle>
-            <CardDescription>This month</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-bold">{metrics.systemIssues}</p>
-            <p className="text-sm text-gray-500">reported issues</p>
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <TeamPerformance
+          userPerformance={userPerformance}
+          isLoading={isLoading.userPerformance}
+          onTicketClick={(ticketId) =>
+            console.log(`Navigate to ticket ${ticketId}`)
+          }
+        />
+        <BadRatings
+          recentBadRatings={recentBadRatings}
+          isLoading={isLoading.recentBadRatings}
+          onTicketClick={(ticketId) =>
+            console.log(`Navigate to ticket ${ticketId}`)
+          }
+        />
       </div>
-
-      {/* Company Calls Chart */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Driver Calls by Company</CardTitle>
-          <CardDescription>Number of support calls per company</CardDescription>
-        </CardHeader>
-        <CardContent className="h-[300px]">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={companyMetrics}>
-              <XAxis dataKey="companyName" />
-              <YAxis />
-              <Tooltip />
-              <Bar dataKey="driverCalls" fill="#4f46e5" />
-            </BarChart>
-          </ResponsiveContainer>
-        </CardContent>
-      </Card>
-
-      {/* User Performance Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Support Team Performance</CardTitle>
-          <CardDescription>
-            Tickets closed and ratings this month
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b">
-                  <th className="text-left py-2">Support Agent</th>
-                  <th className="text-left py-2">Closed Tickets</th>
-                  <th className="text-left py-2">Bad Ratings</th>
-                  <th className="text-left py-2">Performance Score</th>
-                </tr>
-              </thead>
-              <tbody>
-                {userPerformance.map((user, index) => (
-                  <tr key={index} className="border-b">
-                    <td className="py-2">{user.userName}</td>
-                    <td className="py-2">{user.closedTickets}</td>
-                    <td className="py-2">{user.badRatings}</td>
-                    <td className="py-2">
-                      {Math.round(
-                        ((user.closedTickets - user.badRatings) /
-                          user.closedTickets) *
-                          100
-                      )}
-                      %
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 }

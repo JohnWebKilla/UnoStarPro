@@ -12,6 +12,9 @@ import {
   Calendar,
   CreditCard,
   BarChart,
+  Menu,
+  X,
+  Crown,
 } from "lucide-react";
 import { signOutAction } from "@/app/Actions/auth-actions";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -26,7 +29,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { ROUTES, Role } from "@/utils/protected";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { useBirthdayCheck } from "@/hooks/useBirthdayCheck";
+import { motion } from "framer-motion";
 
 type NavItem = {
   path: string;
@@ -89,6 +94,8 @@ interface TopNavProps {
 
 export function TopNav({ userRole, userName, userEmail }: TopNavProps) {
   const pathname = usePathname();
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const isBirthday = useBirthdayCheck();
 
   const visibleNavItems = useMemo(() => {
     if (!userRole) return [];
@@ -111,7 +118,7 @@ export function TopNav({ userRole, userName, userEmail }: TopNavProps) {
             </Link>
           </div>
 
-          {/* Menu Items */}
+          {/* Desktop Menu Items */}
           <div className="flex-grow justify-center sm:space-x-8 hidden sm:flex">
             {visibleNavItems.map(({ path, icon: Icon, label }) => (
               <Link
@@ -128,11 +135,24 @@ export function TopNav({ userRole, userName, userEmail }: TopNavProps) {
             ))}
           </div>
 
-          {/* Avatar */}
-          <div className="flex-shrink-0 sm:ml-6 sm:flex sm:items-center">
-            <span className="mr-2">
+          {/* Avatar and Theme Switcher */}
+          <div className="flex items-center space-x-2">
+            <span className="hidden sm:block">
               <ThemeSwitcher />
             </span>
+
+            {/* Mobile menu button */}
+            <button
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+              className="sm:hidden inline-flex items-center justify-center p-2 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500"
+            >
+              <span className="sr-only">Open main menu</span>
+              {isMobileMenuOpen ? (
+                <X className="block h-6 w-6" />
+              ) : (
+                <Menu className="block h-6 w-6" />
+              )}
+            </button>
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -140,6 +160,19 @@ export function TopNav({ userRole, userName, userEmail }: TopNavProps) {
                   variant="ghost"
                   className="relative h-8 w-8 rounded-full"
                 >
+                  {isBirthday && (
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="absolute -top-2 -right-1 z-10"
+                    >
+                      <Crown
+                        className="h-5 w-5 text-yellow-500 rotate-[30deg]"
+                        fill="currentColor"
+                        strokeWidth={1.5}
+                      />
+                    </motion.div>
+                  )}
                   <Avatar className="h-8 w-8">
                     <AvatarImage
                       src="/placeholder-avatar.jpg"
@@ -189,21 +222,34 @@ export function TopNav({ userRole, userName, userEmail }: TopNavProps) {
       </div>
 
       {/* Mobile menu */}
-      <div className="sm:hidden hidden">
+      <div
+        className={`sm:hidden ${
+          isMobileMenuOpen ? "block" : "hidden"
+        } border-t dark:border-gray-700`}
+      >
         <div className="pt-2 pb-3 space-y-1">
           {visibleNavItems.map(({ path, icon: Icon, label }) => (
             <Link
               key={path}
               href={path}
+              onClick={() => setIsMobileMenuOpen(false)}
               className={`${
                 pathname === path
-                  ? "bg-indigo-50 border-indigo-500 text-indigo-700"
-                  : "border-transparent text-gray-500 hover:bg-gray-50 hover:border-gray-300 hover:text-gray-700"
-              } block pl-3 pr-4 py-2 border-l-4 text-base font-medium`}
+                  ? "bg-blue-500 text-white dark:bg-blue-700"
+                  : "text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-white"
+              } flex items-center px-4 py-2 text-base font-medium`}
             >
-              <Icon className="mr-2 inline-block" /> {label}
+              <Icon className="mr-3 h-5 w-5" />
+              {label}
             </Link>
           ))}
+        </div>
+        {/* Mobile ThemeSwitcher */}
+        <div className="px-4 py-3 border-t dark:border-gray-700">
+          <div className="flex items-center">
+            <span className="mr-2">Theme:</span>
+            <ThemeSwitcher />
+          </div>
         </div>
       </div>
     </nav>

@@ -14,6 +14,7 @@ import { useSearchParams } from "next/navigation";
 import { getDashboardForRole } from "@/utils/protected";
 import { useUser } from "@/contexts/UserContext";
 import { type Role } from "@/utils/protected";
+import { LoadingOverlay } from "@/components/ui/loading-overlay";
 
 function SearchParamsMessage() {
   const searchParams = useSearchParams();
@@ -56,6 +57,7 @@ export default function LoginForm() {
 
       if ("error" in result) {
         setErrorMessage(result.error);
+        setIsLoading(false);
         return;
       }
 
@@ -69,117 +71,127 @@ export default function LoginForm() {
         window.location.href = result.dashboardUrl;
       } else {
         setErrorMessage("Unable to determine appropriate dashboard");
+        setIsLoading(false);
       }
     } catch (error) {
       setErrorMessage("An unexpected error occurred");
-    } finally {
+      setIsLoading(false);
     }
   };
 
   return (
-    <div className="flex w-full items-center justify-center min-h-screen p-4">
-      <motion.form
-        className="w-full max-w-lg p-8 space-y-8 bg-background rounded-lg shadow-lg"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-        onSubmit={handleSubmit}
-      >
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.2, duration: 0.5 }}
+    <>
+      <div className="flex w-full items-center justify-center min-h-screen p-4">
+        <motion.form
+          className="w-full max-w-lg p-8 space-y-8 bg-background rounded-lg shadow-lg"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+          onSubmit={handleSubmit}
         >
-          <div className="flex justify-between items-center mb-4">
-            <div className="flex items-center">
-              <Image
-                src="/logo.webp"
-                alt="UnoStar Logo"
-                width={50}
-                height={50}
-                className="mr-2"
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.2, duration: 0.5 }}
+          >
+            <div className="flex justify-between items-center mb-4">
+              <div className="flex items-center">
+                <Image
+                  src="/logo.webp"
+                  alt="UnoStar Logo"
+                  width={50}
+                  height={50}
+                  className="mr-2"
+                />
+                <div>
+                  <h1 className="text-2xl font-bold">UnoStar</h1>
+                  <h2 className="text-xl">Sign in</h2>
+                </div>
+              </div>
+              <ThemeSwitcher />
+            </div>
+          </motion.div>
+
+          <motion.div
+            className="space-y-6"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.4, duration: 0.5 }}
+          >
+            <div className="space-y-2">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                name="email"
+                type="email"
+                placeholder="you@example.com"
+                required
+                className="w-full"
+                autoComplete="email"
               />
-              <div>
-                <h1 className="text-2xl font-bold">UnoStar</h1>
-                <h2 className="text-xl">Sign in</h2>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex justify-between items-center">
+                <Label htmlFor="password">Password</Label>
+                <Link
+                  className="text-xs text-primary hover:underline"
+                  href="/forgot-password"
+                >
+                  Forgot Password?
+                </Link>
+              </div>
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  name="password"
+                  placeholder="Your password"
+                  required
+                  className="w-full pr-10"
+                  autoComplete="current-password"
+                />
+                <button
+                  type="button"
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                  onClick={() => setShowPassword(!showPassword)}
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4 text-gray-500" />
+                  ) : (
+                    <Eye className="h-4 w-4 text-gray-500" />
+                  )}
+                </button>
               </div>
             </div>
-            <ThemeSwitcher />
-          </div>
-        </motion.div>
 
-        <motion.div
-          className="space-y-6"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.4, duration: 0.5 }}
-        >
-          <div className="space-y-2">
-            <Label htmlFor="email">Email</Label>
-            <Input
-              id="email"
-              name="email"
-              type="email"
-              placeholder="you@example.com"
-              required
+            <SubmitButton
+              pendingText="Signing In..."
               className="w-full"
-              autoComplete="email"
-            />
-          </div>
+              disabled={isLoading}
+            >
+              {isLoading ? "Signing In..." : "Sign in"}
+            </SubmitButton>
 
-          <div className="space-y-2">
-            <div className="flex justify-between items-center">
-              <Label htmlFor="password">Password</Label>
-              <Link
-                className="text-xs text-primary hover:underline"
-                href="/forgot-password"
-              >
-                Forgot Password?
-              </Link>
-            </div>
-            <div className="relative">
-              <Input
-                id="password"
-                type={showPassword ? "text" : "password"}
-                name="password"
-                placeholder="Your password"
-                required
-                className="w-full pr-10"
-                autoComplete="current-password"
+            <SearchParamsMessage />
+
+            {errorMessage && (
+              <FormMessage
+                message={{
+                  error: errorMessage,
+                }}
               />
-              <button
-                type="button"
-                className="absolute inset-y-0 right-0 pr-3 flex items-center"
-                onClick={() => setShowPassword(!showPassword)}
-              >
-                {showPassword ? (
-                  <EyeOff className="h-4 w-4 text-gray-500" />
-                ) : (
-                  <Eye className="h-4 w-4 text-gray-500" />
-                )}
-              </button>
-            </div>
+            )}
+          </motion.div>
+        </motion.form>
+      </div>
+      {isLoading && (
+        <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center">
+          <div className="flex flex-col items-center gap-4">
+            <img src="/Data Loading.gif" alt="Loading" className="h-96 w-96" />
           </div>
-
-          <SubmitButton
-            pendingText="Signing In..."
-            className="w-full"
-            disabled={isLoading}
-          >
-            {isLoading ? "Signing In..." : "Sign in"}
-          </SubmitButton>
-
-          <SearchParamsMessage />
-
-          {errorMessage && (
-            <FormMessage
-              message={{
-                error: errorMessage,
-              }}
-            />
-          )}
-        </motion.div>
-      </motion.form>
-    </div>
+        </div>
+      )}
+    </>
   );
 }
