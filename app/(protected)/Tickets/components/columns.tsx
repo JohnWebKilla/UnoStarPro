@@ -1,7 +1,9 @@
+"use client";
+
 import { ColumnDef } from "@tanstack/react-table";
-import { formatDistanceToNow } from "date-fns";
+import { format } from "date-fns";
 import { Badge } from "@/components/ui/badge";
-import { MoreHorizontal, FileText } from "lucide-react";
+import { MoreHorizontal, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -9,110 +11,136 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
 
-export const columns: any[] = [
+interface Ticket {
+  timestamp: Date;
+  company: string;
+  driver: string;
+  services: string;
+  dispatcher: string;
+  editor: string;
+  duration: string;
+  status: string;
+  dispatchNote?: string;
+  editorNote?: string;
+}
+
+const getDurationColor = (duration: string) => {
+  const minutes = parseInt(duration.replace("m", ""));
+  if (minutes <= 10) {
+    return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300";
+  } else if (minutes <= 20) {
+    return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300";
+  } else {
+    return "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300";
+  }
+};
+
+export const columns: ColumnDef<Ticket, any>[] = [
   {
     accessorKey: "timestamp",
     header: "Timestamp",
-    cell: ({ row }: any) => {
-      const timestamp = row.getValue("timestamp");
-      if (!timestamp) {
-        return "N/A";
-      }
-
-      const date = new Date(timestamp);
-      if (isNaN(date.getTime())) {
-        return "Invalid Date";
-      }
-
-      return formatDistanceToNow(date, {
-        addSuffix: true,
-      });
+    cell: ({ row }) => {
+      const timestamp = row.getValue("timestamp") as Date;
+      return (
+        <div className="flex flex-col">
+          <span>{format(timestamp, "M/d/yyyy")}</span>
+          <span className="text-muted-foreground text-sm">
+            {format(timestamp, "h:mm a")}
+          </span>
+        </div>
+      );
     },
   },
   {
     accessorKey: "company",
     header: "Company",
+    cell: ({ row }) => {
+      return <div>{row.getValue("company") as string}</div>;
+    },
   },
   {
     accessorKey: "driver",
     header: "Driver",
-  },
-  {
-    accessorKey: "driverNote",
-    header: "Driver Note",
+    cell: ({ row }) => {
+      return <div>{row.getValue("driver") as string}</div>;
+    },
   },
   {
     accessorKey: "services",
-    header: "Services",
-    cell: ({ row }: any) => {
-      const services = row.getValue("services");
-      if (!Array.isArray(services)) {
-        return "N/A";
-      }
+    header: () => <div className="flex items-center">Services ↑↓</div>,
+    cell: ({ row }) => {
+      const service = row.getValue("services") as string;
       return (
-        <div className="flex flex-wrap gap-1">
-          {services.map((service, i) => (
-            <Badge key={i} variant="secondary">
-              {service}
-            </Badge>
-          ))}
-        </div>
+        <Badge variant="secondary" className="bg-blue-100 text-blue-800">
+          {service}
+        </Badge>
       );
     },
   },
   {
     accessorKey: "dispatcher",
     header: "Dispatcher",
-  },
-  {
-    accessorKey: "dispatchNote",
-    header: "Dispatch Note",
+    cell: ({ row }) => {
+      const dispatcher = row.getValue("dispatcher") as string;
+      return (
+        <div className="flex items-center gap-2">
+          <div className="h-6 w-6 rounded-full bg-gray-900 text-white flex items-center justify-center text-xs">
+            {dispatcher.charAt(0)}
+          </div>
+          <span>{dispatcher}</span>
+        </div>
+      );
+    },
   },
   {
     accessorKey: "editor",
     header: "Editor",
-  },
-  {
-    accessorKey: "editorNote",
-    header: "Editor Note",
+    cell: ({ row }) => {
+      const editor = row.getValue("editor") as string;
+      return (
+        <div className="flex items-center gap-2">
+          <div className="h-6 w-6 rounded-full bg-gray-900 text-white flex items-center justify-center text-xs">
+            {editor.charAt(0)}
+          </div>
+          <span>{editor}</span>
+        </div>
+      );
+    },
   },
   {
     accessorKey: "duration",
     header: "Duration",
-  },
-  {
-    accessorKey: "files",
-    header: "Files",
-    cell: ({ row }: any) => {
-      const files = row.getValue("files") as string[];
-      return files?.length > 0 ? (
-        <Button variant="ghost" size="sm">
-          <FileText className="h-4 w-4" />
-          <span className="ml-2">{files.length}</span>
-        </Button>
-      ) : null;
-    },
-  },
-  {
-    accessorKey: "rating",
-    header: "Rating",
-    cell: ({ row }: any) => {
-      const rating = row.getValue("rating") as number;
-      return "⭐".repeat(rating);
+    cell: ({ row }) => {
+      const duration = row.getValue("duration") as string;
+      return (
+        <Badge variant="secondary" className={cn(getDurationColor(duration))}>
+          {duration}
+        </Badge>
+      );
     },
   },
   {
     accessorKey: "status",
     header: "Status",
-    cell: ({ row }: any) => {
+    cell: ({ row }) => {
       const status = row.getValue("status") as string;
-      return <Badge>{status}</Badge>;
+      return (
+        <div className="flex items-center gap-2">
+          <Badge variant="secondary" className="bg-yellow-100 text-yellow-800">
+            {status}
+          </Badge>
+          <Button variant="ghost" size="icon" className="h-4 w-4">
+            <Info className="h-3 w-3" />
+          </Button>
+        </div>
+      );
     },
   },
   {
     id: "actions",
-    cell: ({ row }: any) => {
+    cell: ({ row }) => {
       return (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -121,8 +149,8 @@ export const columns: any[] = [
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem>Edit</DropdownMenuItem>
             <DropdownMenuItem>View Details</DropdownMenuItem>
+            <DropdownMenuItem>Edit</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       );

@@ -107,7 +107,7 @@ export function TopNav({ userRole, userName, userEmail }: TopNavProps) {
   };
 
   return (
-    <nav className="bg-background shadow dark:bg-gray-800">
+    <nav className="bg-background shadow dark:bg-gray-900 sticky top-0 z-50">
       <div className="mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
@@ -126,7 +126,7 @@ export function TopNav({ userRole, userName, userEmail }: TopNavProps) {
                 href={path}
                 className={`inline-flex items-center px-3 py-2 rounded-md text-sm font-medium ${
                   pathname === path
-                    ? "bg-blue-500 text-white dark:bg-blue-700"
+                    ? "bg-blue-500 text-white dark:bg-blue-900"
                     : "text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-white"
                 }`}
               >

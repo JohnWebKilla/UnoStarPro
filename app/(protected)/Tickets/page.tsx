@@ -3,156 +3,206 @@
 import { useState, useEffect } from "react";
 import { DataTable } from "./components/data-table";
 import { columns } from "./components/columns";
-import { DriverSearch } from "./components/SearchBar";
-import { AlertCircle, CheckCircle, Loader2, Bell, Check } from "lucide-react";
+import { StatusCards } from "./components/StatusCards";
+import { Chat } from "./components/Chat";
+import { TicketSearch } from "./components/TicketSearch";
+import { DateRange } from "react-day-picker";
 
 interface Ticket {
   id: number;
-  title: string;
-  description: string;
-  date: Date;
+  timestamp: Date;
+  company: string;
+  driver: string;
+  services: string;
+  dispatcher: string;
+  dispatchNote: string;
+  editor: string;
+  editorNote: string;
+  managerNote: string;
+  duration: string;
   status: string;
+  joinedAt?: Date;
+  closedAt?: Date;
+  notifiedAt?: Date;
+  confirmedAt?: Date;
+  beforePdf?: string;
+  afterPdf?: string;
+}
+
+interface TicketFilters {
+  dateRange: DateRange | undefined;
+  status: string;
+  company?: string;
+  driver?: string;
 }
 
 export default function TicketsPage() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [filteredTickets, setFilteredTickets] = useState<Ticket[]>([]);
-  const [activeTab, setActiveTab] = useState<"tickets" | "managerCheck">(
-    "tickets"
-  );
+
+  // Mock current user - replace with your actual user data/auth
+  const currentUser = {
+    id: "You",
+    name: "Current User",
+    image: undefined,
+  };
 
   useEffect(() => {
-    const fetchedTickets: Ticket[] = [
+    const fetchedTickets = [
       {
         id: 1,
-        title: "Ticket 1",
-        description: "This is the description for Ticket 1",
-        date: new Date(2023, 4, 15), // May 15, 2023
-        status: "Open",
+        timestamp: new Date("2024-02-11T15:00:19"),
+        company: "TR LINES INC",
+        driver: "Azim Kosimov",
+        services: "New Shift",
+        dispatcher: "Shaxzod Nosirov",
+        dispatchNote: "Driver assigned and briefed about the route",
+        editor: "Samandar Muinov",
+        editorNote: "Documentation verified and processed",
+        managerNote: "Priority delivery, handle with care",
+        duration: "7m",
+        status: "In Progress",
+        joinedAt: new Date("2024-02-11T15:01:19"),
+        closedAt: new Date("2024-02-11T15:30:19"),
+        notifiedAt: new Date("2024-02-11T15:31:19"),
+        confirmedAt: new Date("2024-02-11T15:35:19"),
+        beforePdf: "/path/to/before.pdf",
+        afterPdf: "/path/to/after.pdf",
       },
       {
         id: 2,
-        title: "Ticket 2",
-        description: "This is the description for Ticket 2",
-        date: new Date(2023, 3, 20), // April 20, 2023
-        status: "Closed",
+        timestamp: new Date("2024-02-11T15:00:32"),
+        company: "TR LINES INC",
+        driver: "Komil Ismoilov",
+        services: "New Shift",
+        dispatcher: "Parviz Erkinov",
+        dispatchNote: "Note",
+        editor: "Samandar Saidov",
+        editorNote: "",
+        managerNote: "Priority delivery, handle with care",
+        duration: "7m",
+        status: "In Progress",
+        beforePdf: "/path/to/before.pdf",
+        afterPdf: "/path/to/after.pdf",
       },
       {
         id: 3,
-        title: "Ticket 3",
-        description: "This is the description for Ticket 3",
-        date: new Date(2023, 4, 10), // May 10, 2023
+        timestamp: new Date("2024-02-11T15:02:27"),
+        company: "LION CARGO",
+        driver: "Irakli Rizhamadze",
+        services: "Extra-Hrs",
+        dispatcher: "Shaxzod Nosirov",
+        dispatchNote: "Note",
+        editor: "Damir Rustamov",
+        editorNote: "",
+        managerNote: "Priority delivery, handle with care",
+        duration: "6m",
         status: "In Progress",
+        beforePdf: "/path/to/before.pdf",
+        afterPdf: "/path/to/after.pdf",
+      },
+      {
+        id: 4,
+        timestamp: new Date("2024-02-11T15:05:38"),
+        company: "US ROAD",
+        driver: "Kakha Aladashvili",
+        services: "New Shift",
+        dispatcher: "Parviz Erkinov",
+        dispatchNote: "",
+        editor: "Shaxrizod Mamadjanov",
+        editorNote: "",
+        managerNote: "Priority delivery, handle with care",
+        duration: "3m",
+        status: "In Progress",
+        beforePdf: "/path/to/before.pdf",
+        afterPdf: "/path/to/after.pdf",
       },
     ];
     setTickets(fetchedTickets);
     setFilteredTickets(fetchedTickets);
   }, []);
 
-  const handleSearch = (startDate: Date | null, endDate: Date | null) => {
+  const handleTicketSearch = (filters: TicketFilters) => {
     const filtered = tickets.filter((ticket) => {
-      if (startDate && endDate) {
-        return ticket.date >= startDate && ticket.date <= endDate;
-      } else {
-        return true; // Return all tickets if start or end date is null
+      let matches = true;
+
+      // Date range
+      if (filters.dateRange?.from && filters.dateRange?.to) {
+        matches =
+          matches &&
+          ticket.timestamp >= filters.dateRange.from &&
+          ticket.timestamp <= filters.dateRange.to;
       }
+
+      // Status
+      if (filters.status) {
+        matches =
+          matches &&
+          ticket.status.toLowerCase() === filters.status.toLowerCase();
+      }
+
+      // Company
+      if (filters.company) {
+        matches =
+          matches &&
+          ticket.company.toLowerCase().includes(filters.company.toLowerCase());
+      }
+
+      // Driver
+      if (filters.driver) {
+        matches =
+          matches &&
+          ticket.driver.toLowerCase().includes(filters.driver.toLowerCase());
+      }
+
+      return matches;
     });
+
     setFilteredTickets(filtered);
   };
 
   // Calculate ticket counts by status
   const openTickets = filteredTickets.filter(
-    (ticket) => ticket.status === "Open"
+    (ticket) => ticket.status.toLowerCase() === "open"
   ).length;
   const closedTickets = filteredTickets.filter(
-    (ticket) => ticket.status === "Closed"
+    (ticket) => ticket.status.toLowerCase() === "closed"
   ).length;
   const inProgressTickets = filteredTickets.filter(
-    (ticket) => ticket.status === "In Progress"
+    (ticket) => ticket.status.toLowerCase() === "in progress"
   ).length;
   const notifiedTickets = filteredTickets.filter(
-    (ticket) => ticket.status === "Notified"
+    (ticket) => ticket.status.toLowerCase() === "notified"
   ).length;
   const confirmedTickets = filteredTickets.filter(
-    (ticket) => ticket.status === "Confirmed"
+    (ticket) => ticket.status.toLowerCase() === "confirmed"
   ).length;
 
   return (
-    <div className="w-full mt-4 px-4">
-      {/* Ticket counts */}
-      <div className="grid grid-cols-5 gap-4 mb-4">
-        <div className="bg-white dark:bg-gray-800 rounded-md p-4 flex items-center border border-gray-300 dark:border-gray-700">
-          <span className="text-red-500 dark:text-red-400 mr-2 border-l-8 border-red-500 dark:border-red-400 pl-2">
-            <AlertCircle size={20} />
-          </span>
-          <span className="font-semibold">Open: {openTickets}</span>
+    <div className="w-full h-[calc(100vh-100px)]">
+      <div className="flex justify-between items-center mb-4">
+        <div className="flex-1">
+          <StatusCards
+            openTickets={openTickets}
+            closedTickets={closedTickets}
+            inProgressTickets={inProgressTickets}
+            notifiedTickets={notifiedTickets}
+            confirmedTickets={confirmedTickets}
+          />
         </div>
-        <div className="bg-white dark:bg-gray-800 rounded-md p-4 flex items-center border border-gray-300 dark:border-gray-700">
-          <span className="text-green-500 dark:text-green-400 mr-2 border-l-8 border-green-500 dark:border-green-400 pl-2">
-            <CheckCircle size={20} />
-          </span>
-          <span className="font-semibold">Closed: {closedTickets}</span>
-        </div>
-        <div className="bg-white dark:bg-gray-800 rounded-md p-4 flex items-center border border-gray-300 dark:border-gray-700">
-          <span className="text-orange-500 dark:text-orange-400 mr-2 border-l-8 border-orange-500 dark:border-orange-400 pl-2">
-            <Loader2 size={20} />
-          </span>
-          <span className="font-semibold">
-            In Progress: {inProgressTickets}
-          </span>
-        </div>
-        <div className="bg-white dark:bg-gray-800 rounded-md p-4 flex items-center border border-gray-300 dark:border-gray-700">
-          <span className="text-blue-500 dark:text-blue-400 mr-2 border-l-8 border-blue-500 dark:border-blue-400 pl-2">
-            <Bell size={20} />
-          </span>
-          <span className="font-semibold">Notified: {notifiedTickets}</span>
-        </div>
-        <div className="bg-white dark:bg-gray-800 rounded-md p-4 flex items-center border border-gray-300 dark:border-gray-700">
-          <span className="text-gray-500 dark:text-gray-400 mr-2 border-l-8 border-gray-500 dark:border-gray-400 pl-2">
-            <Check size={20} />
-          </span>
-          <span className="font-semibold">Confirmed: {confirmedTickets}</span>
+        <div className="ml-4">
+          <TicketSearch onSearch={handleTicketSearch} />
         </div>
       </div>
 
-      {/* Tab navigation */}
-      <div className="flex mb-4">
-        <button
-          className={`px-4 py-2 rounded-l-md ${
-            activeTab === "tickets"
-              ? "bg-blue-500 text-white"
-              : "bg-gray-200 text-gray-700"
-          }`}
-          onClick={() => setActiveTab("tickets")}
-        >
-          Tickets
-        </button>
-        <button
-          className={`px-4 py-2 rounded-r-md ${
-            activeTab === "managerCheck"
-              ? "bg-blue-500 text-white"
-              : "bg-gray-200 text-gray-700"
-          }`}
-          onClick={() => setActiveTab("managerCheck")}
-        >
-          Manager Check
-        </button>
-      </div>
-
-      {activeTab === "tickets" && (
-        <>
-          <div className="w-full mt-4">
-            <DataTable columns={columns} data={filteredTickets} />
-          </div>
-        </>
-      )}
-
-      {activeTab === "managerCheck" && (
-        <div>
-          {/* Add your Manager Check component or content here */}
-          <p>This is the Manager Check section.</p>
+      <div className="flex gap-4 h-[calc(100vh-150px)]">
+        <div className="flex-[3] overflow-auto">
+          <DataTable columns={columns} data={filteredTickets} />
         </div>
-      )}
+        <div className="flex-1 min-w-[400px] max-w-[500px]">
+          <Chat userRole="admin" currentUser={currentUser} />
+        </div>
+      </div>
     </div>
   );
 }
