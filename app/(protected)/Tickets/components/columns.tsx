@@ -13,68 +13,54 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
-interface Ticket {
-  timestamp: Date;
-  company: string;
-  driver: string;
-  services: string;
-  dispatcher: string;
-  editor: string;
-  duration: string;
-  status: string;
-  dispatchNote?: string;
-  editorNote?: string;
-}
-
-const getDurationColor = (duration: string) => {
-  const minutes = parseInt(duration.replace("m", ""));
-  if (minutes <= 10) {
-    return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300";
-  } else if (minutes <= 20) {
-    return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300";
-  } else {
-    return "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300";
-  }
-};
-
-export const columns: ColumnDef<Ticket, any>[] = [
+export const columns: ColumnDef<any, any>[] = [
   {
     accessorKey: "timestamp",
     header: "Timestamp",
     cell: ({ row }) => {
-      const timestamp = row.getValue("timestamp") as Date;
-      return (
-        <div className="flex flex-col">
-          <span>{format(timestamp, "M/d/yyyy")}</span>
-          <span className="text-muted-foreground text-sm">
-            {format(timestamp, "h:mm a")}
-          </span>
-        </div>
-      );
+      const timestamp = row.getValue("timestamp");
+      if (
+        timestamp instanceof Date ||
+        typeof timestamp === "string" ||
+        typeof timestamp === "number"
+      ) {
+        const date = new Date(timestamp);
+        return (
+          <div className="flex flex-col">
+            <span>{format(date, "M/d/yyyy")}</span>
+            <span className="text-muted-foreground text-sm">
+              {format(date, "h:mm a")}
+            </span>
+          </div>
+        );
+      }
+      return null;
     },
   },
   {
     accessorKey: "company",
     header: "Company",
     cell: ({ row }) => {
-      return <div>{row.getValue("company") as string}</div>;
+      const company = row.getValue("company");
+      return <div>{String(company)}</div>;
     },
   },
   {
     accessorKey: "driver",
     header: "Driver",
     cell: ({ row }) => {
-      return <div>{row.getValue("driver") as string}</div>;
+      const driver = row.getValue("driver");
+      return <div>{String(driver)}</div>;
     },
   },
   {
     accessorKey: "services",
-    header: () => <div className="flex items-center">Services ↑↓</div>,
+    header: () => <div className="flex items-center">Services</div>,
     cell: ({ row }) => {
-      const service = row.getValue("services") as string;
+      const service = row.getValue("services");
       return (
         <Badge variant="secondary" className="bg-blue-100 text-blue-800">
-          {service}
+          {String(service)}
         </Badge>
       );
     },
@@ -83,7 +69,7 @@ export const columns: ColumnDef<Ticket, any>[] = [
     accessorKey: "dispatcher",
     header: "Dispatcher",
     cell: ({ row }) => {
-      const dispatcher = row.getValue("dispatcher") as string;
+      const dispatcher = String(row.getValue("dispatcher"));
       return (
         <div className="flex items-center gap-2">
           <div className="h-6 w-6 rounded-full bg-gray-900 text-white flex items-center justify-center text-xs">
@@ -94,11 +80,12 @@ export const columns: ColumnDef<Ticket, any>[] = [
       );
     },
   },
+
   {
     accessorKey: "editor",
     header: "Editor",
     cell: ({ row }) => {
-      const editor = row.getValue("editor") as string;
+      const editor = String(row.getValue("editor"));
       return (
         <div className="flex items-center gap-2">
           <div className="h-6 w-6 rounded-full bg-gray-900 text-white flex items-center justify-center text-xs">
@@ -109,23 +96,20 @@ export const columns: ColumnDef<Ticket, any>[] = [
       );
     },
   },
+
   {
     accessorKey: "duration",
     header: "Duration",
     cell: ({ row }) => {
-      const duration = row.getValue("duration") as string;
-      return (
-        <Badge variant="secondary" className={cn(getDurationColor(duration))}>
-          {duration}
-        </Badge>
-      );
+      const duration = row.getValue("duration");
+      return <div>{String(duration)}</div>;
     },
   },
   {
     accessorKey: "status",
     header: "Status",
     cell: ({ row }) => {
-      const status = row.getValue("status") as string;
+      const status = String(row.getValue("status"));
       return (
         <div className="flex items-center gap-2">
           <Badge variant="secondary" className="bg-yellow-100 text-yellow-800">

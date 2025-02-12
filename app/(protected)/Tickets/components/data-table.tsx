@@ -16,6 +16,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  TableFooter,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
@@ -71,15 +72,16 @@ export function DataTable<TData, TValue>({
   };
 
   return (
-    <div className="space-y-4">
-      <div className="rounded-md border">
+    <div className="flex flex-col h-[calc(100vh-180px)] border rounded-lg">
+      {/* Sticky Header */}
+      <div className="sticky top-0 z-20 bg-background border-b">
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
-              <TableRow key={headerGroup.id}>
+              <TableRow key={headerGroup.id} className="hover:bg-background">
                 <TableHead className="w-[50px]"></TableHead>
                 {headerGroup.headers.map((header) => (
-                  <TableHead key={header.id}>
+                  <TableHead key={header.id} className="bg-background h-10">
                     {header.isPlaceholder
                       ? null
                       : flexRender(
@@ -91,6 +93,12 @@ export function DataTable<TData, TValue>({
               </TableRow>
             ))}
           </TableHeader>
+        </Table>
+      </div>
+
+      {/* Scrollable Body - Add min-height to ensure it takes available space */}
+      <div className="flex-1 min-h-0 overflow-auto">
+        <Table>
           <TableBody>
             {table.getRowModel().rows?.length ? (
               table.getRowModel().rows.map((row) => (
@@ -118,10 +126,10 @@ export function DataTable<TData, TValue>({
                     ))}
                   </TableRow>
                   {expandedRows[row.id] && (
-                    <TableRow>
+                    <TableRow className="bg-muted/30">
                       <TableCell colSpan={columns.length + 1}>
-                        <div className="p-3 space-y-4">
-                          <div className="grid grid-cols-2 gap-4">
+                        <div className="py-2 px-3 space-y-3">
+                          <div className="grid grid-cols-2 gap-3 bg-background p-3 rounded-lg border shadow-sm">
                             <div>
                               <h4 className="font-semibold mb-2 text-sm">
                                 Driver Details
@@ -195,11 +203,10 @@ export function DataTable<TData, TValue>({
                           </div>
 
                           {/* Notes and Documents Grid */}
-                          <div className="space-y-4">
-                            {/* Notes and Documents Grid */}
-                            <div className="grid grid-cols-3 gap-4">
-                              {/* Notes Section - Spans 2 columns */}
-                              <div className="col-span-2">
+                          <div className="space-y-3">
+                            <div className="grid grid-cols-3 gap-3">
+                              {/* Notes Section */}
+                              <div className="col-span-2 bg-background p-3 rounded-lg border shadow-sm">
                                 <h4 className="font-semibold mb-2 text-sm">
                                   Notes
                                 </h4>
@@ -266,8 +273,8 @@ export function DataTable<TData, TValue>({
                                 </div>
                               </div>
 
-                              {/* Documents Section - Spans 1 column */}
-                              <div>
+                              {/* Documents Section */}
+                              <div className="bg-background p-3 rounded-lg border shadow-sm">
                                 <h4 className="font-semibold mb-2 text-sm">
                                   Documents
                                 </h4>
@@ -348,89 +355,89 @@ export function DataTable<TData, TValue>({
                                 </div>
                               </div>
                             </div>
+                          </div>
 
-                            {/* Horizontal Timeline */}
-                            <div className="border-t pt-4">
-                              <h4 className="font-semibold mb-3 text-sm">
-                                Timeline
-                              </h4>
-                              <div className="relative">
-                                {/* Timeline line */}
-                                <div className="absolute top-[15px] left-0 right-0 h-0.5 bg-muted" />
+                          {/* Horizontal Timeline */}
+                          <div className="bg-background p-3 rounded-lg border shadow-sm">
+                            <h4 className="font-semibold mb-3 text-sm">
+                              Timeline
+                            </h4>
+                            <div className="relative">
+                              {/* Timeline line */}
+                              <div className="absolute top-[15px] left-0 right-0 h-0.5 bg-muted" />
 
-                                {/* Timeline items */}
-                                <div className="relative grid grid-cols-5 gap-4">
-                                  {/* Created */}
-                                  <div className="flex flex-col items-center">
-                                    <div className="w-2.5 h-2.5 rounded-full bg-red-500 relative z-10" />
-                                    <p className="text-xs font-medium mt-2">
-                                      Created
-                                    </p>
-                                    <time className="text-[10px] text-muted-foreground">
-                                      {new Date(
+                              {/* Timeline items */}
+                              <div className="relative grid grid-cols-5 gap-4">
+                                {/* Created */}
+                                <div className="flex flex-col items-center">
+                                  <div className="w-2.5 h-2.5 rounded-full bg-red-500 relative z-10" />
+                                  <p className="text-xs font-medium mt-2">
+                                    Created
+                                  </p>
+                                  <time className="text-[10px] text-muted-foreground">
+                                    {new Date(
+                                      (row.original as any).timestamp
+                                    ).toLocaleString()}
+                                  </time>
+                                </div>
+
+                                {/* In Progress (previously Joined) */}
+                                <div className="flex flex-col items-center">
+                                  <div className="w-2.5 h-2.5 rounded-full bg-orange-500 relative z-10" />
+                                  <p className="text-xs font-medium mt-2">
+                                    In Progress
+                                  </p>
+                                  <time className="text-[10px] text-muted-foreground">
+                                    {new Date(
+                                      (row.original as any).joinedAt ||
                                         (row.original as any).timestamp
-                                      ).toLocaleString()}
-                                    </time>
-                                  </div>
+                                    ).toLocaleString()}
+                                  </time>
+                                </div>
 
-                                  {/* In Progress (previously Joined) */}
-                                  <div className="flex flex-col items-center">
-                                    <div className="w-2.5 h-2.5 rounded-full bg-orange-500 relative z-10" />
-                                    <p className="text-xs font-medium mt-2">
-                                      In Progress
-                                    </p>
-                                    <time className="text-[10px] text-muted-foreground">
-                                      {new Date(
-                                        (row.original as any).joinedAt ||
-                                          (row.original as any).timestamp
-                                      ).toLocaleString()}
-                                    </time>
-                                  </div>
+                                {/* Closed */}
+                                <div className="flex flex-col items-center">
+                                  <div className="w-2.5 h-2.5 rounded-full bg-green-500 relative z-10" />
+                                  <p className="text-xs font-medium mt-2">
+                                    Closed
+                                  </p>
+                                  <time className="text-[10px] text-muted-foreground">
+                                    {(row.original as any).closedAt
+                                      ? new Date(
+                                          (row.original as any).closedAt
+                                        ).toLocaleString()
+                                      : "Pending"}
+                                  </time>
+                                </div>
 
-                                  {/* Closed */}
-                                  <div className="flex flex-col items-center">
-                                    <div className="w-2.5 h-2.5 rounded-full bg-green-500 relative z-10" />
-                                    <p className="text-xs font-medium mt-2">
-                                      Closed
-                                    </p>
-                                    <time className="text-[10px] text-muted-foreground">
-                                      {(row.original as any).closedAt
-                                        ? new Date(
-                                            (row.original as any).closedAt
-                                          ).toLocaleString()
-                                        : "Pending"}
-                                    </time>
-                                  </div>
+                                {/* Notified */}
+                                <div className="flex flex-col items-center">
+                                  <div className="w-2.5 h-2.5 rounded-full bg-blue-500 relative z-10" />
+                                  <p className="text-xs font-medium mt-2">
+                                    Notified
+                                  </p>
+                                  <time className="text-[10px] text-muted-foreground">
+                                    {(row.original as any).notifiedAt
+                                      ? new Date(
+                                          (row.original as any).notifiedAt
+                                        ).toLocaleString()
+                                      : "Pending"}
+                                  </time>
+                                </div>
 
-                                  {/* Notified */}
-                                  <div className="flex flex-col items-center">
-                                    <div className="w-2.5 h-2.5 rounded-full bg-blue-500 relative z-10" />
-                                    <p className="text-xs font-medium mt-2">
-                                      Notified
-                                    </p>
-                                    <time className="text-[10px] text-muted-foreground">
-                                      {(row.original as any).notifiedAt
-                                        ? new Date(
-                                            (row.original as any).notifiedAt
-                                          ).toLocaleString()
-                                        : "Pending"}
-                                    </time>
-                                  </div>
-
-                                  {/* Confirmed */}
-                                  <div className="flex flex-col items-center">
-                                    <div className="w-2.5 h-2.5 rounded-full bg-gray-500 relative z-10" />
-                                    <p className="text-xs font-medium mt-2">
-                                      Confirmed
-                                    </p>
-                                    <time className="text-[10px] text-muted-foreground">
-                                      {(row.original as any).confirmedAt
-                                        ? new Date(
-                                            (row.original as any).confirmedAt
-                                          ).toLocaleString()
-                                        : "Pending"}
-                                    </time>
-                                  </div>
+                                {/* Confirmed */}
+                                <div className="flex flex-col items-center">
+                                  <div className="w-2.5 h-2.5 rounded-full bg-gray-500 relative z-10" />
+                                  <p className="text-xs font-medium mt-2">
+                                    Confirmed
+                                  </p>
+                                  <time className="text-[10px] text-muted-foreground">
+                                    {(row.original as any).confirmedAt
+                                      ? new Date(
+                                          (row.original as any).confirmedAt
+                                        ).toLocaleString()
+                                      : "Pending"}
+                                  </time>
                                 </div>
                               </div>
                             </div>
@@ -455,23 +462,47 @@ export function DataTable<TData, TValue>({
         </Table>
       </div>
 
-      <div className="flex items-center justify-end space-x-2">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => table.previousPage()}
-          disabled={!table.getCanPreviousPage()}
-        >
-          Previous
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => table.nextPage()}
-          disabled={!table.getCanNextPage()}
-        >
-          Next
-        </Button>
+      {/* Fixed Footer with Pagination - Position it at the bottom */}
+      <div className="mt-auto border-t bg-background">
+        <div className="py-2 px-4">
+          <div className="flex items-center justify-end space-x-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => table.previousPage()}
+              disabled={!table.getCanPreviousPage()}
+            >
+              Previous
+            </Button>
+            <div className="flex items-center gap-1">
+              {Array.from(
+                { length: table.getPageCount() },
+                (_, i) => i + 1
+              ).map((pageNumber) => (
+                <Button
+                  key={pageNumber}
+                  variant={
+                    table.getState().pagination.pageIndex === pageNumber - 1
+                      ? "default"
+                      : "outline"
+                  }
+                  size="sm"
+                  onClick={() => table.setPageIndex(pageNumber - 1)}
+                >
+                  {pageNumber}
+                </Button>
+              ))}
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => table.nextPage()}
+              disabled={!table.getCanNextPage()}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
       </div>
 
       {selectedRow && (
