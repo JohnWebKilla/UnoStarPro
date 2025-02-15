@@ -20,6 +20,8 @@ import {
 import { IssuesTable } from "./components/IssuesTable";
 import { BugIcon } from "lucide-react";
 import { TicketIcon } from "lucide-react";
+import { Toaster } from "sonner";
+import { mockIssues } from "./components/IssuesTable";
 
 interface Ticket {
   id: number;
@@ -86,7 +88,11 @@ export default function TicketsPage() {
   const [filteredTickets, setFilteredTickets] = useState<Ticket[]>([]);
   const [searchDialogOpen, setSearchDialogOpen] = useState(false);
   const [isFiltered, setIsFiltered] = useState(false);
-  const [issues, setIssues] = useState<SystemIssue[]>([]);
+  const [issues, setIssues] = useState<SystemIssue[]>(mockIssues);
+  const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  const [issueStatusFilter, setIssueStatusFilter] = useState<string | null>(
+    null
+  );
 
   // Mock current user - replace with your actual user data/auth
   const currentUser = {
@@ -246,6 +252,19 @@ export default function TicketsPage() {
     setFilteredTickets(fetchedTickets);
   }, []);
 
+  useEffect(() => {
+    if (statusFilter) {
+      const filtered = tickets.filter(
+        (ticket) => ticket.status.toLowerCase() === statusFilter.toLowerCase()
+      );
+      setFilteredTickets(filtered);
+      setIsFiltered(true);
+    } else {
+      setFilteredTickets(tickets);
+      setIsFiltered(false);
+    }
+  }, [statusFilter, tickets]);
+
   const handleTicketSearch = (filters: TicketFilters) => {
     const filtered = tickets.filter((ticket) => {
       let matches = true;
@@ -325,137 +344,169 @@ export default function TicketsPage() {
     (ticket) => ticket.status.toLowerCase() === "notified"
   ).length;
 
+  // Modify the issues filtering effect
+  useEffect(() => {
+    if (issueStatusFilter) {
+      // Map the filter status to match the actual status values
+      const statusMap: Record<string, string> = {
+        open: "open",
+        "in progress": "in progress",
+        closed: "resolved", // Map 'closed' filter to 'resolved' status
+        notified: "notified",
+      };
+
+      const mappedStatus = statusMap[issueStatusFilter.toLowerCase()];
+      const filtered = mockIssues.filter(
+        (issue) => issue.status.toLowerCase() === mappedStatus
+      );
+      setIssues(filtered);
+    } else {
+      setIssues(mockIssues); // Reset to all mock issues when no filter
+    }
+  }, [issueStatusFilter]);
+
   return (
-    <div className="w-full h-[calc(100vh-100px)]">
-      <Tabs defaultValue="tickets" className="w-full">
-        <TabsContent value="tickets" className="mt-0">
-          <div className="flex flex-col gap-4">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-4">
-                <TabsList>
-                  <TabsTrigger value="tickets">
-                    <TicketIcon className="mr-2 h-4 w-4" />
-                    Tickets
-                  </TabsTrigger>
-                  <TabsTrigger value="issues">
-                    <BugIcon className="mr-2 h-4 w-4" />
-                    Bugs
-                  </TabsTrigger>
-                </TabsList>
-                <StatusCards
-                  openTickets={openTickets}
-                  closedTickets={closedTickets}
-                  inProgressTickets={inProgressTickets}
-                  notifiedTickets={notifiedTickets}
-                />
+    <>
+      <Toaster position="top-right" />
+      <div className="w-full h-[calc(100vh-100px)]">
+        <Tabs defaultValue="tickets" className="w-full">
+          <TabsContent value="tickets" className="mt-0">
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  <TabsList>
+                    <TabsTrigger value="tickets">
+                      <TicketIcon className="mr-2 h-4 w-4" />
+                      Tickets
+                    </TabsTrigger>
+                    <TabsTrigger value="issues">
+                      <BugIcon className="mr-2 h-4 w-4" />
+                      Bugs
+                    </TabsTrigger>
+                  </TabsList>
+                  <StatusCards
+                    openTickets={openTickets}
+                    closedTickets={closedTickets}
+                    inProgressTickets={inProgressTickets}
+                    notifiedTickets={notifiedTickets}
+                    activeFilter={statusFilter}
+                    onFilterChange={setStatusFilter}
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  {isFiltered ? (
+                    <Button
+                      variant="outline"
+                      onClick={handleClearFilters}
+                      size="sm"
+                      className="whitespace-nowrap"
+                    >
+                      <Cross2Icon className="mr-2 h-4 w-4" />
+                      Clear Filters
+                    </Button>
+                  ) : (
+                    <Button
+                      onClick={() => setSearchDialogOpen(true)}
+                      size="sm"
+                      className="whitespace-nowrap"
+                    >
+                      <MagnifyingGlassIcon className="mr-2 h-4 w-4" />
+                      Search Tickets
+                    </Button>
+                  )}
+                  <AddTicket
+                    onAddTicket={(newTicket) => {
+                      setTickets((prev) => [newTicket, ...prev]);
+                      setFilteredTickets((prev) => [newTicket, ...prev]);
+                    }}
+                  />
+                  <TicketSearch
+                    tickets={tickets}
+                    onSearch={handleTicketSearch}
+                    open={searchDialogOpen}
+                    onOpenChange={setSearchDialogOpen}
+                  />
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                {isFiltered ? (
-                  <Button
-                    variant="outline"
-                    onClick={handleClearFilters}
-                    size="sm"
-                    className="whitespace-nowrap"
-                  >
-                    <Cross2Icon className="mr-2 h-4 w-4" />
-                    Clear Filters
-                  </Button>
-                ) : (
-                  <Button
-                    onClick={() => setSearchDialogOpen(true)}
-                    size="sm"
-                    className="whitespace-nowrap"
-                  >
-                    <MagnifyingGlassIcon className="mr-2 h-4 w-4" />
-                    Search Tickets
-                  </Button>
-                )}
-                <AddTicket
-                  onAddTicket={(newTicket) => {
-                    setTickets((prev) => [newTicket, ...prev]);
-                    setFilteredTickets((prev) => [newTicket, ...prev]);
-                  }}
-                />
-                <TicketSearch
-                  tickets={tickets}
-                  onSearch={handleTicketSearch}
-                  open={searchDialogOpen}
-                  onOpenChange={setSearchDialogOpen}
-                />
-              </div>
-            </div>
 
-            <div className="flex gap-4 h-[calc(100vh-140px)]">
-              <div className="flex-[3] overflow-auto rounded-lg border">
-                <DataTable columns={columns} data={filteredTickets} />
-              </div>
-              <div className="flex-1 min-w-[400px] max-w-[500px] rounded-lg border">
-                <Chat userRole="admin" currentUser={currentUser} />
+              <div className="flex gap-4 h-[calc(100vh-140px)]">
+                <div className="flex-[3] overflow-auto rounded-lg border">
+                  <DataTable columns={columns} data={filteredTickets} />
+                </div>
+                <div className="flex-1 min-w-[400px] max-w-[500px] rounded-lg border">
+                  <Chat userRole="admin" currentUser={currentUser} />
+                </div>
               </div>
             </div>
-          </div>
-        </TabsContent>
+          </TabsContent>
 
-        <TabsContent value="issues" className="mt-0">
-          <div className="flex flex-col gap-4">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-4">
-                <TabsList>
-                  <TabsTrigger value="tickets">
-                    <TicketIcon className="mr-2 h-4 w-4" />
-                    Tickets
-                  </TabsTrigger>
-                  <TabsTrigger value="issues">
-                    <BugIcon className="mr-2 h-4 w-4" />
-                    Bugs
-                  </TabsTrigger>
-                </TabsList>
-                <StatusCards
-                  openTickets={issues.filter((i) => i.status === "open").length}
-                  inProgressTickets={
-                    issues.filter((i) => i.status === "in progress").length
-                  }
-                  closedTickets={
-                    issues.filter((i) => i.status === "resolved").length
-                  }
-                  notifiedTickets={0}
-                />
+          <TabsContent value="issues" className="mt-0">
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  <TabsList>
+                    <TabsTrigger value="tickets">
+                      <TicketIcon className="mr-2 h-4 w-4" />
+                      Tickets
+                    </TabsTrigger>
+                    <TabsTrigger value="issues">
+                      <BugIcon className="mr-2 h-4 w-4" />
+                      Bugs
+                    </TabsTrigger>
+                  </TabsList>
+                  <StatusCards
+                    openTickets={
+                      mockIssues.filter((i) => i.status === "open").length
+                    }
+                    inProgressTickets={
+                      mockIssues.filter((i) => i.status === "in progress")
+                        .length
+                    }
+                    closedTickets={
+                      mockIssues.filter((i) => i.status === "resolved").length
+                    }
+                    notifiedTickets={0}
+                    activeFilter={issueStatusFilter}
+                    onFilterChange={setIssueStatusFilter}
+                    showTotalCounts
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <AddSystemIssue
+                    onAddIssue={(issue) => {
+                      const newIssue: SystemIssue = {
+                        id: Date.now().toString(),
+                        timestamp: new Date(),
+                        company: issue.company,
+                        driver: issue.driver,
+                        systemType: issue.systemType,
+                        description: issue.description,
+                        status: "open",
+                        files: issue.files.map((file) => ({
+                          name: file.name,
+                          url: URL.createObjectURL(file),
+                        })),
+                      };
+                      setIssues((prev) => [newIssue, ...prev]);
+                    }}
+                    companies={mockCompanies}
+                    drivers={mockDrivers}
+                  />
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <AddSystemIssue
-                  onAddIssue={(issue) => {
-                    const newIssue: SystemIssue = {
-                      id: Date.now().toString(),
-                      timestamp: new Date(),
-                      company: issue.company,
-                      driver: issue.driver,
-                      systemType: issue.systemType,
-                      description: issue.description,
-                      status: "open",
-                      files: issue.files.map((file) => ({
-                        name: file.name,
-                        url: URL.createObjectURL(file),
-                      })),
-                    };
-                    setIssues((prev) => [newIssue, ...prev]);
-                  }}
-                  companies={mockCompanies}
-                  drivers={mockDrivers}
-                />
-              </div>
-            </div>
 
-            <div className="flex gap-4 h-[calc(100vh-140px)]">
-              <div className="flex-[3] overflow-auto rounded-lg border">
-                <IssuesTable issues={issues} />
-              </div>
-              <div className="flex-1 min-w-[400px] max-w-[500px] rounded-lg border">
-                <Chat userRole="admin" currentUser={currentUser} />
+              <div className="flex gap-4 h-[calc(100vh-140px)]">
+                <div className="flex-[3] overflow-auto rounded-lg border">
+                  <IssuesTable issues={issues} />
+                </div>
+                <div className="flex-1 min-w-[400px] max-w-[500px] rounded-lg border">
+                  <Chat userRole="admin" currentUser={currentUser} />
+                </div>
               </div>
             </div>
-          </div>
-        </TabsContent>
-      </Tabs>
-    </div>
+          </TabsContent>
+        </Tabs>
+      </div>
+    </>
   );
 }

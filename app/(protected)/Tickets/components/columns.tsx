@@ -3,7 +3,7 @@
 import { ColumnDef } from "@tanstack/react-table";
 import { format } from "date-fns";
 import { Badge } from "@/components/ui/badge";
-import { MoreHorizontal, Info } from "lucide-react";
+import { MoreHorizontal, Info, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -12,6 +12,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
+
+const copyToClipboard = (text: string, label: string) => {
+  navigator.clipboard.writeText(text).then(() => {
+    toast.success(`${label} copied to clipboard`);
+  });
+};
 
 export const columns: ColumnDef<any, any>[] = [
   {
@@ -41,16 +48,46 @@ export const columns: ColumnDef<any, any>[] = [
     accessorKey: "company",
     header: "Company",
     cell: ({ row }) => {
-      const company = row.getValue("company");
-      return <div>{String(company)}</div>;
+      const company = String(row.getValue("company"));
+      return (
+        <div className="flex items-center gap-2 group">
+          <div>{company}</div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 p-0"
+            onClick={(e) => {
+              e.stopPropagation();
+              copyToClipboard(company, "Company name");
+            }}
+          >
+            <Copy className="h-3 w-3" />
+          </Button>
+        </div>
+      );
     },
   },
   {
     accessorKey: "driver",
     header: "Driver",
     cell: ({ row }) => {
-      const driver = row.getValue("driver");
-      return <div>{String(driver)}</div>;
+      const driver = String(row.getValue("driver"));
+      return (
+        <div className="flex items-center gap-2 group">
+          <div>{driver}</div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 p-0"
+            onClick={(e) => {
+              e.stopPropagation();
+              copyToClipboard(driver, "Driver name");
+            }}
+          >
+            <Copy className="h-3 w-3" />
+          </Button>
+        </div>
+      );
     },
   },
   {

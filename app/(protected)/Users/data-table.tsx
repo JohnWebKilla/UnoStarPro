@@ -47,7 +47,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { getBirthdayStatus, User } from "./columns"; // Move the helper function to a shared location
+import { getBirthdayStatus } from "./columns"; // Only import getBirthdayStatus
+import { User } from "./types"; // Import User from types
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { EditUserDialog } from "./edit-user-dialog";
 
@@ -60,24 +61,27 @@ const variantMap = {
 interface DataTableProps<TData extends User, TValue> {
   columns: ColumnDef<TData, TValue>[];
   data: TData[];
-  onEdit?: (user: User) => void;
-  onToggleStatus?: (user: User) => Promise<void>;
-  onApprove?: (user: User) => Promise<void>;
-  onManageCompanies?: (user: User) => void;
+  meta: {
+    onEdit: (user: User) => void;
+    onToggleStatus: (user: User) => Promise<void>;
+    onApprove: (user: User) => Promise<void>;
+    onManageCompanies: (user: User) => void;
+    companies: Array<{ id: number; name: string }>;
+  };
 }
 
 export function DataTable<TData extends User, TValue>({
   columns,
   data,
-  onEdit,
-  onToggleStatus,
-  onApprove,
-  onManageCompanies,
+  meta,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<TData | undefined>();
+  const [globalFilter, setGlobalFilter] = useState("");
+  const [roleFilter, setRoleFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
 
   // Memoize the table instance
   const table = useReactTable({
@@ -85,18 +89,15 @@ export function DataTable<TData extends User, TValue>({
     columns,
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
-    onSortingChange: setSorting,
     getSortedRowModel: getSortedRowModel(),
-    onColumnFiltersChange: setColumnFilters,
     getFilteredRowModel: getFilteredRowModel(),
+    onSortingChange: setSorting,
+    onColumnFiltersChange: setColumnFilters,
     state: {
       sorting,
       columnFilters,
     },
-    meta: {
-      setSelectedUser: (user: User) => setSelectedUser(user as TData),
-      setDialogOpen,
-    },
+    meta,
   });
 
   // Add cleanup effect
@@ -124,7 +125,7 @@ export function DataTable<TData extends User, TValue>({
     if (!selectedUser) return;
 
     try {
-      await onEdit?.(selectedUser);
+      await meta.onEdit?.(selectedUser);
       // Close dialog immediately
       setDialogOpen(false);
       // Clear user after a frame to allow dialog to start closing
@@ -134,12 +135,9 @@ export function DataTable<TData extends User, TValue>({
     } catch (error) {
       console.error("Error handling edit:", error);
     }
-  }, [onEdit, selectedUser]);
+  }, [meta.onEdit, selectedUser]);
 
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
-  const [globalFilter, setGlobalFilter] = useState("");
-  const [roleFilter, setRoleFilter] = useState<string>("all");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
 
   // Create filtered data based on role and status
   const filteredData = useMemo(() => {
@@ -408,7 +406,10 @@ export function DataTable<TData extends User, TValue>({
             <TableBody>
               {table.getRowModel().rows?.length ? (
                 table.getRowModel().rows.map((row) => (
-                  <TableRow key={row.id}>
+                  <TableRow
+                    key={row.id}
+                    data-state={row.getIsSelected() && "selected"}
+                  >
                     {row.getVisibleCells().map((cell) => (
                       <TableCell key={cell.id}>
                         {flexRender(
@@ -462,10 +463,7 @@ export function DataTable<TData extends User, TValue>({
           open={dialogOpen}
           onOpenChange={handleDialogChange}
           user={selectedUser}
-          onSuccess={async (updatedUser) => {
-            await onEdit?.(updatedUser);
-            handleDialogChange(false);
-          }}
+          onSuccess={handleSuccess}
         />
       </div>
     </TooltipProvider>

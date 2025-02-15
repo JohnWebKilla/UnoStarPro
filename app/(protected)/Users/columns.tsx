@@ -10,7 +10,17 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { MoreHorizontal, Check, X, Cake, Bell } from "lucide-react";
+import {
+  MoreHorizontal,
+  Check,
+  X,
+  Cake,
+  Bell,
+  Building,
+  Pencil,
+  Power,
+  UserCog,
+} from "lucide-react";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { updateUserStatus } from "./actions";
 import {
@@ -18,20 +28,13 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { User, UserRole } from "./types";
+import { useState } from "react";
 
-export interface User {
-  id: string;
-  first_name: string;
-  last_name: string;
-  email: string;
-  phone_number: string;
-  role: string;
+interface Company {
+  id: number;
+  name: string;
   status: string;
-  created_at: string;
-  dob?: string;
-  avatar?: string;
-  associated_companies?: string[];
-  // ... any other properties your user object might have
 }
 
 const variantMap = {
@@ -75,9 +78,11 @@ export const getBirthdayStatus = (dob: string) => {
 
 // Update the TableMeta interface to use the User type
 interface TableMeta {
-  setSelectedUser: (user: User) => void;
-  setDialogOpen: (open: boolean) => void;
-  onDataChange?: () => void;
+  onEdit: (user: User) => void;
+  onToggleStatus: (user: User) => Promise<void>;
+  onApprove: (user: User) => Promise<void>;
+  onManageCompanies: (user: User) => void;
+  companies: Company[]; // Add companies to meta
 }
 
 // Update the columns type to use User
@@ -166,57 +171,103 @@ export const columns: ColumnDef<User>[] = [
     },
   },
   {
-    id: "actions",
+    accessorKey: "companies",
+    header: "Companies",
     cell: ({ row, table }) => {
       const user = row.original;
       const meta = table.options.meta as TableMeta;
 
+      const getCompanyText = () => {
+        if (user.has_all_access) return "All Companies";
+        if (user.companies && user.companies.length > 0) {
+          if (user.companies.length === 1) {
+            return user.companies[0].name;
+          }
+          return `${user.companies.length} Companies`;
+        }
+        return "No Company Assigned";
+      };
+
       return (
-        <DropdownMenu>
+        <Button
+          variant="link"
+          className="text-blue-500 hover:text-blue-700 flex items-center gap-2 group"
+          onClick={() => meta.onManageCompanies(user)}
+        >
+          <span>{getCompanyText()}</span>
+          <Building className="h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+          <span className="sr-only">Manage company access</span>
+        </Button>
+      );
+    },
+  },
+  {
+    id: "actions",
+    cell: ({ row, table }) => {
+      const user = row.original;
+      const meta = table.options.meta as TableMeta;
+      const [open, setOpen] = useState(false);
+
+      const handleAction = (action: () => void) => {
+        setOpen(false); // Close dropdown before executing action
+        action();
+      };
+
+      return (
+        <DropdownMenu open={open} onOpenChange={setOpen}>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" className="h-8 w-8 p-0">
-              <span className="sr-only">Open menu</span>
               <MoreHorizontal className="h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuLabel>Actions</DropdownMenuLabel>
             <DropdownMenuItem
-              onClick={() => {
-                meta.setSelectedUser(user);
-                meta.setDialogOpen(true);
-              }}
+              onSelect={() => handleAction(() => meta.onEdit(user))}
+              className="flex items-center gap-2"
             >
-              Edit
+              <UserCog className="h-4 w-4" />
+              <span>Edit User</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => handleAction(() => meta.onManageCompanies(user))}
+              className="flex items-center gap-2"
+            >
+              <Building className="h-4 w-4" />
+              <span>Manage Company Access</span>
             </DropdownMenuItem>
             {user.status === "active" && (
               <DropdownMenuItem
-                onClick={async () => {
-                  try {
-                    await updateUserStatus(user.id, "inactive");
-                    meta.onDataChange?.();
-                  } catch (error) {
-                    console.error("Error deactivating user:", error);
-                  }
-                }}
-                className="text-destructive"
+                onSelect={() =>
+                  handleAction(async () => {
+                    try {
+                      await meta.onToggleStatus(user);
+                    } catch (error) {
+                      console.error("Error deactivating user:", error);
+                    }
+                  })
+                }
+                className="flex items-center gap-2 text-destructive"
               >
-                Deactivate
+                <Power className="h-4 w-4" />
+                <span>Deactivate</span>
               </DropdownMenuItem>
             )}
             {user.status === "inactive" && (
               <DropdownMenuItem
-                onClick={async () => {
-                  try {
-                    await updateUserStatus(user.id, "active");
-                    meta.onDataChange?.();
-                  } catch (error) {
-                    console.error("Error activating user:", error);
-                  }
-                }}
-                className="text-green-600"
+                onSelect={() =>
+                  handleAction(async () => {
+                    try {
+                      await meta.onToggleStatus(user);
+                    } catch (error) {
+                      console.error("Error activating user:", error);
+                    }
+                  })
+                }
+                className="flex items-center gap-2 text-green-600"
               >
-                Activate
+                <Power className="h-4 w-4" />
+                <span>Activate</span>
               </DropdownMenuItem>
             )}
           </DropdownMenuContent>

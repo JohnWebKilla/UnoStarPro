@@ -12,7 +12,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { SystemIssue } from "../types";
 
 interface SystemIssue {
   id: string;
@@ -22,6 +21,8 @@ interface SystemIssue {
   systemType: "android" | "ios" | "web";
   description: string;
   status: "open" | "in progress" | "resolved";
+  solution?: string;
+  resolvedAt?: Date;
   files: {
     name: string;
     url: string;
@@ -132,6 +133,120 @@ const columns: ColumnDef<SystemIssue>[] = [
   },
 ];
 
+// Export the mock data
+export const mockIssues: SystemIssue[] = [
+  {
+    id: "1",
+    timestamp: new Date("2024-02-11T14:30:00"),
+    company: "TR LINES INC",
+    driver: "Azim Kosimov",
+    systemType: "android",
+    description: "App crashes when trying to upload delivery photos",
+    status: "open",
+    files: [
+      {
+        name: "crash_log.txt",
+        url: "/path/to/crash_log.txt",
+      },
+      {
+        name: "screenshot.png",
+        url: "/path/to/screenshot.png",
+      },
+    ],
+  },
+  {
+    id: "2",
+    timestamp: new Date("2024-02-11T15:15:00"),
+    company: "LION CARGO",
+    driver: "Irakli Rizhamadze",
+    systemType: "ios",
+    description: "GPS tracking not updating in real-time",
+    status: "in progress",
+    files: [
+      {
+        name: "debug_log.txt",
+        url: "/path/to/debug_log.txt",
+      },
+    ],
+  },
+  {
+    id: "3",
+    timestamp: new Date("2024-02-11T16:00:00"),
+    company: "US ROAD",
+    driver: "Kakha Aladashvili",
+    systemType: "web",
+    description: "Unable to submit delivery confirmation form",
+    status: "resolved",
+    solution:
+      "Fixed CORS issue on the server and updated API endpoint validation",
+    resolvedAt: new Date("2024-02-11T18:30:00"),
+    files: [],
+  },
+  {
+    id: "4",
+    timestamp: new Date("2024-02-11T16:45:00"),
+    company: "SWIFT LOGISTICS",
+    driver: "David Chen",
+    systemType: "android",
+    description: "Push notifications not working for new assignments",
+    status: "in progress",
+    files: [
+      {
+        name: "notification_log.txt",
+        url: "/path/to/notification_log.txt",
+      },
+    ],
+  },
+  {
+    id: "5",
+    timestamp: new Date("2024-02-11T17:30:00"),
+    company: "CARGO PLUS",
+    driver: "Chris Davis",
+    systemType: "ios",
+    description: "App freezes when scanning multiple barcodes",
+    status: "open",
+    files: [
+      {
+        name: "freeze_screenshot.png",
+        url: "/path/to/freeze_screenshot.png",
+      },
+    ],
+  },
+  {
+    id: "6",
+    timestamp: new Date("2024-02-11T18:15:00"),
+    company: "FAST TRACK",
+    driver: "Tom Wilson",
+    systemType: "web",
+    description: "Document upload failing with large PDF files",
+    status: "resolved",
+    solution:
+      "Increased file size limit and implemented chunked upload for large files",
+    resolvedAt: new Date("2024-02-11T20:45:00"),
+    files: [
+      {
+        name: "error_report.pdf",
+        url: "/path/to/error_report.pdf",
+      },
+    ],
+  },
+  {
+    id: "7",
+    timestamp: new Date("2024-02-11T19:00:00"),
+    company: "ROAD KINGS",
+    driver: "John Smith",
+    systemType: "android",
+    description: "Battery drain issue with location tracking",
+    status: "in progress",
+    files: [
+      {
+        name: "battery_stats.txt",
+        url: "/path/to/battery_stats.txt",
+      },
+    ],
+  },
+];
+
 export function IssuesTable({ issues }: IssuesTableProps) {
-  return <DataTable columns={columns} data={issues} />;
+  return <DataTable columns={columns} data={issues} type="issues" />;
 }

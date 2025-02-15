@@ -1,4 +1,8 @@
 /** @type {import('next').NextConfig} */
-const nextConfig = {};
+const nextConfig = {
+    experimental: {
+        serverComponentsExternalPackages: ["grammy"],
+    },
+};
 
 module.exports = nextConfig;

@@ -10,10 +10,9 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { useState } from "react";
-import { Ticket } from "../page";
 
 interface AddTicketProps {
-  onAddTicket: (ticket: Ticket) => void;
+  onAddTicket: (ticket: any) => void;
 }
 
 export function AddTicket({ onAddTicket }: AddTicketProps) {
@@ -22,7 +21,7 @@ export function AddTicket({ onAddTicket }: AddTicketProps) {
   const handleAddTicket = () => {
     // Here you would typically have a form to create a new ticket
     // For now, we'll just create a mock ticket
-    const newTicket: Ticket = {
+    const newTicket: any = {
       id: Math.floor(Math.random() * 1000),
       timestamp: new Date(),
       company: "New Company",

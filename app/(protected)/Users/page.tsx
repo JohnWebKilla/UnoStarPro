@@ -1,16 +1,23 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { DataTable } from "./data-table";
-import { columns, User } from "./columns";
+import { columns } from "./columns";
+import { User, UserRole } from "./types";
 import { Button } from "@/components/ui/button";
 import { PlusCircle } from "lucide-react";
 import { UserDialog } from "./user-dialog";
 import { useToast } from "@/components/ui/use-toast";
 import { TableSkeleton } from "./table-skeleton";
-import { getUsers, updateUser, updateUserStatus } from "./actions";
+import {
+  getUsers,
+  updateUser,
+  updateUserStatus,
+  updateUserCompanyAccess,
+} from "./actions";
 import { createClient } from "@/utils/supabase/client";
 import { RealtimeChannel } from "@supabase/supabase-js";
+import { CompanyManagement } from "./company-management";
 
 export default function UsersPage() {
   const [users, setUsers] = useState<User[]>([]);
@@ -18,6 +25,14 @@ export default function UsersPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const { toast } = useToast();
+  const [companyDialogOpen, setCompanyDialogOpen] = useState(false);
+  const [userForCompanies, setUserForCompanies] = useState<User | null>(null);
+  const [companies, setCompanies] = useState<
+    Array<{ id: number; name: string }>
+  >([]);
+  const [lastUpdatedUserId, setLastUpdatedUserId] = useState<string | null>(
+    null
+  );
 
   useEffect(() => {
     let channel: RealtimeChannel;
@@ -38,6 +53,26 @@ export default function UsersPage() {
     };
   }, []);
 
+  useEffect(() => {
+    const fetchCompanies = async () => {
+      try {
+        const response = await fetch("/api/companies");
+        if (!response.ok) throw new Error("Failed to fetch companies");
+        const data = await response.json();
+        setCompanies(data);
+      } catch (error) {
+        console.error("Error fetching companies:", error);
+        toast({
+          title: "Error",
+          description: "Failed to load companies",
+          variant: "destructive",
+        });
+      }
+    };
+
+    fetchCompanies();
+  }, []);
+
   const setupRealtimeSubscription = async () => {
     const supabase = createClient();
 
@@ -51,37 +86,24 @@ export default function UsersPage() {
           table: "users",
         },
         async (payload: any) => {
-          console.log("Change received!", payload);
-
-          switch (payload.eventType) {
-            case "INSERT":
-              setUsers((prevUsers) => [...prevUsers, payload.new as User]);
-              toast({
-                title: "New User",
-                description: "A new user has been added",
-              });
-              break;
-
-            case "UPDATE":
-              setUsers((prevUsers) =>
-                prevUsers.map((user) =>
-                  user.id === payload.new.id
-                    ? { ...user, ...payload.new }
-                    : user
-                )
-              );
-              break;
-
-            case "DELETE":
-              setUsers((prevUsers) =>
-                prevUsers.filter((user) => user.id !== payload.old.id)
-              );
-              toast({
-                title: "User Removed",
-                description: "A user has been removed",
-              });
-              break;
-          }
+          console.log("Users change received!", payload);
+          const { users: updatedUsers, error } = await getUsers();
+          if (error || !updatedUsers) return;
+          setUsers(updatedUsers);
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "user_companies",
+        },
+        async (payload: any) => {
+          console.log("User companies change received!", payload);
+          const { users: updatedUsers, error } = await getUsers();
+          if (error || !updatedUsers) return;
+          setUsers(updatedUsers);
         }
       )
       .subscribe();
@@ -110,10 +132,10 @@ export default function UsersPage() {
     }
   };
 
-  const handleEdit = (user: User) => {
+  const handleEdit = useCallback((user: User) => {
     setSelectedUser(user);
     setDialogOpen(true);
-  };
+  }, []);
 
   const handleToggleStatus = async (user: User) => {
     try {
@@ -177,36 +199,93 @@ export default function UsersPage() {
   };
 
   const handleManageCompanies = (user: User) => {
-    // This will be implemented with the companies dialog
-    console.log("Manage companies for user:", user);
+    setUserForCompanies(user);
+    setCompanyDialogOpen(true);
   };
 
-  const handleDialogSuccess = async (updatedUser?: User) => {
-    if (updatedUser) {
-      // Update the user in the local state
-      setUsers((prevUsers) =>
-        prevUsers.map((u) =>
-          u.id === updatedUser.id ? { ...u, ...updatedUser } : u
-        )
-      );
-    } else {
-      // If no updated user provided, fetch all users
-      await fetchUsers();
+  const handleCompanyDialogClose = (open: boolean) => {
+    setCompanyDialogOpen(open);
+    if (!open) {
+      // Wait for dialog animation to complete
+      setTimeout(() => {
+        setUserForCompanies(null);
+      }, 300);
     }
-    handleDialogClose();
   };
 
-  const handleDialogClose = () => {
-    setSelectedUser(null);
-    setDialogOpen(false);
+  const handleCompanyUpdateSuccess = async (
+    updatedCompanyIds: number[],
+    hasAllAccess: boolean
+  ) => {
+    if (!userForCompanies) return;
+
+    // Update UI immediately
+    const optimisticUser: User = {
+      ...userForCompanies,
+      has_all_access: hasAllAccess,
+      companies: companies
+        .filter((c) => updatedCompanyIds.includes(c.id))
+        .map((c) => ({ ...c, status: "active" })),
+    };
+
+    // Update local state and close dialog immediately
+    setUsers((prevUsers) =>
+      prevUsers.map((u) => (u.id === optimisticUser.id ? optimisticUser : u))
+    );
+    setCompanyDialogOpen(false);
+
+    try {
+      // Make the API call in the background
+      const result = await updateUserCompanyAccess(
+        userForCompanies.id,
+        hasAllAccess ? null : updatedCompanyIds,
+        hasAllAccess
+      );
+
+      if (result.error) {
+        throw new Error(result.error);
+      }
+
+      // Show success message
+      toast({
+        title: "Success",
+        description: "Company access updated successfully",
+      });
+    } catch (error: any) {
+      // On error, revert the optimistic update
+      const { users: revertUsers } = await getUsers();
+      if (revertUsers) {
+        setUsers(revertUsers);
+      }
+
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update company access",
+        variant: "destructive",
+      });
+    }
   };
+
+  const handleDialogClose = useCallback((open: boolean) => {
+    if (!open) {
+      setDialogOpen(false);
+      // Wait for the dialog to animate out before clearing the selected user
+      setTimeout(() => {
+        setSelectedUser(null);
+      }, 300);
+    }
+  }, []);
+
+  const handleDialogSuccess = useCallback(async (updatedUser?: User) => {
+    handleDialogClose(false);
+  }, []);
 
   return (
-    <div className="container mx-auto py-10">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Users Management</h1>
-        <Button onClick={() => setDialogOpen(true)} className="rounded-md">
-          <PlusCircle className="mr-2 h-4 w-4" />
+    <div className="px-4 py-10">
+      <div className="flex justify-between items-center mb-8">
+        <h1 className="text-2xl font-bold">Users</h1>
+        <Button onClick={() => setDialogOpen(true)}>
+          <PlusCircle className="h-4 w-4 mr-2" />
           Add User
         </Button>
       </div>
@@ -217,19 +296,42 @@ export default function UsersPage() {
         <DataTable
           columns={columns}
           data={users}
-          onEdit={handleEdit}
-          onToggleStatus={handleToggleStatus}
-          onApprove={handleApprove}
-          onManageCompanies={handleManageCompanies}
+          meta={{
+            onEdit: handleEdit,
+            onToggleStatus: handleToggleStatus,
+            onApprove: handleApprove,
+            onManageCompanies: handleManageCompanies,
+            companies,
+          }}
         />
       )}
 
       <UserDialog
+        key={selectedUser?.id || "new"}
         open={dialogOpen}
         onOpenChange={handleDialogClose}
-        user={selectedUser}
+        user={selectedUser || undefined}
         onSuccess={handleDialogSuccess}
+        companies={companies}
       />
+
+      {userForCompanies && (
+        <CompanyManagement
+          open={companyDialogOpen}
+          onOpenChange={handleCompanyDialogClose}
+          userId={userForCompanies.id}
+          userRole={userForCompanies.role}
+          currentCompanyIds={
+            userForCompanies.companies
+              ? userForCompanies.companies.map((c) => c.id)
+              : []
+          }
+          hasAllAccess={userForCompanies.has_all_access}
+          companies={companies}
+          userName={`${userForCompanies.first_name} ${userForCompanies.last_name}`}
+          onSuccess={handleCompanyUpdateSuccess}
+        />
+      )}
     </div>
   );
 }

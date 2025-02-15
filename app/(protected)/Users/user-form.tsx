@@ -3,7 +3,7 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { User } from "./columns";
+import { User } from "./types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -21,7 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { forwardRef, useEffect } from "react";
+import { forwardRef } from "react";
 
 const formSchema = z.object({
   first_name: z.string().min(1, "First name is required"),
@@ -29,7 +29,6 @@ const formSchema = z.object({
   email: z.string().email("Invalid email address"),
   phone_number: z.string().min(1, "Phone number is required"),
   role: z.string().min(1, "Role is required"),
-  // Add other fields as needed
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -54,26 +53,11 @@ export const UserForm = forwardRef<HTMLFormElement, UserFormProps>(
       },
     });
 
-    // Reset form when user changes
-    useEffect(() => {
-      form.reset({
-        first_name: user?.first_name || "",
-        last_name: user?.last_name || "",
-        email: user?.email || "",
-        phone_number: user?.phone_number || "",
-        role: user?.role || "user",
-      });
-    }, [user, form]);
-
     const handleSubmit = async (values: FormValues) => {
-      try {
-        await onSubmit({
-          ...user,
-          ...values,
-        } as User);
-      } catch (error) {
-        console.error("Error submitting form:", error);
-      }
+      await onSubmit({
+        ...user,
+        ...values,
+      } as User);
     };
 
     return (
