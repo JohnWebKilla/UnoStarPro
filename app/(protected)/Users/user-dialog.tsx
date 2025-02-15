@@ -32,7 +32,7 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
 import { createUser, updateUser } from "./actions";
 import { CompanyManagement } from "./company-management";
-import { User } from "./types";
+import { User, UserRole } from "./types";
 import { Building } from "lucide-react";
 
 const formSchema = z.object({
@@ -160,18 +160,26 @@ export function UserDialog({
 
         if (user) {
           formData.append("id", user.id);
+
+          // Create optimistic user update
+          const optimisticUser: User = {
+            ...user,
+            first_name: values.first_name,
+            last_name: values.last_name,
+            email: values.email,
+            phone_number: values.phone_number,
+            role: values.role as UserRole,
+            dob: values.dob,
+          };
+
+          // Call onSuccess immediately with optimistic data
+          onSuccess?.(optimisticUser);
+
+          // Make the API call in the background
           const response = await updateUser(formData);
           if (response.error) throw new Error(response.error);
           if (!response.user || !response.user.user)
             throw new Error("User update failed");
-
-          toast({
-            title: "Success",
-            description: "User updated successfully",
-          });
-
-          onSuccess?.(formatUser(response.user.user));
-          handleDialogChange(false);
         } else {
           const response = await createUser(formData);
           if (response.error) throw new Error(response.error);
@@ -194,11 +202,13 @@ export function UserDialog({
           description: error.message || "An error occurred",
           variant: "destructive",
         });
+        // If there was an error, we need to close the dialog and let the parent know
+        onOpenChange(false);
       } finally {
         setDialogState((prev) => ({ ...prev, isSubmitting: false }));
       }
     },
-    [user, toast, onSuccess, handleDialogChange, dialogState.isSubmitting]
+    [user, toast, onSuccess, onOpenChange, dialogState.isSubmitting]
   );
 
   const handleCompanyDialogChange = useCallback(

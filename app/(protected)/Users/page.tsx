@@ -277,7 +277,23 @@ export default function UsersPage() {
   }, []);
 
   const handleDialogSuccess = useCallback(async (updatedUser?: User) => {
+    if (!updatedUser) {
+      handleDialogClose(false);
+      return;
+    }
+
+    // Update UI immediately
+    setUsers((prevUsers) =>
+      prevUsers.map((u) => (u.id === updatedUser.id ? updatedUser : u))
+    );
+
+    // Close dialog immediately
     handleDialogClose(false);
+
+    toast({
+      title: "Success",
+      description: "User updated successfully",
+    });
   }, []);
 
   return (
