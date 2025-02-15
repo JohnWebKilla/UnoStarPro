@@ -23,7 +23,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { ChevronDown, ChevronUp, Cake, Bell } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  Cake,
+  Bell,
+  MoreHorizontal,
+  Pencil,
+  Building,
+  Power,
+} from "lucide-react";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -34,7 +43,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { MoreHorizontal } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -69,6 +77,11 @@ interface DataTableProps<TData extends User, TValue> {
     companies: Array<{ id: number; name: string }>;
   };
 }
+
+// Add this helper function at the top level
+const formatDate = (dateString: string) => {
+  return new Date(dateString).toLocaleDateString();
+};
 
 export function DataTable<TData extends User, TValue>({
   columns,
@@ -171,156 +184,151 @@ export function DataTable<TData extends User, TValue>({
     }));
   };
 
-  const renderMobileCard = (row: any) => {
-    const isExpanded = expandedRows[row.id];
+  const renderMobileCard = (user: User) => {
+    const isExpanded = expandedRows[user.id];
+    const birthdayStatus = user.dob ? getBirthdayStatus(user.dob) : null;
+    const [isMenuOpen, setIsMenuOpen] = useState(false);
 
-    try {
-      const cells = row.getVisibleCells();
-      const userData = row.original;
+    const handleAction = (action: () => void) => {
+      // Close menu first
+      setIsMenuOpen(false);
+      // Small delay before action to ensure menu is closed
+      setTimeout(() => {
+        action();
+      }, 100);
+    };
 
-      return (
-        <div key={row.id} className="bg-card rounded-lg shadow-sm mb-2 p-4">
-          <div className="flex justify-between items-center">
-            <div
-              className="flex items-center space-x-3 flex-1 cursor-pointer"
-              onClick={() => toggleRow(row.id)}
-            >
-              {/* Avatar section */}
-              <div className="flex-shrink-0">
-                {userData.avatar && (
-                  <Avatar>
-                    <AvatarImage
-                      src={userData.avatar}
-                      alt={userData.first_name}
-                    />
-                    <AvatarFallback>
-                      {userData.first_name?.[0]}
-                      {userData.last_name?.[0]}
-                    </AvatarFallback>
-                  </Avatar>
-                )}
+    return (
+      <div key={user.id} className="bg-card rounded-lg shadow-sm mb-4 p-4">
+        <div className="flex justify-between items-start">
+          <div className="flex items-start space-x-3">
+            <Avatar>
+              <AvatarImage
+                src={user.avatar}
+                alt={`${user.first_name} ${user.last_name}`}
+              />
+              <AvatarFallback>
+                {user.first_name?.[0]}
+                {user.last_name?.[0]}
+              </AvatarFallback>
+            </Avatar>
+            <div>
+              <h3 className="font-medium">
+                {user.first_name} {user.last_name}
+              </h3>
+              <p className="text-sm text-muted-foreground">{user.email}</p>
+              <div className="flex items-center gap-2 mt-1">
+                <Badge
+                  variant={variantMap[user.status as keyof typeof variantMap]}
+                >
+                  {user.status}
+                </Badge>
+                <span className="text-sm text-muted-foreground capitalize">
+                  {user.role}
+                </span>
               </div>
-
-              {/* User info section */}
-              <div>
-                <div className="font-medium">
-                  {userData.first_name} {userData.last_name}
-                </div>
-                <div className="text-sm text-muted-foreground">
-                  {userData.email}
-                </div>
-                <div className="text-sm text-muted-foreground">
-                  {userData.role}
-                </div>
-              </div>
-            </div>
-
-            {/* Actions Menu */}
-            <div className="flex items-center space-x-2">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" className="h-8 w-8 p-0">
-                    <MoreHorizontal className="h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                  <DropdownMenuItem onClick={() => setSelectedUser(userData)}>
-                    Edit
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-
-              <button
-                onClick={() => toggleRow(row.id)}
-                className="focus:outline-none"
-              >
-                {isExpanded ? (
-                  <ChevronUp className="h-5 w-5" />
-                ) : (
-                  <ChevronDown className="h-5 w-5" />
-                )}
-              </button>
             </div>
           </div>
 
-          {/* Expanded details */}
-          {isExpanded && (
-            <div className="mt-4 space-y-2">
-              {userData.email && (
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Email</span>
-                  <span className="text-sm">{userData.email}</span>
-                </div>
-              )}
-              {userData.phone_number && (
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Phone</span>
-                  <span className="text-sm">{userData.phone_number}</span>
-                </div>
-              )}
-              {userData.status && (
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Status</span>
-                  <span className="text-sm">
-                    <Badge
-                      variant={
-                        variantMap[userData.status as keyof typeof variantMap]
-                      }
-                    >
-                      {userData.status}
-                    </Badge>
-                  </span>
-                </div>
-              )}
-              {userData.created_at && (
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Joined</span>
-                  <span className="text-sm">
-                    {new Date(userData.created_at).toLocaleDateString()}
-                  </span>
-                </div>
-              )}
-              {userData.dob && (
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">
-                    Date of Birth
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm">
-                      {new Date(userData.dob).toLocaleDateString()}
-                    </span>
-                    {getBirthdayStatus(userData.dob) === "today" && (
-                      <Tooltip>
-                        <TooltipTrigger>
-                          <Cake className="h-4 w-4 text-pink-500" />
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>Birthday Today! 🎉</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    )}
-                    {getBirthdayStatus(userData.dob) === "upcoming" && (
-                      <Tooltip>
-                        <TooltipTrigger>
-                          <Bell className="h-4 w-4 text-yellow-500 animate-pulse" />
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>Upcoming Birthday! 🎈</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    )}
-                  </div>
-                </div>
-              )}
+          <div className="flex items-center">
+            <DropdownMenu open={isMenuOpen} onOpenChange={setIsMenuOpen}>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  className="h-8 w-8 p-0"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                  }}
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="w-[160px]"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <DropdownMenuItem
+                  onClick={() => handleAction(() => meta.onEdit(user))}
+                  className="flex items-center gap-2"
+                >
+                  <Pencil className="h-4 w-4" />
+                  <span>Edit</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() =>
+                    handleAction(() => meta.onManageCompanies(user))
+                  }
+                  className="flex items-center gap-2"
+                >
+                  <Building className="h-4 w-4" />
+                  <span>Manage Companies</span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                {user.status === "active" ? (
+                  <DropdownMenuItem
+                    className="text-destructive flex items-center gap-2"
+                    onClick={() =>
+                      handleAction(() => meta.onToggleStatus(user))
+                    }
+                  >
+                    <Power className="h-4 w-4" />
+                    <span>Deactivate</span>
+                  </DropdownMenuItem>
+                ) : (
+                  <DropdownMenuItem
+                    className="text-green-600 flex items-center gap-2"
+                    onClick={() =>
+                      handleAction(() => meta.onToggleStatus(user))
+                    }
+                  >
+                    <Power className="h-4 w-4" />
+                    <span>Activate</span>
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+
+        <div className="mt-4 space-y-2 text-sm">
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Phone</span>
+            <span>{user.phone_number || "-"}</span>
+          </div>
+
+          {user.dob && (
+            <div className="flex justify-between items-center">
+              <span className="text-muted-foreground">Birthday</span>
+              <div className="flex items-center gap-2">
+                <span>{formatDate(user.dob)}</span>
+                {birthdayStatus === "today" && (
+                  <Cake className="h-4 w-4 text-pink-500" />
+                )}
+                {birthdayStatus === "upcoming" && (
+                  <Bell className="h-4 w-4 text-yellow-500 animate-pulse" />
+                )}
+              </div>
             </div>
           )}
+
+          <div className="flex justify-between items-center">
+            <span className="text-muted-foreground">Companies</span>
+            <Button
+              variant="link"
+              className="h-auto p-0 text-blue-500"
+              onClick={() => meta.onManageCompanies(user)}
+            >
+              {user.has_all_access
+                ? "All Companies"
+                : user.companies?.length
+                  ? `${user.companies.length} Companies`
+                  : "No Companies"}
+            </Button>
+          </div>
         </div>
-      );
-    } catch (error) {
-      console.error("Error rendering mobile card:", error);
-      return null;
-    }
+      </div>
+    );
   };
 
   // Filter options
@@ -341,50 +349,68 @@ export function DataTable<TData extends User, TValue>({
     <TooltipProvider>
       <div>
         {/* Filters Section */}
-        <div className="space-y-4 md:space-y-0 md:flex md:items-center md:justify-between py-4">
-          <div className="flex flex-col md:flex-row gap-4">
-            <Input
-              placeholder="Search..."
-              value={globalFilter ?? ""}
-              onChange={(event) => setGlobalFilter(event.target.value)}
-              className="w-full md:w-[250px]"
-            />
-            <div className="flex gap-2">
-              <Select value={roleFilter} onValueChange={handleRoleChange}>
-                <SelectTrigger className="w-full md:w-[180px]">
-                  <SelectValue placeholder="Select Role" />
-                </SelectTrigger>
-                <SelectContent>
-                  {roleOptions.map((role) => (
-                    <SelectItem key={role} value={role}>
-                      {role.charAt(0).toUpperCase() + role.slice(1)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+        <div className="space-y-4 py-4">
+          {/* Search and Filters Container */}
+          <div className="flex flex-col space-y-4">
+            {/* Search Bar */}
+            <div className="w-full">
+              <Input
+                placeholder="Search users..."
+                value={globalFilter ?? ""}
+                onChange={(event) => setGlobalFilter(event.target.value)}
+                className="w-full md:max-w-sm"
+              />
+            </div>
 
-              <Select value={statusFilter} onValueChange={handleStatusChange}>
-                <SelectTrigger className="w-full md:w-[180px]">
-                  <SelectValue placeholder="Select Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  {statusOptions.map((status) => (
-                    <SelectItem key={status} value={status}>
-                      {status.charAt(0).toUpperCase() + status.slice(1)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            {/* Filters Row */}
+            <div className="flex flex-col sm:flex-row gap-2">
+              {/* Role Filter */}
+              <div className="w-full sm:w-auto">
+                <Select value={roleFilter} onValueChange={handleRoleChange}>
+                  <SelectTrigger className="w-full sm:w-[140px]">
+                    <SelectValue placeholder="Role: All" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {roleOptions.map((role) => (
+                      <SelectItem key={role} value={role}>
+                        {role === "all"
+                          ? "All Roles"
+                          : role.charAt(0).toUpperCase() + role.slice(1)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Status Filter */}
+              <div className="w-full sm:w-auto">
+                <Select value={statusFilter} onValueChange={handleStatusChange}>
+                  <SelectTrigger className="w-full sm:w-[140px]">
+                    <SelectValue placeholder="Status: All" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {statusOptions.map((status) => (
+                      <SelectItem key={status} value={status}>
+                        {status === "all"
+                          ? "All Status"
+                          : status.charAt(0).toUpperCase() + status.slice(1)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Mobile Cards View */}
+        {/* Mobile View */}
         <div className="md:hidden">
-          {tableFiltered.getRowModel().rows.map((row) => renderMobileCard(row))}
+          {tableFiltered
+            .getRowModel()
+            .rows.map((row) => renderMobileCard(row.original))}
         </div>
 
-        {/* Desktop Table View */}
+        {/* Desktop View */}
         <div className="hidden md:block rounded-md border">
           <Table>
             <TableHeader>
@@ -435,11 +461,11 @@ export function DataTable<TData extends User, TValue>({
         </div>
 
         {/* Pagination */}
-        <div className="flex items-center justify-end space-x-2 py-4">
-          <div className="flex-1 text-sm text-muted-foreground">
-            {table.getFilteredRowModel().rows.length} user(s) total
-          </div>
-          <div className="space-x-2">
+        <div className="flex items-center justify-between py-4">
+          <span className="text-sm text-muted-foreground">
+            {table.getFilteredRowModel().rows.length} users
+          </span>
+          <div className="flex items-center space-x-2">
             <Button
               variant="outline"
               size="sm"

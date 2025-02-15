@@ -237,7 +237,7 @@ export function UserDialog({
     <>
       <Dialog open={open} onOpenChange={handleDialogChange}>
         <DialogContent
-          className="sm:max-w-[425px]"
+          className="sm:max-w-[425px] w-[95vw] max-h-[90vh] overflow-y-auto"
           onEscapeKeyDown={(e) =>
             dialogState.isSubmitting && e.preventDefault()
           }
