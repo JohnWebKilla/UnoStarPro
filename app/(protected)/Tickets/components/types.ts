@@ -1,4 +1,9 @@
 // Create a new file for shared types
+export interface Reaction {
+  emoji: string;
+  users: { id: string; name: string }[];
+}
+
 export interface Message {
   id: string;
   content: string;

@@ -14,13 +14,22 @@ import { Users, MessageSquare, Plus, Search } from "lucide-react";
 import { ChatGroup } from "./types";
 import { useOnlineStatus } from "../hooks/useOnlineStatus";
 import { cn } from "@/lib/utils";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ScrollArea } from "@/components/ui/scroll-area";
+
+interface Member {
+  id: string;
+  name: string;
+  role: "admin" | "member";
+  type: "driver" | "user";
+}
 
 interface CreateChatProps {
-  onCreateGroup: (groupData: {
-    name: string;
-    members: { id: string; name: string; role: string; type: string }[];
-  }) => void;
+  onCreateGroup: (data: { name: string; members: Member[] }) => void;
   onCreateDirectMessage: (userId: string) => void;
+  availableMembers: Member[];
+  onClose: () => void;
   currentUser: {
     id: string;
     name: string;
@@ -31,56 +40,46 @@ interface CreateChatProps {
 export function CreateChat({
   onCreateGroup,
   onCreateDirectMessage,
+  availableMembers,
+  onClose,
   currentUser,
 }: CreateChatProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [mode, setMode] = useState<"group" | "direct" | null>(null);
   const [groupName, setGroupName] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedMembers, setSelectedMembers] = useState<{
-    [key: string]: { id: string; name: string; role: string; type: string };
-  }>({});
-
-  // Mock user list - replace with your actual user data
-  const availableUsers = [
-    { id: "user1", name: "John Doe", type: "user" },
-    { id: "user2", name: "Jane Smith", type: "user" },
-    { id: "driver1", name: "Driver 1", type: "driver" },
-    { id: "driver2", name: "Driver 2", type: "driver" },
-  ];
+  const [selectedMembers, setSelectedMembers] = useState<Member[]>([]);
 
   const onlineUsers = useOnlineStatus();
 
-  const filteredUsers = availableUsers.filter(
-    (user) =>
-      user.id !== currentUser.id &&
-      user.name.toLowerCase().includes(searchQuery.toLowerCase())
+  const filteredMembers = availableMembers.filter(
+    (member) =>
+      member.id !== currentUser.id &&
+      member.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const handleCreateGroup = () => {
-    if (groupName.trim() && Object.keys(selectedMembers).length > 0) {
-      onCreateGroup({
-        name: groupName,
-        members: [
-          { ...currentUser, role: "admin", type: "user" },
-          ...Object.values(selectedMembers),
-        ],
-      });
-      handleClose();
-    }
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!groupName.trim() || selectedMembers.length === 0) return;
+
+    onCreateGroup({
+      name: groupName,
+      members: [
+        {
+          id: currentUser.id,
+          name: currentUser.name,
+          role: "admin" as const,
+          type: "user" as const,
+        },
+        ...selectedMembers,
+      ],
+    });
+    onClose();
   };
 
-  const handleCreateDirectMessage = (user: (typeof availableUsers)[0]) => {
-    onCreateDirectMessage(user.id);
-    handleClose();
-  };
-
-  const handleClose = () => {
-    setIsOpen(false);
-    setMode(null);
-    setGroupName("");
-    setSearchQuery("");
-    setSelectedMembers({});
+  const handleDirectMessage = (member: Member) => {
+    onCreateDirectMessage(member.id);
+    onClose();
   };
 
   const UserItem = ({ user, selected = false, onClick }: any) => (
@@ -144,81 +143,69 @@ export function CreateChat({
             </Button>
           </div>
         ) : mode === "group" ? (
-          <div className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="text-sm font-medium">Group Name</label>
+              <Label htmlFor="group-name">Group Name</Label>
               <Input
+                id="group-name"
                 value={groupName}
                 onChange={(e) => setGroupName(e.target.value)}
                 placeholder="Enter group name"
-                className="mt-1"
               />
             </div>
+
             <div>
-              <label className="text-sm font-medium">Add Members</label>
-              <div className="relative mt-1">
-                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search users..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-8"
-                />
-              </div>
-              {Object.keys(selectedMembers).length > 0 && (
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {Object.values(selectedMembers).map((member) => (
+              <Label>Select Members</Label>
+              <Input
+                placeholder="Search members..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="mb-2"
+              />
+              <ScrollArea className="h-[200px] rounded-md border p-4">
+                <div className="space-y-4">
+                  {filteredMembers.map((member) => (
                     <div
                       key={member.id}
-                      className="flex items-center gap-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded-full px-2 py-1 text-sm"
+                      className="flex items-center space-x-2"
                     >
-                      <span>{member.name}</span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-4 w-4 p-0 hover:bg-transparent"
-                        onClick={() => {
-                          const { [member.id]: _, ...rest } = selectedMembers;
-                          setSelectedMembers(rest);
+                      <Checkbox
+                        id={`member-${member.id}`}
+                        checked={selectedMembers.some(
+                          (m) => m.id === member.id
+                        )}
+                        onCheckedChange={() => {
+                          setSelectedMembers((prev) =>
+                            prev.some((m) => m.id === member.id)
+                              ? prev.filter((m) => m.id !== member.id)
+                              : [...prev, member]
+                          );
                         }}
+                      />
+                      <label
+                        htmlFor={`member-${member.id}`}
+                        className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
                       >
-                        ×
-                      </Button>
+                        {member.name}
+                      </label>
                     </div>
                   ))}
                 </div>
-              )}
-              <div className="mt-2 space-y-1 max-h-[200px] overflow-y-auto">
-                {filteredUsers.map((user) => (
-                  <UserItem
-                    key={user.id}
-                    user={user}
-                    selected={!!selectedMembers[user.id]}
-                    onClick={() => {
-                      if (!selectedMembers[user.id]) {
-                        setSelectedMembers({
-                          ...selectedMembers,
-                          [user.id]: {
-                            ...user,
-                            role: "member",
-                          },
-                        });
-                      }
-                    }}
-                  />
-                ))}
-              </div>
+              </ScrollArea>
             </div>
-            <Button
-              className="w-full"
-              disabled={
-                !groupName.trim() || Object.keys(selectedMembers).length === 0
-              }
-              onClick={handleCreateGroup}
-            >
-              Create Group
-            </Button>
-          </div>
+
+            <div className="flex justify-end space-x-2">
+              <Button type="button" variant="outline" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={!groupName.trim() || selectedMembers.length === 0}
+              >
+                Create Group
+              </Button>
+            </div>
+          </form>
         ) : (
           <div className="space-y-4">
             <div className="relative">
@@ -231,11 +218,11 @@ export function CreateChat({
               />
             </div>
             <div className="space-y-1 max-h-[300px] overflow-y-auto">
-              {filteredUsers.map((user) => (
+              {filteredMembers.map((user) => (
                 <UserItem
                   key={user.id}
                   user={user}
-                  onClick={() => handleCreateDirectMessage(user)}
+                  onClick={() => handleDirectMessage(user)}
                 />
               ))}
             </div>

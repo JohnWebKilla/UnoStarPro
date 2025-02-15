@@ -196,7 +196,8 @@ export function MessageBubble({
                       <div className="flex items-center gap-0.5">
                         {message.reactions.map((reaction) => {
                           const hasReacted = reaction.users.some(
-                            (u) => u.id === currentUser.id
+                            (u: { id: string; name: string }) =>
+                              u.id === currentUser.id
                           );
                           return (
                             <button
@@ -204,7 +205,8 @@ export function MessageBubble({
                               onClick={() => {
                                 if (
                                   reaction.users.some(
-                                    (u) => u.id === currentUser.id
+                                    (u: { id: string; name: string }) =>
+                                      u.id === currentUser.id
                                   )
                                 ) {
                                   onRemoveReaction(message.id, reaction.emoji);

@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { EmojiPickerPortal } from "./EmojiPickerPortal";
+import { Message } from "./types";
 import {
   Paperclip,
   Send,
@@ -69,7 +70,7 @@ export function MessageInput({
         sender: currentUser.id,
         timestamp: new Date(),
         read: true,
-        replyTo: replyingTo || undefined,
+        replyTo: replyingTo?.id,
         files: selectedFiles.map((file) => ({
           name: file.name,
           url: URL.createObjectURL(file),

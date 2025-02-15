@@ -48,6 +48,7 @@ export function Chat({ userRole = "admin", currentUser }: ChatProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedGroup, setSelectedGroup] = useState<ChatGroup | null>(null);
   const [newMessage, setNewMessage] = useState("");
+  const [createChatOpen, setCreateChatOpen] = useState(false);
   const [groups, setGroups] = useState<ChatGroup[]>([
     {
       id: "1",
@@ -104,7 +105,6 @@ export function Chat({ userRole = "admin", currentUser }: ChatProps) {
       name: "Drivers Group",
       type: "drivers",
       isGroup: true,
-      members: ["Driver1", "Driver2", "Driver3"],
       unreadCount: 0,
       lastMessage: {
         id: "msg3",
@@ -118,20 +118,20 @@ export function Chat({ userRole = "admin", currentUser }: ChatProps) {
         {
           id: "Driver1",
           name: "Driver1",
-          role: "admin",
-          type: "driver",
+          role: "admin" as const,
+          type: "driver" as const,
         },
         {
           id: "Driver2",
           name: "Driver2",
-          role: "member",
-          type: "driver",
+          role: "member" as const,
+          type: "driver" as const,
         },
         {
           id: "Driver3",
           name: "Driver3",
-          role: "member",
-          type: "driver",
+          role: "member" as const,
+          type: "driver" as const,
         },
       ],
     },
@@ -319,48 +319,56 @@ export function Chat({ userRole = "admin", currentUser }: ChatProps) {
 
   const handleCreateGroup = (groupData: {
     name: string;
-    members: { id: string; name: string; role: string; type: string }[];
+    members: {
+      id: string;
+      name: string;
+      role: "admin" | "member";
+      type: "driver" | "user";
+    }[];
   }) => {
     const newGroup: ChatGroup = {
-      id: `group${Date.now()}`,
+      id: `group-${Date.now()}`,
       name: groupData.name,
-      type: "office", // or determine based on members
+      type: "office",
       isGroup: true,
       members: groupData.members,
-      messages: [],
       unreadCount: 0,
+      messages: [],
     };
-    setGroups((prev) => [...prev, newGroup]);
+    setGroups([...groups, newGroup]);
   };
 
   const handleCreateDirectMessage = (userId: string) => {
-    // Find user from your user list
-    const user = availableUsers.find((u) => u.id === userId);
-    if (!user) return;
-
-    // Check if chat already exists
-    const existingChat = groups.find(
-      (g) => !g.isGroup && g.members.some((m) => m.id === userId)
+    const existingGroup = groups.find(
+      (g) => !g.isGroup && g.members.some((member) => member.id === userId)
     );
-
-    if (existingChat) {
-      setSelectedGroup(existingChat);
+    if (existingGroup) {
+      setSelectedGroup(existingGroup);
       return;
     }
 
-    const newChat: ChatGroup = {
-      id: `chat${Date.now()}`,
+    const user = groups.flatMap((g) => g.members).find((m) => m.id === userId);
+
+    if (!user) return;
+
+    const newGroup: ChatGroup = {
+      id: `dm-${Date.now()}`,
       name: user.name,
-      type: user.type === "driver" ? "drivers" : "office",
+      type: "office",
       isGroup: false,
       members: [
-        { ...currentUser, role: "member", type: "user" },
-        { ...user, role: "member" },
+        {
+          id: user.id,
+          name: user.name,
+          role: "member",
+          type: user.type,
+        },
       ],
-      messages: [],
       unreadCount: 0,
+      messages: [],
     };
-    setGroups((prev) => [...prev, newChat]);
+    setGroups([...groups, newGroup]);
+    setSelectedGroup(newGroup);
   };
 
   if (selectedGroup) {
@@ -391,7 +399,15 @@ export function Chat({ userRole = "admin", currentUser }: ChatProps) {
           <CreateChat
             onCreateGroup={handleCreateGroup}
             onCreateDirectMessage={handleCreateDirectMessage}
+            availableMembers={groups
+              .flatMap((g) => g.members)
+              .filter(
+                (member, index, self) =>
+                  member.id !== currentUser.id &&
+                  index === self.findIndex((m) => m.id === member.id)
+              )}
             currentUser={currentUser}
+            onClose={() => setCreateChatOpen(false)}
           />
         </div>
 

@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDistanceToNow } from "date-fns";
@@ -17,7 +18,7 @@ interface ChatViewUIProps {
   onDeleteMessage: (messageId: string) => void;
   userRole: string;
   newMessage: string;
-  setNewMessage: (message: string) => void;
+  setNewMessage: React.Dispatch<React.SetStateAction<string>>;
   isEditing: string | null;
   setIsEditing: (id: string | null) => void;
   replyingTo: string | null;
@@ -60,12 +61,16 @@ export function ChatViewUI({
       {/* Messages */}
       <div className="flex-1 overflow-auto p-4 space-y-4">
         {selectedGroup.messages.map((message, index) => {
-          const prevMessage = index > 0 ? selectedGroup.messages[index - 1] : null;
-          const nextMessage = index < selectedGroup.messages.length - 1
-            ? selectedGroup.messages[index + 1]
-            : null;
-          const isFirstInGroup = !prevMessage || prevMessage.sender !== message.sender;
-          const isLastInGroup = !nextMessage || nextMessage.sender !== message.sender;
+          const prevMessage =
+            index > 0 ? selectedGroup.messages[index - 1] : null;
+          const nextMessage =
+            index < selectedGroup.messages.length - 1
+              ? selectedGroup.messages[index + 1]
+              : null;
+          const isFirstInGroup =
+            !prevMessage || prevMessage.sender !== message.sender;
+          const isLastInGroup =
+            !nextMessage || nextMessage.sender !== message.sender;
 
           return (
             <div
@@ -77,15 +82,21 @@ export function ChatViewUI({
               {message.replyTo && (
                 <div className="text-xs text-gray-500 mb-1">
                   Replying to:{" "}
-                  {selectedGroup.messages.find((m) => m.id === message.replyTo)?.content}
+                  {
+                    selectedGroup.messages.find((m) => m.id === message.replyTo)
+                      ?.content
+                  }
                 </div>
               )}
               <div className="flex items-end gap-2">
                 {message.sender !== "You" && isLastInGroup && (
-                  <MessageAvatar name={message.sender} isGroup={selectedGroup.isGroup} />
+                  <MessageAvatar
+                    name={message.sender}
+                    isGroup={selectedGroup.isGroup}
+                  />
                 )}
                 {message.sender !== "You" && !isLastInGroup && (
-                  <div className="w-8" /> {/* Spacer for alignment */}
+                  <div className="w-8" aria-hidden="true" />
                 )}
                 <div
                   className={`max-w-[80%] rounded-lg p-3 ${
@@ -96,11 +107,13 @@ export function ChatViewUI({
                     !isFirstInGroup ? "rounded-tr-md" : ""
                   }`}
                 >
-                  {isFirstInGroup && !selectedGroup.isGroup && message.sender !== "You" && (
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
-                      {message.sender}
-                    </p>
-                  )}
+                  {isFirstInGroup &&
+                    !selectedGroup.isGroup &&
+                    message.sender !== "You" && (
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                        {message.sender}
+                      </p>
+                    )}
                   {isEditing === message.id ? (
                     <div className="flex flex-col gap-2 w-full">
                       <Textarea
@@ -146,7 +159,9 @@ export function ChatViewUI({
                     </div>
                   ) : (
                     <>
-                      <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                      <p className="text-sm whitespace-pre-wrap">
+                        {message.content}
+                      </p>
                       {message.files?.map((file, index) => (
                         <div key={index} className="mt-2">
                           {file.type === "image" ? (
@@ -175,7 +190,7 @@ export function ChatViewUI({
                   <MessageAvatar name="You" />
                 )}
                 {message.sender === "You" && !isLastInGroup && (
-                  <div className="w-8" /> {/* Spacer for alignment */}
+                  <div className="w-8" />
                 )}
                 <MessageActions
                   isOwnMessage={message.sender === "You"}
@@ -191,7 +206,9 @@ export function ChatViewUI({
                   }`}
                 >
                   <span className="text-xs text-gray-500">
-                    {formatDistanceToNow(message.timestamp, { addSuffix: true })}
+                    {formatDistanceToNow(message.timestamp, {
+                      addSuffix: true,
+                    })}
                   </span>
                   {message.edited && (
                     <span className="text-xs text-gray-500">(edited)</span>
@@ -208,8 +225,10 @@ export function ChatViewUI({
         {replyingTo && (
           <div className="flex items-center gap-2 mb-2 text-sm text-gray-500">
             <Reply className="h-4 w-4" />
-            Replying to:{" "}
-            {selectedGroup.messages.find((m) => m.id === replyingTo)?.content}
+            <span>
+              Replying to:{" "}
+              {selectedGroup.messages.find((m) => m.id === replyingTo)?.content}
+            </span>
             <Button
               variant="ghost"
               size="sm"
@@ -227,7 +246,11 @@ export function ChatViewUI({
               id="file-upload"
               className="hidden"
               multiple
-              onChange={(e) => e.target.files && handleFileUpload(e.target.files)}
+              onChange={(e) => {
+                if (e.target.files) {
+                  handleFileUpload(e.target.files);
+                }
+              }}
             />
             <Button
               variant="ghost"
