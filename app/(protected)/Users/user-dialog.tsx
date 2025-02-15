@@ -334,6 +334,7 @@ export function UserDialog({
                         <SelectItem value="admin">Admin</SelectItem>
                         <SelectItem value="user">User</SelectItem>
                         <SelectItem value="driver">Driver</SelectItem>
+                        <SelectItem value="customer">Customer</SelectItem>
                       </SelectContent>
                     </Select>
                     <FormMessage />
