@@ -101,29 +101,38 @@ export async function createUser(formData: FormData) {
   try {
     const supabase = await createClient();
 
-    // First create the auth user
-    const { data: authUser, error: authError } = await supabase.auth.signUp({
-      email: formData.get("email") as string,
-      password: formData.get("password") as string,
-      options: {
-        data: {
-          first_name: formData.get("first_name"),
-          last_name: formData.get("last_name"),
-          phone_number: formData.get("phone_number"),
-          role: formData.get("role"),
-          status: "pending",
-          dob: formData.get("dob"),
-        },
-      },
-    });
-
+    // Get authenticated user data first
+    const {
+      data: { user: authUser },
+      error: authError,
+    } = await supabase.auth.getUser();
     if (authError) throw authError;
-    if (!authUser.user) throw new Error("No user returned from auth signup");
+    if (!authUser) throw new Error("Not authenticated");
 
-    // Then add the user to the users table
+    // Then create the new user
+    const { data: newAuthUser, error: createError } =
+      await supabase.auth.signUp({
+        email: formData.get("email") as string,
+        password: formData.get("password") as string,
+        options: {
+          data: {
+            first_name: formData.get("first_name"),
+            last_name: formData.get("last_name"),
+            phone_number: formData.get("phone_number"),
+            role: formData.get("role"),
+            status: "pending",
+            dob: formData.get("dob"),
+          },
+        },
+      });
+
+    if (createError) throw createError;
+    if (!newAuthUser.user) throw new Error("No user returned from auth signup");
+
+    // Add the user to the users table
     const { error: insertError } = await supabase.from("users").insert({
-      id: authUser.user.id,
-      email: authUser.user.email,
+      id: newAuthUser.user.id,
+      email: newAuthUser.user.email,
       first_name: formData.get("first_name"),
       last_name: formData.get("last_name"),
       phone_number: formData.get("phone_number"),
@@ -135,8 +144,7 @@ export async function createUser(formData: FormData) {
 
     if (insertError) throw insertError;
 
-    revalidatePath("/Users");
-    return { user: authUser, error: null };
+    return { user: newAuthUser, error: null };
   } catch (error) {
     console.error("Error creating user:", error);
     return { user: null, error: "Failed to create user" };
@@ -146,6 +154,15 @@ export async function createUser(formData: FormData) {
 export async function updateUser(formData: FormData) {
   try {
     const supabase = await createClient();
+
+    // Get authenticated user data
+    const {
+      data: { user: authUser },
+      error: authError,
+    } = await supabase.auth.getUser();
+    if (authError) throw authError;
+    if (!authUser) throw new Error("Not authenticated");
+
     const userId = formData.get("id") as string;
     const newRole = formData.get("role") as string;
 
@@ -161,8 +178,8 @@ export async function updateUser(formData: FormData) {
     // Check if role is being changed from admin to non-admin
     const isRoleDowngrade = currentUser.role === "admin" && newRole !== "admin";
 
-    // First update the user metadata in auth
-    const { data: authUpdate, error: authError } =
+    // Update the user metadata in auth
+    const { data: authUpdate, error: authError2 } =
       await supabase.auth.updateUser({
         data: {
           first_name: formData.get("first_name"),
@@ -173,7 +190,7 @@ export async function updateUser(formData: FormData) {
         },
       });
 
-    if (authError) throw authError;
+    if (authError2) throw authError2;
 
     // Prepare update data
     const updateData: {
@@ -198,7 +215,7 @@ export async function updateUser(formData: FormData) {
       updateData.has_all_access = false;
     }
 
-    // Then update the users table
+    // Update the users table
     const { data: user, error: dbError } = await supabase
       .from("users")
       .update(updateData)
@@ -208,10 +225,9 @@ export async function updateUser(formData: FormData) {
 
     if (dbError) throw dbError;
 
-    // Return the user data in the correct format
     return {
       user: {
-        user: user, // The database user already matches our User interface
+        user: user,
       },
       error: null,
     };

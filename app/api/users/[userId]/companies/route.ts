@@ -1,25 +1,52 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { cookies } from "next/headers";
 
 export async function GET(
-  request: Request,
-  { params }: { params: { id: string } }
+  request: NextRequest,
+  { params }: { params: { userId: string } }
 ) {
   try {
     const supabase = await createClient();
 
-    const { data: companies, error } = await supabase
+    const { data: user, error: userError } = await supabase
       .from("users")
-      .select("associated_companies")
-      .eq("id", params.id)
+      .select("has_all_access, role")
+      .eq("id", params.userId)
       .single();
 
-    if (error) throw error;
+    if (userError) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
 
-    return NextResponse.json(companies);
-  } catch (error) {
-    console.error("Error fetching user companies:", error);
+    // If user has all access, return all active companies
+    if (user.has_all_access) {
+      const { data: companies, error: companiesError } = await supabase
+        .from("companies")
+        .select("*")
+        .eq("status", "active")
+        .order("name");
+
+      if (companiesError) throw companiesError;
+      return NextResponse.json({ companies, single: false });
+    }
+
+    // Get user's assigned companies from junction table
+    const { data: userCompanies, error: userCompaniesError } = await supabase
+      .from("user_companies")
+      .select("companies(*)")
+      .eq("user_id", params.userId)
+      .eq("companies.status", "active");
+
+    if (userCompaniesError) throw userCompaniesError;
+
+    const companies = userCompanies
+      .map((uc: any) => uc.companies)
+      .filter((company) => company !== null);
+
+    return NextResponse.json({ companies, single: false });
+  } catch (error: any) {
+    console.error("Error getting user companies:", error);
     return NextResponse.json(
       { error: "Failed to fetch user companies" },
       { status: 500 }
