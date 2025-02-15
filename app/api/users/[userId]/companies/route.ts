@@ -55,8 +55,8 @@ export async function GET(
 }
 
 export async function PUT(
-  request: Request,
-  { params }: { params: { id: string } }
+  request: NextRequest,
+  { params }: { params: { userId: string } }
 ) {
   try {
     const supabase = await createClient();
@@ -67,7 +67,7 @@ export async function PUT(
       .update({
         associated_companies: body.companies,
       })
-      .eq("id", params.id)
+      .eq("id", params.userId)
       .select()
       .single();
 
