@@ -432,3 +432,34 @@ export async function getUserAccessibleCompanies(userId: string) {
     return { error: error.message };
   }
 }
+
+// Add this function to manage payroll base
+export async function updateUserPayrollBase(
+  userId: string,
+  data: {
+    base_salary: number;
+    currency?: string;
+    payment_frequency?: "monthly" | "bi-weekly" | "weekly";
+  }
+) {
+  const supabase = await createClient();
+
+  try {
+    const { error } = await supabase
+      .from("payroll_base")
+      .upsert({
+        user_id: userId,
+        base_salary: data.base_salary,
+        currency: data.currency || "USD",
+        payment_frequency: data.payment_frequency || "monthly",
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return { success: true, error: null };
+  } catch (error) {
+    console.error("Error updating payroll base:", error);
+    return { success: false, error: "Failed to update payroll base" };
+  }
+}

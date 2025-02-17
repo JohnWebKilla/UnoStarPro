@@ -12,6 +12,7 @@ import {
   Calendar,
   CreditCard,
   BarChart,
+  DollarSign,
   Menu,
   X,
   Crown,
@@ -79,6 +80,24 @@ const NAV_ITEMS: NavItem[] = [
     roles: ["admin", "driver"],
   },
   {
+    path: "/Expenses",
+    icon: DollarSign,
+    label: "Expenses",
+    roles: ["admin"],
+  },
+  {
+    path: "/Performance",
+    icon: BarChart,
+    label: "Performance",
+    roles: ["admin"],
+  },
+  {
+    path: "/Scheduling",
+    icon: Calendar,
+    label: "Scheduling",
+    roles: ["admin"],
+  },
+  {
     path: "/Reports",
     icon: BarChart,
     label: "Reports",
@@ -118,33 +137,33 @@ export function TopNav({ userRole, userName, userEmail }: TopNavProps) {
             </Link>
           </div>
 
-          {/* Desktop Menu Items */}
-          <div className="flex-grow justify-center sm:space-x-8 hidden sm:flex">
+          {/* Desktop Menu Items - Modified for better spacing */}
+          <div className="flex-grow justify-start pl-8 space-x-2 hidden lg:flex overflow-x-auto">
             {visibleNavItems.map(({ path, icon: Icon, label }) => (
               <Link
                 key={path}
                 href={path}
-                className={`inline-flex items-center px-3 py-2 rounded-md text-sm font-medium ${
+                className={`inline-flex items-center px-2 py-2 rounded-md text-sm font-medium whitespace-nowrap ${
                   pathname === path
                     ? "bg-blue-500 text-white dark:bg-blue-900"
                     : "text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-white"
                 }`}
               >
-                <Icon className="mr-2" /> {label}
+                <Icon className="w-4 h-4 mr-1" /> {label}
               </Link>
             ))}
           </div>
 
           {/* Avatar and Theme Switcher */}
           <div className="flex items-center space-x-2">
-            <span className="hidden sm:block">
+            <span className="hidden lg:block">
               <ThemeSwitcher />
             </span>
 
-            {/* Mobile menu button */}
+            {/* Mobile menu button - Changed breakpoint from sm to lg */}
             <button
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-              className="sm:hidden inline-flex items-center justify-center p-2 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500"
+              className="lg:hidden inline-flex items-center justify-center p-2 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500"
             >
               <span className="sr-only">Open main menu</span>
               {isMobileMenuOpen ? (
@@ -221,9 +240,9 @@ export function TopNav({ userRole, userName, userEmail }: TopNavProps) {
         </div>
       </div>
 
-      {/* Mobile menu */}
+      {/* Mobile menu - Changed breakpoint from sm to lg */}
       <div
-        className={`sm:hidden ${
+        className={`lg:hidden ${
           isMobileMenuOpen ? "block" : "hidden"
         } border-t dark:border-gray-700`}
       >
