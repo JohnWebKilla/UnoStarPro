@@ -29,6 +29,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ThemeSwitcher } from "@/components/theme-switcher";
+import { NotificationButton } from "@/components/notification-button";
 import { ROUTES, Role } from "@/utils/protected";
 import { useMemo, useState } from "react";
 import { useBirthdayCheck } from "@/hooks/useBirthdayCheck";
@@ -158,6 +159,9 @@ export function TopNav({ userRole, userName, userEmail }: TopNavProps) {
           <div className="flex items-center space-x-2">
             <span className="hidden lg:block">
               <ThemeSwitcher />
+            </span>
+            <span className="hidden lg:block">
+              <NotificationButton />
             </span>
 
             {/* Mobile menu button - Changed breakpoint from sm to lg */}
