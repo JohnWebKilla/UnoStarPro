@@ -21,7 +21,7 @@ import { Plus, Pencil } from "lucide-react";
 import { NotificationMessage } from "./types";
 import { CreateNotificationDialog } from "./components/CreateNotificationDialog";
 import { EditNotificationDialog } from "./components/EditNotificationDialog";
-import { DeleteConfirmationDialog } from "./components/DeleteConfirmationDialog";
+import DeleteConfirmationDialog from "./components/DeleteConfirmationDialog";
 import { useToast } from "@/components/ui/use-toast";
 import {
   createNotificationAction,
@@ -29,6 +29,10 @@ import {
   deleteNotificationAction,
   updateNotificationAction,
 } from "./actions";
+import {
+  NotificationRecord,
+  TranslationRecord,
+} from "./services/notifications";
 
 export default function NotificationsPage() {
   const [messages, setMessages] = React.useState<NotificationMessage[]>([]);
@@ -55,22 +59,36 @@ export default function NotificationsPage() {
       }
 
       setMessages(
-        notifications.map((n) => ({
-          id: n.id,
-          title: n.title,
-          content: n.content,
-          type: n.type,
-          displayType: n.display_type,
-          image: n.image_url,
-          translateTo: n.translate_to,
-          autoShow: n.auto_show,
-          showFrom: n.show_from ? new Date(n.show_from) : undefined,
-          showUntil: n.show_until ? new Date(n.show_until) : undefined,
-          dismissible: n.dismissible,
-          position: n.position as "top" | "bottom" | undefined,
-          duration: n.duration,
-          active: n.active,
-        }))
+        notifications.map(
+          (n: NotificationRecord & { translations?: TranslationRecord[] }) => ({
+            id: n.id,
+            title: n.title,
+            content: n.content,
+            type: n.type,
+            displayType: n.display_type,
+            image: n.image_url,
+            translations: n.translations?.map((t: TranslationRecord) => ({
+              id: t.id,
+              notificationId: t.notification_id,
+              title: t.title,
+              content: t.content,
+              language: t.language,
+              createdAt: t.created_at ? new Date(t.created_at) : undefined,
+              updatedAt: t.updated_at ? new Date(t.updated_at) : undefined,
+            })),
+            autoShow: n.auto_show,
+            showFrom: n.show_from ? new Date(n.show_from) : undefined,
+            showUntil: n.show_until ? new Date(n.show_until) : undefined,
+            dismissible: n.dismissible,
+            position: n.position as "top" | "bottom" | undefined,
+            duration: n.duration,
+            active: n.active,
+            defaultLanguage: n.default_language,
+            createdAt: n.created_at ? new Date(n.created_at) : undefined,
+            updatedAt: n.updated_at ? new Date(n.updated_at) : undefined,
+            createdBy: n.created_by,
+          })
+        )
       );
     } catch (error) {
       console.error("Error loading notifications:", error);
@@ -216,7 +234,7 @@ export default function NotificationsPage() {
     <div className="py-6">
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-3xl font-bold">Notifications</h1>
+          <h2 className="text-3xl font-bold">Notifications</h2>
           <p className="text-muted-foreground">
             Manage your application notifications and banners
           </p>

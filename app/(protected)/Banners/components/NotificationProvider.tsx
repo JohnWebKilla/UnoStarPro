@@ -8,7 +8,7 @@ import { useToast } from "@/components/ui/use-toast";
 import {
   createNotificationAction,
   getActiveNotificationsAction,
-  deactivateNotificationAction,
+  deleteNotificationAction,
 } from "../actions";
 import { createClient } from "@/utils/supabase/client";
 import { NotificationRecord } from "../services/notifications";
@@ -210,33 +210,40 @@ export const NotificationProvider = ({
 
   const hideNotification = async (id: string) => {
     try {
-      const { success, error } = await deactivateNotificationAction(id);
+      const { success, error } = await deleteNotificationAction(id);
       if (error) {
         toast({
           title: "Error",
-          description: "Failed to hide notification",
+          description: error,
           variant: "destructive",
         });
         return;
       }
 
-      // Add to dismissed notifications
-      const newDismissed = [...dismissedNotifications, id];
-      setDismissedNotifications(newDismissed);
-      localStorage.setItem(
-        DISMISSED_NOTIFICATIONS_KEY,
-        JSON.stringify(newDismissed)
-      );
+      if (success) {
+        // Add to dismissed notifications
+        const newDismissed = [...dismissedNotifications, id];
+        setDismissedNotifications(newDismissed);
+        localStorage.setItem(
+          DISMISSED_NOTIFICATIONS_KEY,
+          JSON.stringify(newDismissed)
+        );
 
-      // Remove from active notifications immediately
-      setActiveNotifications((prev) =>
-        prev.filter((notification) => notification.id !== id)
-      );
+        // Remove from active notifications immediately
+        setActiveNotifications((prev) =>
+          prev.filter((notification) => notification.id !== id)
+        );
+
+        toast({
+          title: "Success",
+          description: "Notification deleted successfully",
+        });
+      }
     } catch (error) {
-      console.error("Error hiding notification:", error);
+      console.error("Error deleting notification:", error);
       toast({
         title: "Error",
-        description: "Failed to hide notification",
+        description: "Failed to delete notification",
         variant: "destructive",
       });
     }

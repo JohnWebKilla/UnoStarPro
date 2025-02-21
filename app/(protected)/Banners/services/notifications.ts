@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient } from "@/utils/supabase/server";
-import { NotificationMessage } from "../types";
+import { NotificationMessage, Translation, LanguageCode } from "../types";
 
 export interface NotificationRecord {
   id: string;
@@ -10,7 +10,7 @@ export interface NotificationRecord {
   type: "info" | "warning" | "success" | "error";
   display_type: "banner" | "dialog";
   image_url?: string;
-  translate_to?: string[];
+  translate_to?: LanguageCode[];
   auto_show?: boolean;
   show_from?: string;
   show_until?: string;
@@ -21,6 +21,73 @@ export interface NotificationRecord {
   updated_at?: string;
   created_by?: string;
   active?: boolean;
+  default_language?: LanguageCode;
+  version: number;
+}
+
+export interface TranslationRecord {
+  id: string;
+  notification_id: string;
+  language: LanguageCode;
+  title: string;
+  content: string;
+  is_auto_translated: boolean;
+  version: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+async function createTranslations(
+  supabase: any,
+  notificationId: string,
+  translations: Translation[],
+  version: number,
+  isAutoTranslated: boolean = false
+): Promise<TranslationRecord[]> {
+  const { data, error } = await supabase
+    .from("notification_translations")
+    .insert(
+      translations.map((t) => ({
+        notification_id: notificationId,
+        language: t.language,
+        title: t.title,
+        content: t.content,
+        is_auto_translated: isAutoTranslated,
+        version: version,
+      }))
+    )
+    .select();
+
+  if (error) {
+    console.error("Error creating translations:", error);
+    throw error;
+  }
+
+  return data;
+}
+
+async function getTranslations(
+  supabase: any,
+  notificationId: string,
+  version?: number
+): Promise<TranslationRecord[]> {
+  let query = supabase
+    .from("notification_translations")
+    .select("*")
+    .eq("notification_id", notificationId);
+
+  if (version !== undefined) {
+    query = query.eq("version", version);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error("Error fetching translations:", error);
+    return [];
+  }
+
+  return data || [];
 }
 
 export async function createNotification(
@@ -40,7 +107,8 @@ export async function createNotification(
       return null;
     }
 
-    const { data, error } = await supabase
+    // Create notification
+    const { data: notificationData, error: notificationError } = await supabase
       .from("notifications")
       .insert({
         title: notification.title,
@@ -57,47 +125,54 @@ export async function createNotification(
         duration: notification.duration,
         active: true,
         created_by: user?.id,
+        default_language: notification.defaultLanguage || "en",
+        version: 1, // Initial version
       })
       .select()
       .single();
 
-    if (error) {
-      console.error("Error creating notification:", error);
+    if (notificationError) {
+      console.error("Error creating notification:", notificationError);
       return null;
     }
 
-    return data;
+    // Create translations if provided
+    if (notification.translations && notification.translations.length > 0) {
+      // Split translations into manual and auto-translated
+      const manualTranslations = notification.translations.filter(
+        (t) => !t.isAutoTranslated
+      );
+      const autoTranslations = notification.translations.filter(
+        (t) => t.isAutoTranslated
+      );
+
+      // Create manual translations
+      if (manualTranslations.length > 0) {
+        await createTranslations(
+          supabase,
+          notificationData.id,
+          manualTranslations,
+          1,
+          false
+        );
+      }
+
+      // Create auto-translated translations
+      if (autoTranslations.length > 0) {
+        await createTranslations(
+          supabase,
+          notificationData.id,
+          autoTranslations,
+          1,
+          true
+        );
+      }
+    }
+
+    return notificationData;
   } catch (error) {
     console.error("Error creating notification:", error);
     return null;
-  }
-}
-
-export async function getActiveNotifications(): Promise<NotificationRecord[]> {
-  try {
-    const supabase = await createClient();
-    const now = new Date().toISOString();
-
-    console.log("Fetching notifications with current time:", now);
-
-    // Get all notifications
-    const { data, error } = await supabase
-      .from("notifications")
-      .select("*")
-      .eq("active", true)
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      console.error("Error fetching notifications:", error);
-      return [];
-    }
-
-    console.log("All active notifications:", data);
-
-    return data || [];
-  } catch (error) {
-    console.error("Error fetching notifications:", error);
-    return [];
   }
 }
 
@@ -107,7 +182,23 @@ export async function updateNotification(
 ): Promise<NotificationRecord | null> {
   try {
     const supabase = await createClient();
-    const { data, error } = await supabase
+
+    // Get current version
+    const { data: currentNotification, error: fetchError } = await supabase
+      .from("notifications")
+      .select("version")
+      .eq("id", id)
+      .single();
+
+    if (fetchError) {
+      console.error("Error fetching current notification:", fetchError);
+      return null;
+    }
+
+    const newVersion = (currentNotification?.version || 0) + 1;
+
+    // Update notification with new version
+    const { data: notificationData, error: notificationError } = await supabase
       .from("notifications")
       .update({
         title: updates.title,
@@ -122,26 +213,106 @@ export async function updateNotification(
         dismissible: updates.dismissible,
         position: updates.position,
         duration: updates.duration,
+        default_language: updates.defaultLanguage,
+        version: newVersion,
       })
       .eq("id", id)
       .select()
       .single();
 
-    if (error) {
-      console.error("Error updating notification:", error);
+    if (notificationError) {
+      console.error("Error updating notification:", notificationError);
       return null;
     }
 
-    return data;
+    // Update translations if provided
+    if (updates.translations && updates.translations.length > 0) {
+      // Split translations into manual and auto-translated
+      const manualTranslations = updates.translations.filter(
+        (t) => !t.isAutoTranslated
+      );
+      const autoTranslations = updates.translations.filter(
+        (t) => t.isAutoTranslated
+      );
+
+      // Create manual translations with new version
+      if (manualTranslations.length > 0) {
+        await createTranslations(
+          supabase,
+          id,
+          manualTranslations,
+          newVersion,
+          false
+        );
+      }
+
+      // Create auto-translated translations with new version
+      if (autoTranslations.length > 0) {
+        await createTranslations(
+          supabase,
+          id,
+          autoTranslations,
+          newVersion,
+          true
+        );
+      }
+    }
+
+    return notificationData;
   } catch (error) {
     console.error("Error updating notification:", error);
     return null;
   }
 }
 
+export async function getActiveNotifications(
+  version?: number
+): Promise<(NotificationRecord & { translations?: TranslationRecord[] })[]> {
+  try {
+    const supabase = await createClient();
+    const now = new Date().toISOString();
+
+    let query = supabase
+      .from("notifications")
+      .select("*")
+      .eq("active", true)
+      .order("created_at", { ascending: false });
+
+    if (version !== undefined) {
+      query = query.eq("version", version);
+    }
+
+    const { data: notifications, error: notificationsError } = await query;
+
+    if (notificationsError) {
+      console.error("Error fetching notifications:", notificationsError);
+      return [];
+    }
+
+    // Get translations for all notifications
+    const notificationsWithTranslations = await Promise.all(
+      notifications.map(async (notification) => {
+        const translations = await getTranslations(
+          supabase,
+          notification.id,
+          notification.version
+        );
+        return {
+          ...notification,
+          translations,
+        };
+      })
+    );
+
+    return notificationsWithTranslations;
+  } catch (error) {
+    console.error("Error fetching notifications:", error);
+    return [];
+  }
+}
+
 export async function deleteNotification(id: string): Promise<boolean> {
   try {
-    console.log("Starting deletion process for notification ID:", id);
     const supabase = await createClient();
 
     // Get current user's ID and role
@@ -167,11 +338,6 @@ export async function deleteNotification(id: string): Promise<boolean> {
     }
 
     const isAdmin = userData?.role === "admin";
-    console.log("User role check:", {
-      userId: user?.id,
-      role: userData?.role,
-      isAdmin,
-    });
 
     // First check if the notification exists and get its current state
     const { data: existingData, error: checkError } = await supabase
@@ -190,8 +356,6 @@ export async function deleteNotification(id: string): Promise<boolean> {
       return false;
     }
 
-    console.log("Found notification to delete:", existingData);
-
     // Check if user has permission to delete
     if (!isAdmin && existingData.created_by !== user?.id) {
       console.error(
@@ -200,23 +364,23 @@ export async function deleteNotification(id: string): Promise<boolean> {
       return false;
     }
 
-    // Attempt to delete with detailed response
-    const {
-      data: deleteData,
-      error: deleteError,
-      status,
-      statusText,
-    } = await supabase
+    // Delete translations first
+    const { error: translationsError } = await supabase
+      .from("notification_translations")
+      .delete()
+      .eq("notification_id", id);
+
+    if (translationsError) {
+      console.error("Error deleting translations:", translationsError);
+      return false;
+    }
+
+    // Delete notification
+    const { error: deleteError } = await supabase
       .from("notifications")
       .delete()
       .eq("id", id)
       .eq("active", true);
-
-    console.log("Delete operation response:", {
-      status,
-      statusText,
-      data: deleteData,
-    });
 
     if (deleteError) {
       console.error("Error during deletion:", {
@@ -224,31 +388,11 @@ export async function deleteNotification(id: string): Promise<boolean> {
         details: deleteError.details,
         code: deleteError.code,
         hint: deleteError.hint,
-        status: status,
       });
       return false;
     }
 
-    // Final verification
-    const { data: verifyData, error: verifyError } = await supabase
-      .from("notifications")
-      .select("*")
-      .eq("id", id)
-      .maybeSingle();
-
-    if (verifyError) {
-      console.error("Error verifying deletion:", verifyError);
-      return false;
-    }
-
-    const wasDeleted = !verifyData;
-    console.log(
-      wasDeleted
-        ? "Successfully deleted notification"
-        : "Deletion failed - notification still exists. This might be a permissions issue."
-    );
-
-    return wasDeleted;
+    return true;
   } catch (error) {
     console.error("Unexpected error in deleteNotification:", error);
     return false;

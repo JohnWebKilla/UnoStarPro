@@ -16,7 +16,7 @@ interface DeleteConfirmationDialogProps {
   title: string;
 }
 
-export function DeleteConfirmationDialog({
+export default function DeleteConfirmationDialog({
   open,
   onOpenChange,
   onConfirm,
