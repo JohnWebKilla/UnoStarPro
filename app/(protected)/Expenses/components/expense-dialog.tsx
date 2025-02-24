@@ -121,12 +121,12 @@ export function ExpenseDialog({
   const [showNewCategory, setShowNewCategory] = useState(false);
   const [newCategory, setNewCategory] = useState({ name: "", description: "" });
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [calendarOpen, setCalendarOpen] = useState(false);
   const { toast } = useToast();
   const supabase = createClient();
   const [exchangeRate, setExchangeRate] = useState<number | null>(null);
   const [isLoadingRate, setIsLoadingRate] = useState(false);
   const [lastFetchedDate, setLastFetchedDate] = useState<Date | null>(null);
+  const [isPopoverOpen, setIsPopoverOpen] = useState(false);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -406,7 +406,10 @@ export function ExpenseDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent
+        className="sm:max-w-[500px] fixed top-[50%] left-[50%] translate-x-[-50%] translate-y-[-50%] w-[90vw]"
+        onClick={(e) => e.stopPropagation()}
+      >
         <DialogHeader>
           <DialogTitle className="text-xl">
             {mode === "edit" ? "Edit" : "Add New"} Expense
@@ -578,18 +581,22 @@ export function ExpenseDialog({
                 control={form.control}
                 name="expense_date"
                 render={({ field }) => (
-                  <FormItem className="flex flex-col">
+                  <FormItem className="flex flex-col relative">
                     <FormLabel>Date</FormLabel>
-                    <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
+                    <Popover
+                      open={isPopoverOpen}
+                      onOpenChange={setIsPopoverOpen}
+                      modal={true}
+                    >
                       <PopoverTrigger asChild>
                         <FormControl>
                           <Button
-                            type="button"
                             variant={"outline"}
                             className={cn(
                               "w-full pl-3 text-left font-normal",
                               !field.value && "text-muted-foreground"
                             )}
+                            onClick={(e) => e.stopPropagation()}
                           >
                             {field.value ? (
                               format(field.value, "PPP")
@@ -601,25 +608,27 @@ export function ExpenseDialog({
                         </FormControl>
                       </PopoverTrigger>
                       <PopoverContent
-                        className="w-auto p-0"
+                        className="w-auto p-0 relative z-[9999]"
                         align="start"
                         side="bottom"
                         sideOffset={4}
+                        onClick={(e) => e.stopPropagation()}
                       >
                         <Calendar
                           mode="single"
                           selected={field.value}
                           onSelect={(date) => {
+                            field.onChange(date);
                             if (date) {
-                              field.onChange(date);
                               fetchExchangeRate(date);
-                              setCalendarOpen(false);
+                              setIsPopoverOpen(false);
                             }
                           }}
                           disabled={(date) =>
                             date > new Date() || date < new Date("1900-01-01")
                           }
                           initialFocus
+                          className="rounded-md border"
                         />
                       </PopoverContent>
                     </Popover>
