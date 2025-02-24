@@ -11,45 +11,99 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { format, startOfWeek, addDays } from "date-fns";
+import { Badge } from "@/components/ui/badge";
 
-interface Shift {
-  id: string;
+interface ScheduleResponse {
+  id: number;
   user_id: string;
-  start_time: string;
-  end_time: string;
-  date: string;
-  user: {
+  working_shift: string;
+  off_days: string[];
+  users: {
     first_name: string;
     last_name: string;
+    role: string;
   };
 }
 
-export function ShiftSchedule() {
+interface Schedule {
+  id: number;
+  user_id: string;
+  working_shift: string;
+  off_days: string[];
+  first_name: string;
+  last_name: string;
+  role: string;
+}
+
+interface Shift {
+  id: number;
+  name: string;
+  start_time: string;
+  end_time: string;
+}
+
+interface Props {
+  className?: string;
+}
+
+const ShiftSchedule: React.FC<Props> = ({ className }) => {
+  const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const supabase = createClient();
 
   useEffect(() => {
-    fetchShifts();
+    fetchData();
   }, []);
 
-  const fetchShifts = async () => {
+  const fetchData = async () => {
     try {
       setIsLoading(true);
-      const { data, error } = await supabase
+
+      // Fetch shifts
+      const { data: shiftsData, error: shiftsError } = await supabase
         .from("shifts")
+        .select("*")
+        .order("id");
+
+      if (shiftsError) throw shiftsError;
+      setShifts(shiftsData || []);
+
+      // Fetch schedules with user data
+      const { data: schedulesData, error: schedulesError } = await supabase
+        .from("schedules")
         .select(
           `
-          *,
-          user:users(first_name, last_name)
+          id,
+          user_id,
+          working_shift,
+          off_days,
+          users (
+            first_name,
+            last_name,
+            role
+          )
         `
         )
-        .order("date", { ascending: true });
+        .eq("users.role", "user")
+        .returns<ScheduleResponse[]>();
 
-      if (error) throw error;
-      setShifts(data || []);
+      if (schedulesError) throw schedulesError;
+
+      // Transform the data to match our interface
+      const transformedData = schedulesData?.map((schedule) => ({
+        id: schedule.id,
+        user_id: schedule.user_id,
+        working_shift: schedule.working_shift,
+        off_days: schedule.off_days,
+        first_name: schedule.users.first_name,
+        last_name: schedule.users.last_name,
+        role: schedule.users.role,
+      }));
+
+      setSchedules(transformedData || []);
     } catch (error: any) {
-      console.error("Error fetching shifts:", error.message);
+      console.error("Error fetching data:", error.message);
     } finally {
       setIsLoading(false);
     }
@@ -63,8 +117,28 @@ export function ShiftSchedule() {
   const weekStart = startOfWeek(new Date());
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
 
+  const getShiftTimes = (shiftId: string) => {
+    const shift = shifts.find((s) => s.id.toString() === shiftId);
+    return shift ? `${shift.start_time} - ${shift.end_time}` : "No shift";
+  };
+
+  const isOffDay = (schedule: Schedule, date: Date) => {
+    const dayName = format(date, "EEEE").toLowerCase();
+    return schedule.off_days?.includes(dayName);
+  };
+
   return (
-    <div className="space-y-4">
+    <div className={`space-y-4 ${className || ""}`}>
+      <div className="flex gap-4 mb-4">
+        {shifts.map((shift) => (
+          <div key={shift.id} className="flex items-center gap-2">
+            <Badge variant="outline">
+              {shift.name}: {shift.start_time} - {shift.end_time}
+            </Badge>
+          </div>
+        ))}
+      </div>
+
       <Table>
         <TableHeader>
           <TableRow>
@@ -77,18 +151,21 @@ export function ShiftSchedule() {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {shifts.map((shift) => (
-            <TableRow key={shift.id}>
+          {schedules.map((schedule) => (
+            <TableRow key={schedule.id}>
               <TableCell className="font-medium">
-                {shift.user.first_name} {shift.user.last_name}
+                {schedule.first_name} {schedule.last_name}
               </TableCell>
               {weekDays.map((day) => (
-                <TableCell key={day.toISOString()}>
-                  {format(new Date(shift.date), "yyyy-MM-dd") ===
-                  format(day, "yyyy-MM-dd")
-                    ? `${format(new Date(shift.start_time), "HH:mm")} - 
-                       ${format(new Date(shift.end_time), "HH:mm")}`
-                    : "-"}
+                <TableCell
+                  key={day.toISOString()}
+                  className={isOffDay(schedule, day) ? "bg-gray-100" : ""}
+                >
+                  {isOffDay(schedule, day) ? (
+                    <Badge variant="secondary">Off Day</Badge>
+                  ) : (
+                    getShiftTimes(schedule.working_shift)
+                  )}
                 </TableCell>
               ))}
             </TableRow>
@@ -97,4 +174,6 @@ export function ShiftSchedule() {
       </Table>
     </div>
   );
-}
+};
+
+export default ShiftSchedule;

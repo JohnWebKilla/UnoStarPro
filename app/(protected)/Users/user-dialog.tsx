@@ -34,6 +34,7 @@ import { createUser, updateUser } from "./actions";
 import { CompanyManagement } from "./company-management";
 import { User, UserRole } from "./types";
 import { Building } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
 
 const formSchema = z.object({
   first_name: z.string().min(2, "First name must be at least 2 characters"),
@@ -43,6 +44,8 @@ const formSchema = z.object({
   role: z.string(),
   password: z.string().optional(),
   dob: z.string().optional(),
+  working_shift: z.string().optional(),
+  off_days: z.array(z.string()).optional(),
 });
 
 interface UserDialogProps {
@@ -52,6 +55,17 @@ interface UserDialogProps {
   onSuccess?: (user?: User) => void;
   companies: Array<{ id: number; name: string }>;
 }
+
+const SHIFTS = [
+  { id: "1", name: "Shift 1 (08:00 - 16:00)" },
+  { id: "2", name: "Shift 2 (16:00 - 00:00)" },
+  { id: "3", name: "Shift 3 (00:00 - 08:00)" },
+];
+
+const DAYS = [
+  { id: "saturday", label: "Saturday" },
+  { id: "sunday", label: "Sunday" },
+];
 
 // Helper function to convert a Supabase auth user to our custom User type
 function formatUser(supabaseUser: import("@supabase/auth-js").User): User {
@@ -68,6 +82,8 @@ function formatUser(supabaseUser: import("@supabase/auth-js").User): User {
     dob: supabaseUser.user_metadata?.dob || null,
     company_id: supabaseUser.user_metadata?.company_id || null,
     avatar: supabaseUser.user_metadata?.avatar || null,
+    working_shift: supabaseUser.user_metadata?.working_shift || "1",
+    off_days: supabaseUser.user_metadata?.off_days || ["saturday", "sunday"],
   };
 }
 
@@ -97,6 +113,8 @@ export function UserDialog({
       role: "user",
       password: "",
       dob: "",
+      working_shift: "1",
+      off_days: ["saturday", "sunday"],
     },
   });
 
@@ -114,6 +132,8 @@ export function UserDialog({
         phone_number: user.phone_number || "",
         role: user.role || "user",
         dob: formattedDate,
+        working_shift: user.working_shift || "1",
+        off_days: user.off_days || ["saturday", "sunday"],
       });
     }
   }, [user, open, form]);
@@ -154,9 +174,18 @@ export function UserDialog({
         setDialogState((prev) => ({ ...prev, isSubmitting: true }));
         const formData = new FormData();
 
-        Object.entries(values).forEach(([key, value]) => {
+        // Handle array values separately
+        const { off_days, ...otherValues } = values;
+
+        // Add non-array values
+        Object.entries(otherValues).forEach(([key, value]) => {
           if (value) formData.append(key, value);
         });
+
+        // Add array values as JSON strings
+        if (off_days) {
+          formData.append("off_days", JSON.stringify(off_days));
+        }
 
         if (user) {
           formData.append("id", user.id);
@@ -170,6 +199,8 @@ export function UserDialog({
             phone_number: values.phone_number,
             role: values.role as UserRole,
             dob: values.dob,
+            working_shift: values.working_shift,
+            off_days: values.off_days,
           };
 
           // Call onSuccess immediately with optimistic data
@@ -354,6 +385,74 @@ export function UserDialog({
                   </FormItem>
                 )}
               />
+              {form.watch("role") === "user" && (
+                <>
+                  <FormField
+                    control={form.control}
+                    name="working_shift"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Working Shift</FormLabel>
+                        <Select
+                          onValueChange={field.onChange}
+                          defaultValue={field.value}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select a shift" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {SHIFTS.map((shift) => (
+                              <SelectItem key={shift.id} value={shift.id}>
+                                {shift.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="off_days"
+                    render={() => (
+                      <FormItem>
+                        <FormLabel>Off Days</FormLabel>
+                        <div className="flex flex-col gap-2">
+                          {DAYS.map((day) => (
+                            <div
+                              key={day.id}
+                              className="flex items-center space-x-2"
+                            >
+                              <Checkbox
+                                id={day.id}
+                                checked={form
+                                  .watch("off_days")
+                                  ?.includes(day.id)}
+                                onCheckedChange={(checked) => {
+                                  const currentOffDays =
+                                    form.watch("off_days") || [];
+                                  const newOffDays = checked
+                                    ? [...currentOffDays, day.id]
+                                    : currentOffDays.filter(
+                                        (d) => d !== day.id
+                                      );
+                                  form.setValue("off_days", newOffDays);
+                                }}
+                              />
+                              <label htmlFor={day.id}>{day.label}</label>
+                            </div>
+                          ))}
+                        </div>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </>
+              )}
               {!user && (
                 <FormField
                   control={form.control}

@@ -3,16 +3,12 @@
 import { createClient } from "@/utils/supabase/server";
 import { revalidatePath } from "next/cache";
 import { User, UserRole } from "./types";
+import { Database } from "@/types/supabase";
 
-interface Company {
-  id: number;
-  name: string;
-  status: string;
-}
-
-interface UserCompanyJunction {
+type Company = Database["public"]["Tables"]["companies"]["Row"];
+type UserCompanyJunction = {
   companies: Company;
-}
+};
 
 interface UserWithCompanies extends User {
   user_companies?: UserCompanyJunction[];
@@ -21,7 +17,7 @@ interface UserWithCompanies extends User {
 
 export async function getUsers() {
   try {
-    const supabase = await createClient();
+    const supabase = createClient();
 
     // Get all users with their company associations using left join
     const { data: users, error } = await supabase
@@ -31,9 +27,7 @@ export async function getUsers() {
         *,
         user_companies (
           companies (
-            id,
-            name,
-            status
+            *
           )
         )
       `
@@ -45,50 +39,52 @@ export async function getUsers() {
     // Get all active companies for lookup
     const { data: allCompanies, error: companiesError } = await supabase
       .from("companies")
-      .select("id, name, status")
+      .select("*")
       .eq("status", "active");
 
     if (companiesError) throw companiesError;
 
     // Transform the data to include company information
-    const transformedUsers = (users as UserWithCompanies[]).map((user) => {
-      let assignedCompanies: Company[] = [];
+    const transformedUsers = (users as unknown as UserWithCompanies[]).map(
+      (user) => {
+        let assignedCompanies: Company[] = [];
 
-      // If user has all access, include all active companies
-      if (user.has_all_access) {
-        assignedCompanies = allCompanies || [];
-      } else {
-        // Get companies from user_companies junction table
-        if (user.user_companies && user.user_companies.length > 0) {
-          assignedCompanies = user.user_companies
-            .map((uc: any) => uc.companies)
-            .filter((company) => company && company.status === "active");
-        }
+        // If user has all access, include all active companies
+        if (user.has_all_access) {
+          assignedCompanies = allCompanies || [];
+        } else {
+          // Get companies from user_companies junction table
+          if (user.user_companies && user.user_companies.length > 0) {
+            assignedCompanies = user.user_companies
+              .map((uc: UserCompanyJunction) => uc.companies)
+              .filter((company): company is Company => company !== null);
+          }
 
-        // If user has a legacy company_id, add it to the list if not already included
-        if (user.company_id) {
-          const legacyCompanyExists = assignedCompanies.some(
-            (c) => c.id === user.company_id
-          );
-          if (!legacyCompanyExists) {
-            const legacyCompany = allCompanies?.find(
-              (c) => c.id === user.company_id
+          // If user has a legacy company_id, add it to the list if not already included
+          if (user.company_id) {
+            const legacyCompanyExists = assignedCompanies.some(
+              (c: Company) => c.id === user.company_id
             );
-            if (legacyCompany) {
-              assignedCompanies.push(legacyCompany);
+            if (!legacyCompanyExists) {
+              const legacyCompany = allCompanies?.find(
+                (c: Company) => c.id === user.company_id
+              );
+              if (legacyCompany) {
+                assignedCompanies.push(legacyCompany);
+              }
             }
           }
         }
+
+        // For debugging
+        console.log("User:", user.email, "Companies:", assignedCompanies);
+
+        return {
+          ...user,
+          companies: assignedCompanies,
+        };
       }
-
-      // For debugging
-      console.log("User:", user.email, "Companies:", assignedCompanies);
-
-      return {
-        ...user,
-        companies: assignedCompanies,
-      };
-    });
+    );
 
     return { users: transformedUsers, error: null };
   } catch (error) {
@@ -97,149 +93,149 @@ export async function getUsers() {
   }
 }
 
+function generatePassword(length = 12) {
+  const charset =
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+";
+  let password = "";
+  for (let i = 0; i < length; i++) {
+    password += charset.charAt(Math.floor(Math.random() * charset.length));
+  }
+  return password;
+}
+
 export async function createUser(formData: FormData) {
   try {
-    const supabase = await createClient();
+    const supabase = createClient();
 
-    // Get authenticated user data first
-    const {
-      data: { user: authUser },
-      error: authError,
-    } = await supabase.auth.getUser();
-    if (authError) throw authError;
-    if (!authUser) throw new Error("Not authenticated");
+    const first_name = formData.get("first_name") as string;
+    const last_name = formData.get("last_name") as string;
+    const email = formData.get("email") as string;
+    const phone_number = formData.get("phone_number") as string;
+    const role = formData.get("role") as string;
+    const password = formData.get("password") as string;
+    const dob = formData.get("dob") as string;
+    const working_shift = (formData.get("working_shift") as string) || "1";
+    const off_days = JSON.parse(
+      (formData.get("off_days") as string) || '["saturday", "sunday"]'
+    );
 
-    // Then create the new user
-    const { data: newAuthUser, error: createError } =
-      await supabase.auth.signUp({
-        email: formData.get("email") as string,
-        password: formData.get("password") as string,
-        options: {
-          data: {
-            first_name: formData.get("first_name"),
-            last_name: formData.get("last_name"),
-            phone_number: formData.get("phone_number"),
-            role: formData.get("role"),
-            status: "pending",
-            dob: formData.get("dob"),
-          },
+    // Create the user in Supabase Auth
+    const { data: authData, error: authError } = await supabase.auth.signUp({
+      email,
+      password: password || generatePassword(),
+      options: {
+        data: {
+          first_name,
+          last_name,
+          phone_number,
+          role,
+          dob,
+          working_shift,
+          off_days,
         },
-      });
-
-    if (createError) throw createError;
-    if (!newAuthUser.user) throw new Error("No user returned from auth signup");
-
-    // Add the user to the users table
-    const { error: insertError } = await supabase.from("users").insert({
-      id: newAuthUser.user.id,
-      email: newAuthUser.user.email,
-      first_name: formData.get("first_name"),
-      last_name: formData.get("last_name"),
-      phone_number: formData.get("phone_number"),
-      role: formData.get("role"),
-      status: "pending",
-      dob: formData.get("dob"),
-      created_at: new Date().toISOString(),
+      },
     });
 
-    if (insertError) throw insertError;
+    if (authError) throw authError;
 
-    return { user: newAuthUser, error: null };
-  } catch (error) {
-    console.error("Error creating user:", error);
-    return { user: null, error: "Failed to create user" };
+    // Create initial schedule
+    if (authData.user) {
+      const { error: scheduleError } = await supabase.from("schedules").insert({
+        user_id: authData.user.id,
+        working_shift,
+        off_days,
+      });
+
+      if (scheduleError) throw scheduleError;
+    }
+
+    return { user: authData };
+  } catch (error: any) {
+    return { error: error.message };
   }
 }
 
 export async function updateUser(formData: FormData) {
   try {
-    const supabase = await createClient();
+    const supabase = createClient();
 
-    // Get authenticated user data
-    const {
-      data: { user: authUser },
-      error: authError,
-    } = await supabase.auth.getUser();
-    if (authError) throw authError;
-    if (!authUser) throw new Error("Not authenticated");
+    const id = formData.get("id") as string;
+    const first_name = formData.get("first_name") as string;
+    const last_name = formData.get("last_name") as string;
+    const email = formData.get("email") as string;
+    const phone_number = formData.get("phone_number") as string;
+    const role = formData.get("role") as string;
+    const dob = formData.get("dob") as string;
+    const working_shift = (formData.get("working_shift") as string) || "1";
+    const off_days = JSON.parse(
+      (formData.get("off_days") as string) || '["saturday", "sunday"]'
+    );
 
-    const userId = formData.get("id") as string;
-    const newRole = formData.get("role") as string;
-
-    // Get current user data to check role
+    // Get current user data
     const { data: currentUser, error: fetchError } = await supabase
       .from("users")
-      .select("role")
-      .eq("id", userId)
+      .select("email")
+      .eq("id", id)
       .single();
 
     if (fetchError) throw fetchError;
 
-    // Check if role is being changed from admin to non-admin
-    const isRoleDowngrade = currentUser.role === "admin" && newRole !== "admin";
-
-    // Update the user metadata in auth
-    const { data: authUpdate, error: authError2 } =
-      await supabase.auth.updateUser({
-        data: {
-          first_name: formData.get("first_name"),
-          last_name: formData.get("last_name"),
-          phone_number: formData.get("phone_number"),
-          role: newRole,
-          dob: formData.get("dob"),
-        },
-      });
-
-    if (authError2) throw authError2;
-
-    // Prepare update data
+    // Only include email in the update if it has changed
     const updateData: {
-      first_name: FormDataEntryValue | null;
-      last_name: FormDataEntryValue | null;
-      phone_number: FormDataEntryValue | null;
-      role: string;
-      dob: FormDataEntryValue | null;
-      company_id?: null;
-      has_all_access?: boolean;
+      email?: string;
+      data: {
+        first_name: string;
+        last_name: string;
+        phone_number: string;
+        role: string;
+        dob: string;
+        working_shift: string;
+        off_days: string[];
+      };
     } = {
-      first_name: formData.get("first_name"),
-      last_name: formData.get("last_name"),
-      phone_number: formData.get("phone_number"),
-      role: newRole,
-      dob: formData.get("dob"),
+      data: {
+        first_name,
+        last_name,
+        phone_number,
+        role,
+        dob,
+        working_shift,
+        off_days,
+      },
     };
 
-    // If role is downgraded from admin, reset company access
-    if (isRoleDowngrade) {
-      updateData.company_id = null;
-      updateData.has_all_access = false;
+    // Only include email if it has changed
+    if (currentUser.email !== email) {
+      updateData.email = email;
     }
 
-    // Update the users table
-    const { data: user, error: dbError } = await supabase
-      .from("users")
-      .update(updateData)
-      .eq("id", userId)
-      .select()
-      .single();
+    // Update user metadata
+    const { data: userData, error: userError } =
+      await supabase.auth.updateUser(updateData);
 
-    if (dbError) throw dbError;
+    if (userError) throw userError;
 
-    return {
-      user: {
-        user: user,
+    // Create or update schedule
+    const { error: scheduleError } = await supabase.from("schedules").upsert(
+      {
+        user_id: id,
+        working_shift,
+        off_days,
       },
-      error: null,
-    };
-  } catch (error) {
-    console.error("Error updating user:", error);
-    return { user: null, error: "Failed to update user" };
+      { onConflict: "user_id" }
+    );
+
+    if (scheduleError) throw scheduleError;
+
+    return { user: userData };
+  } catch (error: any) {
+    return { error: error.message };
   }
 }
 
 export async function updateUserStatus(userId: string, status: string) {
   try {
-    const supabase = await createClient();
+    const supabase = createClient();
 
     const { data, error } = await supabase
       .from("users")
@@ -260,7 +256,7 @@ export async function updateUserStatus(userId: string, status: string) {
 
 export async function getUserCompanies(userId: string) {
   try {
-    const supabase = await createClient();
+    const supabase = createClient();
 
     const { data, error } = await supabase
       .from("user_companies")
@@ -269,7 +265,10 @@ export async function getUserCompanies(userId: string) {
 
     if (error) throw error;
 
-    return { companies: data.map((d) => d.company_id), error: null };
+    return {
+      companies: data.map((d: { company_id: number }) => d.company_id),
+      error: null,
+    };
   } catch (error) {
     console.error("Error fetching user companies:", error);
     return { companies: [], error: "Failed to fetch user companies" };
@@ -278,10 +277,10 @@ export async function getUserCompanies(userId: string) {
 
 export async function updateUserCompanies(
   userId: string,
-  companyIds: string[]
+  companyIds: number[]
 ) {
   try {
-    const supabase = await createClient();
+    const supabase = createClient();
 
     // First, remove all existing associations
     await supabase.from("user_companies").delete().eq("user_id", userId);
@@ -311,7 +310,7 @@ export async function updateUserCompanyAccess(
   hasAllAccess: boolean
 ) {
   try {
-    const supabase = await createClient();
+    const supabase = createClient();
 
     // Verify user role allows this change
     const { data: user, error: userError } = await supabase
@@ -387,10 +386,9 @@ export async function updateUserCompanyAccess(
   }
 }
 
-// Update the getUserAccessibleCompanies function to handle multiple companies
 export async function getUserAccessibleCompanies(userId: string) {
   try {
-    const supabase = await createClient();
+    const supabase = createClient();
 
     // First get user's access level
     const { data: user, error: userError } = await supabase
@@ -416,15 +414,17 @@ export async function getUserAccessibleCompanies(userId: string) {
     // Get user's assigned companies from junction table
     const { data: userCompanies, error: userCompaniesError } = await supabase
       .from("user_companies")
-      .select("companies(*)")
+      .select("companies:companies(*)")
       .eq("user_id", userId)
       .eq("companies.status", "active");
 
     if (userCompaniesError) throw userCompaniesError;
 
-    const companies = userCompanies
+    // Type assertion to help TypeScript understand the structure
+    type UserCompanyResponse = { companies: Company };
+    const companies = (userCompanies as unknown as UserCompanyResponse[])
       .map((uc) => uc.companies)
-      .filter((company) => company !== null);
+      .filter((company): company is Company => company !== null);
 
     return { companies, single: false };
   } catch (error: any) {
@@ -433,7 +433,6 @@ export async function getUserAccessibleCompanies(userId: string) {
   }
 }
 
-// Add this function to manage payroll base
 export async function updateUserPayrollBase(
   userId: string,
   data: {
@@ -442,9 +441,9 @@ export async function updateUserPayrollBase(
     payment_frequency?: "monthly" | "bi-weekly" | "weekly";
   }
 ) {
-  const supabase = await createClient();
-
   try {
+    const supabase = createClient();
+
     const { error } = await supabase
       .from("payroll_base")
       .upsert({

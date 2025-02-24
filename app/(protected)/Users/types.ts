@@ -20,4 +20,6 @@ export interface User {
   company_id: number | null;
   has_all_access: boolean;
   companies?: Company[];
+  working_shift?: string;
+  off_days?: string[];
 }
