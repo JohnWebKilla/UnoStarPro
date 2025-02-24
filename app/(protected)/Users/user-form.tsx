@@ -3,7 +3,7 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { User } from "./types";
+import { User, Department } from "./types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -23,12 +23,22 @@ import {
 } from "@/components/ui/select";
 import { forwardRef } from "react";
 
+const DEPARTMENTS = {
+  Editor: { icon: "✏️", label: "Editor" },
+  Manager: { icon: "👔", label: "Manager" },
+  Dispatcher: { icon: "📡", label: "Dispatcher" },
+  Safety: { icon: "🛡️", label: "Safety" },
+} as const;
+
 const formSchema = z.object({
   first_name: z.string().min(1, "First name is required"),
   last_name: z.string().min(1, "Last name is required"),
   email: z.string().email("Invalid email address"),
   phone_number: z.string().min(1, "Phone number is required"),
   role: z.string().min(1, "Role is required"),
+  department: z
+    .enum(["Editor", "Manager", "Dispatcher", "Safety"] as const)
+    .optional(),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -50,6 +60,7 @@ export const UserForm = forwardRef<HTMLFormElement, UserFormProps>(
         email: user?.email || "",
         phone_number: user?.phone_number || "",
         role: user?.role || "user",
+        department: user?.department,
       },
     });
 
@@ -142,6 +153,38 @@ export const UserForm = forwardRef<HTMLFormElement, UserFormProps>(
                     <SelectItem value="admin">Admin</SelectItem>
                     <SelectItem value="user">User</SelectItem>
                     <SelectItem value="driver">Driver</SelectItem>
+                  </SelectContent>
+                </Select>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name="department"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Department</FormLabel>
+                <Select
+                  onValueChange={field.onChange}
+                  defaultValue={field.value}
+                >
+                  <FormControl>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a department" />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    {Object.entries(DEPARTMENTS).map(
+                      ([value, { icon, label }]) => (
+                        <SelectItem key={value} value={value}>
+                          <span className="flex items-center gap-2">
+                            {icon} {label}
+                          </span>
+                        </SelectItem>
+                      )
+                    )}
                   </SelectContent>
                 </Select>
                 <FormMessage />

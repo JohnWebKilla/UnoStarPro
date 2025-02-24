@@ -17,7 +17,7 @@ interface UserWithCompanies extends User {
 
 export async function getUsers() {
   try {
-    const supabase = createClient();
+    const supabase = await createClient();
 
     // Get all users with their company associations using left join
     const { data: users, error } = await supabase
@@ -105,13 +105,14 @@ function generatePassword(length = 12) {
 
 export async function createUser(formData: FormData) {
   try {
-    const supabase = createClient();
+    const supabase = await createClient();
 
     const first_name = formData.get("first_name") as string;
     const last_name = formData.get("last_name") as string;
     const email = formData.get("email") as string;
     const phone_number = formData.get("phone_number") as string;
     const role = formData.get("role") as string;
+    const department = formData.get("department") as string;
     const password = formData.get("password") as string;
     const dob = formData.get("dob") as string;
     const working_shift = (formData.get("working_shift") as string) || "1";
@@ -129,6 +130,7 @@ export async function createUser(formData: FormData) {
           last_name,
           phone_number,
           role,
+          department,
           dob,
           working_shift,
           off_days,
@@ -157,7 +159,25 @@ export async function createUser(formData: FormData) {
 
 export async function updateUser(formData: FormData) {
   try {
-    const supabase = createClient();
+    const supabase = await createClient();
+
+    // Log the initial state
+    console.log("Starting user update with session check");
+
+    // Get current session
+    const {
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession();
+    if (sessionError) {
+      console.error("Session error:", sessionError);
+      throw new Error(`Session error: ${sessionError.message}`);
+    }
+    if (!session) {
+      console.error("No session found");
+      throw new Error("No active session");
+    }
+    console.log("Session found for user:", session.user.id);
 
     const id = formData.get("id") as string;
     const first_name = formData.get("first_name") as string;
@@ -165,77 +185,139 @@ export async function updateUser(formData: FormData) {
     const email = formData.get("email") as string;
     const phone_number = formData.get("phone_number") as string;
     const role = formData.get("role") as string;
+    const department = formData.get("department") as string;
     const dob = formData.get("dob") as string;
     const working_shift = (formData.get("working_shift") as string) || "1";
     const off_days = JSON.parse(
       (formData.get("off_days") as string) || '["saturday", "sunday"]'
     );
 
-    // Get current user data
+    console.log("Update data prepared:", {
+      id,
+      first_name,
+      last_name,
+      email,
+      role,
+      department,
+    });
+
+    // First update the user's schedule
+    try {
+      console.log("Attempting to update schedule first");
+
+      // Simple upsert operation
+      const { error: scheduleError } = await supabase.from("schedules").upsert(
+        {
+          user_id: id,
+          working_shift,
+          off_days,
+          updated_at: new Date().toISOString(),
+        },
+        {
+          onConflict: "user_id",
+          ignoreDuplicates: false,
+        }
+      );
+
+      if (scheduleError) {
+        console.warn("Warning: Schedule operation failed:", scheduleError);
+      } else {
+        console.log("Schedule updated successfully");
+      }
+    } catch (scheduleError) {
+      console.warn("Warning: Schedule operation failed:", scheduleError);
+      // Continue with user update even if schedule update fails
+    }
+
+    // Get current user data with error logging
     const { data: currentUser, error: fetchError } = await supabase
       .from("users")
-      .select("email")
+      .select("email, role")
       .eq("id", id)
       .single();
 
-    if (fetchError) throw fetchError;
-
-    // Only include email in the update if it has changed
-    const updateData: {
-      email?: string;
-      data: {
-        first_name: string;
-        last_name: string;
-        phone_number: string;
-        role: string;
-        dob: string;
-        working_shift: string;
-        off_days: string[];
-      };
-    } = {
-      data: {
-        first_name,
-        last_name,
-        phone_number,
-        role,
-        dob,
-        working_shift,
-        off_days,
-      },
-    };
-
-    // Only include email if it has changed
-    if (currentUser.email !== email) {
-      updateData.email = email;
+    if (fetchError) {
+      console.error("Error fetching current user:", fetchError);
+      throw fetchError;
     }
+    console.log("Current user data fetched:", currentUser);
 
-    // Update user metadata
-    const { data: userData, error: userError } =
-      await supabase.auth.updateUser(updateData);
+    // Update the user record in the database
+    console.log("Updating user record in database");
+    try {
+      const { error: dbUpdateError } = await supabase
+        .from("users")
+        .update({
+          first_name,
+          last_name,
+          email,
+          phone_number,
+          role,
+          department,
+          dob,
+        })
+        .eq("id", id);
 
-    if (userError) throw userError;
+      if (dbUpdateError) {
+        console.error("Error updating user record:", dbUpdateError);
+        throw dbUpdateError;
+      }
+      console.log("User record updated successfully");
 
-    // Create or update schedule
-    const { error: scheduleError } = await supabase.from("schedules").upsert(
-      {
-        user_id: id,
-        working_shift,
-        off_days,
-      },
-      { onConflict: "user_id" }
-    );
+      // Update user metadata
+      const updateData: {
+        email?: string;
+        data: {
+          first_name: string;
+          last_name: string;
+          phone_number: string;
+          role: string;
+          department?: string;
+          dob: string;
+          working_shift: string;
+          off_days: string[];
+        };
+      } = {
+        data: {
+          first_name,
+          last_name,
+          phone_number,
+          role,
+          department,
+          dob,
+          working_shift,
+          off_days,
+        },
+      };
 
-    if (scheduleError) throw scheduleError;
+      if (currentUser.email !== email) {
+        updateData.email = email;
+      }
 
-    return { user: userData };
+      console.log("Attempting to update user metadata");
+      const { data: userData, error: userError } =
+        await supabase.auth.updateUser(updateData);
+
+      if (userError) {
+        console.error("Error updating user metadata:", userError);
+        throw userError;
+      }
+      console.log("User metadata updated successfully");
+
+      return { user: userData, error: null };
+    } catch (error: any) {
+      console.error("Update error:", error);
+      return { error: error.message };
+    }
   } catch (error: any) {
+    console.error("Update user error:", error);
     return { error: error.message };
   }
 }
 
 export async function updateUserStatus(userId: string, status: string) {
   try {
-    const supabase = createClient();
+    const supabase = await createClient();
 
     const { data, error } = await supabase
       .from("users")
@@ -256,7 +338,7 @@ export async function updateUserStatus(userId: string, status: string) {
 
 export async function getUserCompanies(userId: string) {
   try {
-    const supabase = createClient();
+    const supabase = await createClient();
 
     const { data, error } = await supabase
       .from("user_companies")
@@ -280,7 +362,7 @@ export async function updateUserCompanies(
   companyIds: number[]
 ) {
   try {
-    const supabase = createClient();
+    const supabase = await createClient();
 
     // First, remove all existing associations
     await supabase.from("user_companies").delete().eq("user_id", userId);
@@ -310,7 +392,7 @@ export async function updateUserCompanyAccess(
   hasAllAccess: boolean
 ) {
   try {
-    const supabase = createClient();
+    const supabase = await createClient();
 
     // Verify user role allows this change
     const { data: user, error: userError } = await supabase
@@ -388,7 +470,7 @@ export async function updateUserCompanyAccess(
 
 export async function getUserAccessibleCompanies(userId: string) {
   try {
-    const supabase = createClient();
+    const supabase = await createClient();
 
     // First get user's access level
     const { data: user, error: userError } = await supabase
@@ -442,7 +524,7 @@ export async function updateUserPayrollBase(
   }
 ) {
   try {
-    const supabase = createClient();
+    const supabase = await createClient();
 
     const { error } = await supabase
       .from("payroll_base")

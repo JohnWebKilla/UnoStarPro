@@ -42,6 +42,9 @@ const formSchema = z.object({
   email: z.string().email("Invalid email address"),
   phone_number: z.string().min(1, "Phone number is required"),
   role: z.string(),
+  department: z
+    .enum(["Editor", "Manager", "Dispatcher", "Safety"] as const)
+    .optional(),
   password: z.string().optional(),
   dob: z.string().optional(),
   working_shift: z.string().optional(),
@@ -67,6 +70,13 @@ const DAYS = [
   { id: "sunday", label: "Sunday" },
 ];
 
+const DEPARTMENTS = {
+  Editor: { icon: "✏️", label: "Editor" },
+  Manager: { icon: "👔", label: "Manager" },
+  Dispatcher: { icon: "📡", label: "Dispatcher" },
+  Safety: { icon: "🛡️", label: "Safety" },
+} as const;
+
 // Helper function to convert a Supabase auth user to our custom User type
 function formatUser(supabaseUser: import("@supabase/auth-js").User): User {
   return {
@@ -76,6 +86,7 @@ function formatUser(supabaseUser: import("@supabase/auth-js").User): User {
     last_name: supabaseUser.user_metadata?.last_name || "",
     phone_number: supabaseUser.user_metadata?.phone_number || "",
     role: supabaseUser.user_metadata?.role || "user",
+    department: supabaseUser.user_metadata?.department || undefined,
     status: supabaseUser.user_metadata?.status || "active",
     has_all_access: supabaseUser.user_metadata?.has_all_access || false,
     created_at: supabaseUser.created_at || new Date().toISOString(),
@@ -111,6 +122,7 @@ export function UserDialog({
       email: "",
       phone_number: "",
       role: "user",
+      department: undefined,
       password: "",
       dob: "",
       working_shift: "1",
@@ -131,6 +143,7 @@ export function UserDialog({
         email: user.email || "",
         phone_number: user.phone_number || "",
         role: user.role || "user",
+        department: user.department,
         dob: formattedDate,
         working_shift: user.working_shift || "1",
         off_days: user.off_days || ["saturday", "sunday"],
@@ -198,6 +211,7 @@ export function UserDialog({
             email: values.email,
             phone_number: values.phone_number,
             role: values.role as UserRole,
+            department: values.department,
             dob: values.dob,
             working_shift: values.working_shift,
             off_days: values.off_days,
@@ -366,6 +380,37 @@ export function UserDialog({
                         <SelectItem value="user">User</SelectItem>
                         <SelectItem value="driver">Driver</SelectItem>
                         <SelectItem value="customer">Customer</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="department"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Department</FormLabel>
+                    <Select
+                      onValueChange={field.onChange}
+                      defaultValue={field.value}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select a department" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {Object.entries(DEPARTMENTS).map(
+                          ([value, { icon, label }]) => (
+                            <SelectItem key={value} value={value}>
+                              <span className="flex items-center gap-2">
+                                {icon} {label}
+                              </span>
+                            </SelectItem>
+                          )
+                        )}
                       </SelectContent>
                     </Select>
                     <FormMessage />

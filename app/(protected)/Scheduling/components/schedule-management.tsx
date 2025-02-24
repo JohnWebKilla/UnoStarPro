@@ -1,15 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { createClient } from "@/utils/supabase/client";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { useState } from "react";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -17,254 +10,187 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { format } from "date-fns";
-import { Calendar } from "@/components/ui/calendar";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import { Textarea } from "@/components/ui/textarea";
+import { useEmployees, useUpdateSchedule } from "../hooks/useScheduling";
+import { Employee, ShiftType } from "../types";
 import { toast } from "sonner";
-import { Database } from "@/types/supabase";
 
-interface ScheduleResponse {
-  id: number;
-  user_id: string;
-  working_shift: string;
-  off_days: string;
-  users: {
-    first_name: string;
-    last_name: string;
-    role: string;
+const DAYS = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+] as const;
+
+const SHIFTS = {
+  1: { label: "Morning (6AM-2PM)", color: "bg-blue-100" },
+  2: { label: "Afternoon (2PM-10PM)", color: "bg-green-100" },
+  3: { label: "Night (10PM-6AM)", color: "bg-purple-100" },
+} as const;
+
+function EmployeeScheduleForm({
+  employee,
+  onClose,
+}: {
+  employee: Employee;
+  onClose: () => void;
+}) {
+  const [selectedShift, setSelectedShift] = useState<ShiftType>(1);
+  const [offDays, setOffDays] = useState<string[]>([]);
+  const { mutate: updateSchedule, isPending } = useUpdateSchedule();
+
+  const handleSubmit = () => {
+    updateSchedule(
+      {
+        userId: employee.id,
+        workingShift: selectedShift,
+        offDays: offDays,
+      },
+      {
+        onSuccess: () => {
+          toast.success("Schedule updated successfully");
+          onClose();
+        },
+        onError: (error) => {
+          toast.error(
+            error instanceof Error ? error.message : "Failed to update schedule"
+          );
+        },
+      }
+    );
   };
-}
-
-interface Schedule {
-  id: number;
-  user_id: string;
-  working_shift: string;
-  off_days: string;
-  first_name: string;
-  last_name: string;
-  role: string;
-}
-
-type Absence = Database["public"]["Tables"]["absences"]["Row"];
-
-interface Props {
-  className?: string;
-}
-
-const ScheduleManagement: React.FC<Props> = ({ className }) => {
-  const [schedules, setSchedules] = useState<Schedule[]>([]);
-  const [absences, setAbsences] = useState<Absence[]>([]);
-  const [selectedDate, setSelectedDate] = useState<Date | undefined>(
-    new Date()
-  );
-  const [absenceReason, setAbsenceReason] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
-  const supabase = createClient();
-
-  const shifts = [
-    { id: 1, name: "Shift 1", start_time: "08:00", end_time: "16:00" },
-    { id: 2, name: "Shift 2", start_time: "16:00", end_time: "00:00" },
-    { id: 3, name: "Shift 3", start_time: "00:00", end_time: "08:00" },
-  ];
-
-  useEffect(() => {
-    fetchSchedules();
-    fetchAbsences();
-  }, []);
-
-  const fetchSchedules = async () => {
-    try {
-      const { data, error } = await (
-        await supabase
-      )
-        .from("schedules")
-        .select(
-          `
-          id,
-          user_id,
-          working_shift,
-          off_days,
-          users (
-            first_name,
-            last_name,
-            role
-          )
-        `
-        )
-        .eq("users.role", "user")
-        .returns<ScheduleResponse[]>();
-
-      if (error) throw error;
-
-      // Transform the data to match our interface
-      const transformedData = data?.map((schedule) => ({
-        id: schedule.id,
-        user_id: schedule.user_id,
-        working_shift: schedule.working_shift,
-        off_days: schedule.off_days,
-        first_name: schedule.users.first_name,
-        last_name: schedule.users.last_name,
-        role: schedule.users.role,
-      }));
-
-      setSchedules(transformedData || []);
-    } catch (error: any) {
-      console.error("Error fetching schedules:", error.message);
-    }
-  };
-
-  const fetchAbsences = async () => {
-    try {
-      const { data, error } = await (await supabase)
-        .from("absences")
-        .select("*")
-        .gte("date", format(new Date(), "yyyy-MM-01"))
-        .returns<Absence[]>();
-
-      if (error) throw error;
-      setAbsences(data || []);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const updateUserShift = async (userId: string, shiftId: number) => {
-    try {
-      const { error } = await (await supabase)
-        .from("schedules")
-        .update({ working_shift: shiftId.toString() })
-        .eq("user_id", userId);
-
-      if (error) throw error;
-      await fetchSchedules();
-    } catch (error: any) {
-      console.error("Error updating shift:", error.message);
-    }
-  };
-
-  const markAbsent = async (userId: string) => {
-    if (!selectedDate) {
-      toast.error("Please select a date");
-      return;
-    }
-
-    try {
-      const { error } = await (await supabase).from("absences").insert({
-        user_id: userId,
-        date: format(selectedDate, "yyyy-MM-dd"),
-        reason: absenceReason || "No reason provided",
-      });
-
-      if (error) throw error;
-
-      toast.success("Absence marked successfully");
-      await fetchAbsences();
-      setAbsenceReason(""); // Reset reason after successful submission
-    } catch (error: any) {
-      console.error("Error marking absence:", error.message);
-      toast.error("Failed to mark absence");
-    }
-  };
-
-  if (isLoading) {
-    return <div>Loading...</div>;
-  }
 
   return (
     <div className="space-y-6">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Employee</TableHead>
-            <TableHead>Current Shift</TableHead>
-            <TableHead>Off Days</TableHead>
-            <TableHead>Absences This Month</TableHead>
-            <TableHead>Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {schedules.map((schedule) => (
-            <TableRow key={schedule.id}>
-              <TableCell>
-                {schedule.first_name} {schedule.last_name}
-              </TableCell>
-              <TableCell>
-                <Select
-                  value={schedule.working_shift}
-                  onValueChange={(value) =>
-                    updateUserShift(schedule.user_id, parseInt(value))
-                  }
-                >
-                  <SelectTrigger className="w-[180px]">
-                    <SelectValue placeholder="Select shift" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {shifts.map((shift) => (
-                      <SelectItem key={shift.id} value={shift.id.toString()}>
-                        {shift.name} ({shift.start_time} - {shift.end_time})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </TableCell>
-              <TableCell>{schedule.off_days || "Not set"}</TableCell>
-              <TableCell>
-                {absences.filter((a) => a.user_id === schedule.user_id).length}
-              </TableCell>
-              <TableCell>
-                <Dialog>
-                  <DialogTrigger asChild>
-                    <Button variant="destructive" size="sm">
-                      Mark Absent
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>Mark Absence</DialogTitle>
-                    </DialogHeader>
-                    <div className="space-y-4 py-4">
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Date</label>
-                        <Calendar
-                          mode="single"
-                          selected={selectedDate}
-                          onSelect={setSelectedDate}
-                          className="rounded-md border"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Reason</label>
-                        <Textarea
-                          value={absenceReason}
-                          onChange={(e) => setAbsenceReason(e.target.value)}
-                          placeholder="Enter reason for absence"
-                          className="min-h-[100px]"
-                        />
-                      </div>
-                      <Button
-                        className="w-full"
-                        onClick={() => markAbsent(schedule.user_id)}
-                      >
-                        Confirm Absence
-                      </Button>
-                    </div>
-                  </DialogContent>
-                </Dialog>
-              </TableCell>
-            </TableRow>
+      <div className="space-y-2">
+        <h4 className="font-medium">Working Shift</h4>
+        <Select
+          value={selectedShift.toString()}
+          onValueChange={(value) =>
+            setSelectedShift(parseInt(value) as ShiftType)
+          }
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Select shift" />
+          </SelectTrigger>
+          <SelectContent>
+            {Object.entries(SHIFTS).map(([value, { label }]) => (
+              <SelectItem key={value} value={value}>
+                {label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="space-y-2">
+        <h4 className="font-medium">Off Days</h4>
+        <div className="grid grid-cols-2 gap-4">
+          {DAYS.map((day) => (
+            <div key={day} className="flex items-center space-x-2">
+              <Checkbox
+                id={day}
+                checked={offDays.includes(day.toLowerCase())}
+                onCheckedChange={(checked) => {
+                  setOffDays(
+                    checked
+                      ? [...offDays, day.toLowerCase()]
+                      : offDays.filter((d) => d !== day.toLowerCase())
+                  );
+                }}
+              />
+              <label
+                htmlFor={day}
+                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+              >
+                {day}
+              </label>
+            </div>
           ))}
-        </TableBody>
-      </Table>
+        </div>
+      </div>
+
+      <div className="flex justify-end space-x-2">
+        <Button variant="outline" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button onClick={handleSubmit} disabled={isPending}>
+          {isPending ? "Saving..." : "Save Schedule"}
+        </Button>
+      </div>
     </div>
   );
-};
+}
 
-export default ScheduleManagement;
+function EmployeeCard({
+  employee,
+  onEdit,
+}: {
+  employee: Employee;
+  onEdit: () => void;
+}) {
+  return (
+    <Card className="p-4">
+      <div className="flex items-center justify-between">
+        <div className="space-y-1">
+          <h4 className="font-medium">
+            {employee.first_name} {employee.last_name}
+          </h4>
+          <p className="text-sm text-muted-foreground">{employee.email}</p>
+        </div>
+        <Button variant="outline" size="sm" onClick={onEdit}>
+          Edit Schedule
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+export default function ScheduleManagement() {
+  const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
+  const employees = useEmployees();
+
+  if (!employees) {
+    return (
+      <div className="h-[500px] flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      </div>
+    );
+  }
+
+  return (
+    <Card className="p-6">
+      <div className="space-y-6">
+        <div className="flex justify-between items-start">
+          <div className="space-y-1">
+            <h3 className="text-lg font-medium">Schedule Management</h3>
+            <p className="text-sm text-muted-foreground">
+              Set working shifts and off days for employees
+            </p>
+          </div>
+        </div>
+
+        {editingEmployee ? (
+          <EmployeeScheduleForm
+            employee={editingEmployee}
+            onClose={() => setEditingEmployee(null)}
+          />
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {employees.map((employee) => (
+              <EmployeeCard
+                key={employee.id}
+                employee={employee}
+                onEdit={() => setEditingEmployee(employee)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}

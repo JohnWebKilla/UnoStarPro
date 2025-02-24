@@ -1,5 +1,7 @@
 export type UserRole = "admin" | "manager" | "user" | "driver" | "customer";
 
+export type Department = "Editor" | "Manager" | "Dispatcher" | "Safety";
+
 export interface Company {
   id: number;
   name: string;
@@ -13,6 +15,7 @@ export interface User {
   email: string;
   phone_number: string;
   role: UserRole;
+  department?: Department;
   status: string;
   created_at: string;
   dob?: string;
