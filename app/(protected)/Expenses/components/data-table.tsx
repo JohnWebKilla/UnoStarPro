@@ -3,8 +3,7 @@
 import {
   ColumnDef,
   flexRender,
-  getCoreRowModel,
-  useReactTable,
+  Table as TableInstance,
 } from "@tanstack/react-table";
 import {
   Table,
@@ -14,11 +13,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { format } from "date-fns";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
   data: TData[];
+  table: TableInstance<TData>;
   isLoading?: boolean;
   isInitializing?: boolean;
 }
@@ -26,14 +26,20 @@ interface DataTableProps<TData, TValue> {
 export function DataTable<TData, TValue>({
   columns,
   data,
-  isLoading = false,
-  isInitializing = false,
+  table,
+  isLoading,
+  isInitializing,
 }: DataTableProps<TData, TValue>) {
-  const table = useReactTable({
-    data,
-    columns,
-    getCoreRowModel: getCoreRowModel(),
-  });
+  if (isInitializing) {
+    return (
+      <div className="space-y-3 p-4">
+        <Skeleton className="h-4 w-[250px]" />
+        <Skeleton className="h-8 w-full" />
+        <Skeleton className="h-8 w-full" />
+        <Skeleton className="h-8 w-full" />
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-md border">
@@ -41,34 +47,26 @@ export function DataTable<TData, TValue>({
         <TableHeader>
           {table.getHeaderGroups().map((headerGroup) => (
             <TableRow key={headerGroup.id}>
-              {headerGroup.headers.map((header) => (
-                <TableHead key={header.id}>
-                  {header.isPlaceholder
-                    ? null
-                    : flexRender(
-                        header.column.columnDef.header,
-                        header.getContext()
-                      )}
-                </TableHead>
-              ))}
+              {headerGroup.headers.map((header) => {
+                return (
+                  <TableHead key={header.id}>
+                    {header.isPlaceholder
+                      ? null
+                      : flexRender(
+                          header.column.columnDef.header,
+                          header.getContext()
+                        )}
+                  </TableHead>
+                );
+              })}
             </TableRow>
           ))}
         </TableHeader>
         <TableBody>
-          {isInitializing ? (
+          {isLoading ? (
             <TableRow>
               <TableCell colSpan={columns.length} className="h-24 text-center">
-                <div className="flex justify-center items-center">
-                  Initializing...
-                </div>
-              </TableCell>
-            </TableRow>
-          ) : isLoading ? (
-            <TableRow>
-              <TableCell colSpan={columns.length} className="h-24 text-center">
-                <div className="flex justify-center items-center">
-                  Loading expenses...
-                </div>
+                Loading...
               </TableCell>
             </TableRow>
           ) : table.getRowModel().rows?.length ? (
@@ -78,7 +76,10 @@ export function DataTable<TData, TValue>({
                 data-state={row.getIsSelected() && "selected"}
               >
                 {row.getVisibleCells().map((cell) => (
-                  <TableCell key={cell.id}>
+                  <TableCell
+                    key={cell.id}
+                    className="transition-all duration-200"
+                  >
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
                   </TableCell>
                 ))}
@@ -86,11 +87,8 @@ export function DataTable<TData, TValue>({
             ))
           ) : (
             <TableRow>
-              <TableCell
-                colSpan={columns.length}
-                className="h-24 text-center text-muted-foreground"
-              >
-                No expenses found for this period
+              <TableCell colSpan={columns.length} className="h-24 text-center">
+                No results.
               </TableCell>
             </TableRow>
           )}

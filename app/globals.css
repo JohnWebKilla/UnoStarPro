@@ -70,3 +70,31 @@
     @apply bg-background text-foreground;
   }
 }
+
+@keyframes highlight {
+  0% {
+    background-color: rgba(var(--highlight-color), 0);
+  }
+
+  25% {
+    background-color: rgba(var(--highlight-color), 0.1);
+  }
+
+  75% {
+    background-color: rgba(var(--highlight-color), 0.1);
+  }
+
+  100% {
+    background-color: rgba(var(--highlight-color), 0);
+  }
+}
+
+.animate-highlight {
+  --highlight-color: 59, 130, 246;
+  animation: highlight 2s ease-in-out;
+  border-radius: 0.25rem;
+}
+
+.dark .animate-highlight {
+  --highlight-color: 96, 165, 250;
+}
