@@ -275,8 +275,8 @@ function DepartmentBadge({
   if (!department || !(department in DEPARTMENTS)) {
     return (
       <Badge variant="secondary" className="bg-gray-100 dark:bg-gray-800">
-        <span className="mr-1">👤</span>
-        Unassigned
+        <span className="mr-1.5 flex-shrink-0">👤</span>
+        <span>Unassigned</span>
       </Badge>
     );
   }
@@ -284,8 +284,8 @@ function DepartmentBadge({
   const deptInfo = DEPARTMENTS[department];
   return (
     <Badge variant="secondary" className={`${deptInfo.color} border-0`}>
-      <span className="mr-1">{deptInfo.icon}</span>
-      {department}
+      <span className="mr-1.5 flex-shrink-0">{deptInfo.icon}</span>
+      <span>{department}</span>
     </Badge>
   );
 }
@@ -569,9 +569,13 @@ function EmployeeCard({
                 >
                   <SelectTrigger className="w-[130px] h-8">
                     <SelectValue>
-                      <span className="flex items-center gap-2">
-                        {SHIFTS[shift as ShiftType].icon}
-                        {SHIFTS[shift as ShiftType].shortLabel}
+                      <span className="flex items-center">
+                        <span className="mr-2 flex-shrink-0">
+                          {SHIFTS[shift as ShiftType].icon}
+                        </span>
+                        <span className="truncate">
+                          {SHIFTS[shift as ShiftType].shortLabel}
+                        </span>
                       </span>
                     </SelectValue>
                   </SelectTrigger>
@@ -580,8 +584,9 @@ function EmployeeCard({
                       ([value, { label, icon, time }]) => (
                         <SelectItem key={value} value={value}>
                           <div className="flex flex-col">
-                            <span className="flex items-center gap-2">
-                              {icon} {label}
+                            <span className="flex items-center">
+                              <span className="mr-2 flex-shrink-0">{icon}</span>
+                              <span>{label}</span>
                             </span>
                             <span className="text-xs text-muted-foreground">
                               {time}
@@ -638,7 +643,7 @@ function ShiftGroup({
         className={`${color} px-6 py-4 border-b dark:border-gray-800 flex items-center justify-between`}
       >
         <div className="flex items-center gap-3">
-          <span className="text-2xl">{icon}</span>
+          <span className="text-2xl flex-shrink-0">{icon}</span>
           <div>
             <h3 className="font-semibold">{title}</h3>
             <p className="text-sm text-muted-foreground">{time}</p>
@@ -844,33 +849,36 @@ export default function ShiftSchedule() {
             <SelectTrigger className="w-[160px]">
               <SelectValue>
                 {selectedDepartment === "all" ? (
-                  <span className="flex items-center gap-2">
-                    <Users className="h-4 w-4" />
-                    All Departments
+                  <span className="flex items-center">
+                    <Users className="h-4 w-4 mr-2 flex-shrink-0" />
+                    <span className="truncate">All Departments</span>
                   </span>
                 ) : (
-                  <span className="flex items-center gap-2">
-                    {
-                      DEPARTMENTS[
-                        selectedDepartment as keyof typeof DEPARTMENTS
-                      ]?.icon
-                    }
-                    {selectedDepartment}
+                  <span className="flex items-center">
+                    <span className="mr-2 flex-shrink-0">
+                      {
+                        DEPARTMENTS[
+                          selectedDepartment as keyof typeof DEPARTMENTS
+                        ]?.icon
+                      }
+                    </span>
+                    <span className="truncate">{selectedDepartment}</span>
                   </span>
                 )}
               </SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">
-                <span className="flex items-center gap-2">
-                  <Users className="h-4 w-4" />
-                  All Departments
+                <span className="flex items-center">
+                  <Users className="h-4 w-4 mr-2 flex-shrink-0" />
+                  <span>All Departments</span>
                 </span>
               </SelectItem>
               {Object.entries(DEPARTMENTS).map(([dept, { icon }]) => (
                 <SelectItem key={dept} value={dept}>
-                  <span className="flex items-center gap-2">
-                    {icon} {dept}
+                  <span className="flex items-center">
+                    <span className="mr-2 flex-shrink-0">{icon}</span>
+                    <span>{dept}</span>
                   </span>
                 </SelectItem>
               ))}
