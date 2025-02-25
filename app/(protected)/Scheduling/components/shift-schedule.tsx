@@ -26,6 +26,9 @@ import {
   Clock,
   Calendar,
   Trash2,
+  Phone,
+  Mail,
+  Info,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -301,12 +304,16 @@ function EmployeeCard({
   shift: ShiftType;
   onShiftChange: (newShift: ShiftType) => void;
 }) {
+  // Log employee information
+  console.log("Employee in EmployeeCard:", employee);
+
   const currentShift = SHIFTS[shift];
   const { data } = useSchedulingData();
   const absences = data?.absences ?? [];
   const [absenceError, setAbsenceError] = useState<string | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isAbsenceDetailsOpen, setIsAbsenceDetailsOpen] = useState(false);
+  const [isUserDetailsOpen, setIsUserDetailsOpen] = useState(false);
   const createAbsenceMutation = useCreateAbsence();
   const deleteAbsenceMutation = useDeleteAbsence();
 
@@ -398,11 +405,32 @@ function EmployeeCard({
     }
   };
 
+  const handleCall = () => {
+    // Get the actual phone number or use a default
+    const phoneNumber = employee.phone || "+15551234567";
+    window.location.href = `tel:${phoneNumber.replace(/\s+/g, "")}`;
+    toast.info(`Calling ${employee.first_name} ${employee.last_name}`);
+  };
+
+  const handleEmail = () => {
+    // Copy email to clipboard
+    navigator.clipboard
+      .writeText(employee.email)
+      .then(() => {
+        toast.success(`${employee.email} copied to clipboard`);
+      })
+      .catch((err) => {
+        console.error("Failed to copy email: ", err);
+        toast.error("Failed to copy email to clipboard");
+      });
+  };
+
   return (
     <Card className="p-3 hover:shadow-md transition-all dark:border-gray-800">
       <div className="flex items-center gap-3">
         <div
-          className={`h-10 w-10 rounded-full ${currentShift.color} flex items-center justify-center border-2 dark:border-gray-700 flex-shrink-0`}
+          className={`h-10 w-10 rounded-full ${currentShift.color} flex items-center justify-center border-2 dark:border-gray-700 flex-shrink-0 cursor-pointer`}
+          onClick={() => setIsUserDetailsOpen(true)}
         >
           <span className="text-sm font-semibold">
             {employee.first_name[0]}
@@ -411,7 +439,10 @@ function EmployeeCard({
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-medium">
+            <span
+              className="font-medium cursor-pointer hover:underline"
+              onClick={() => setIsUserDetailsOpen(true)}
+            >
               {employee.first_name} {employee.last_name}
             </span>
             <DepartmentBadge
@@ -479,6 +510,40 @@ function EmployeeCard({
           </div>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <a
+                  href={`tel:${(employee.phone || "+15551234567").replace(/\s+/g, "")}`}
+                  className="inline-flex items-center justify-center h-8 w-8 rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none ring-offset-background hover:bg-accent hover:text-accent-foreground"
+                >
+                  <Phone className="h-4 w-4 text-blue-500" />
+                </a>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Call employee</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={handleEmail}
+                >
+                  <Mail className="h-4 w-4 text-blue-500" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Copy email address</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -605,6 +670,111 @@ function EmployeeCard({
           </TooltipProvider>
         </div>
       </div>
+
+      {/* User Details Dialog */}
+      <Dialog open={isUserDetailsOpen} onOpenChange={setIsUserDetailsOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Employee Details</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-4">
+            <div className="flex items-center gap-4">
+              <div
+                className={`h-16 w-16 rounded-full ${currentShift.color} flex items-center justify-center border-2 dark:border-gray-700`}
+              >
+                <span className="text-xl font-semibold">
+                  {employee.first_name[0]}
+                  {employee.last_name[0]}
+                </span>
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold">
+                  {employee.first_name} {employee.last_name}
+                </h3>
+                <DepartmentBadge
+                  department={
+                    employee.department as keyof typeof DEPARTMENTS | undefined
+                  }
+                />
+              </div>
+            </div>
+
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center gap-2 p-2 rounded-md border">
+                <Mail className="h-5 w-5 text-muted-foreground" />
+                <div className="flex-1">
+                  <p className="text-sm text-muted-foreground">Email</p>
+                  <p className="font-medium">{employee.email}</p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={handleEmail}
+                >
+                  <Mail className="h-4 w-4" />
+                </Button>
+              </div>
+
+              <div className="flex items-center gap-2 p-2 rounded-md border">
+                <Phone className="h-5 w-5 text-muted-foreground" />
+                <div className="flex-1">
+                  <p className="text-sm text-muted-foreground">Phone</p>
+                  <p className="font-medium">
+                    {employee.phone || "No phone number available"}
+                  </p>
+                </div>
+                {employee.phone ? (
+                  <a
+                    href={`tel:${employee.phone.replace(/\s+/g, "")}`}
+                    className="inline-flex items-center justify-center h-8 w-8 rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none ring-offset-background hover:bg-accent hover:text-accent-foreground"
+                  >
+                    <Phone className="h-4 w-4" />
+                  </a>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 w-8 p-0"
+                    disabled
+                  >
+                    <Phone className="h-4 w-4 opacity-50" />
+                  </Button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 p-2 rounded-md border">
+                <Clock className="h-5 w-5 text-muted-foreground" />
+                <div className="flex-1">
+                  <p className="text-sm text-muted-foreground">Current Shift</p>
+                  <p className="font-medium flex items-center">
+                    <span className="mr-2">{SHIFTS[shift].icon}</span>
+                    {SHIFTS[shift].label} ({SHIFTS[shift].time})
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-2 pt-4">
+              <Button
+                variant="outline"
+                onClick={() => setIsUserDetailsOpen(false)}
+              >
+                Close
+              </Button>
+              <Button
+                variant="default"
+                onClick={() => {
+                  setIsUserDetailsOpen(false);
+                  setIsDialogOpen(true);
+                }}
+              >
+                Mark Absence
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
@@ -628,6 +798,9 @@ function ShiftGroup({
   onShiftChange: (employeeId: string, newShift: ShiftType) => void;
   absences: Absence[];
 }) {
+  // Log employees in this shift group
+  console.log(`Employees in ${title}:`, employees);
+
   // Count absences for this shift's employees on the selected date
   const absentEmployeesCount = employees.filter(({ employee }) =>
     absences.some(
@@ -687,11 +860,20 @@ export default function ShiftSchedule() {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedDepartment, setSelectedDepartment] = useState<string>("all");
-  const { data, isLoading: dataLoading } = useSchedulingData();
+  const { data, isLoading: dataLoading, error } = useSchedulingData();
   const updateScheduleMutation = useUpdateSchedule();
   const employees = data?.employees ?? [];
   const absences = data?.absences ?? [];
   const schedules = (data?.schedules ?? []) as APISchedule[];
+
+  // More detailed logging for debugging
+  console.log("ShiftSchedule - Data loading state:", dataLoading);
+  console.log("ShiftSchedule - Data error:", error);
+  console.log("ShiftSchedule - Raw data object:", data);
+  console.log("ShiftSchedule - Employees count:", employees.length);
+  console.log("ShiftSchedule - First few employees:", employees.slice(0, 3));
+  console.log("ShiftSchedule - Schedules count:", schedules.length);
+  console.log("ShiftSchedule - Absences count:", absences.length);
 
   // Initialize employee shifts from schedules
   const employeeShifts = useMemo(() => {
@@ -699,6 +881,7 @@ export default function ShiftSchedule() {
     schedules.forEach((schedule) => {
       shifts[schedule.user_id] = parseInt(schedule.working_shift) as ShiftType;
     });
+    console.log("ShiftSchedule - Calculated employee shifts:", shifts);
     return shifts;
   }, [schedules]);
 
@@ -715,11 +898,17 @@ export default function ShiftSchedule() {
   const isLoading = dataLoading || !employees;
 
   if (isLoading) {
+    console.log("ShiftSchedule - Showing loading state");
     return (
       <div className="h-[500px] flex items-center justify-center">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
       </div>
     );
+  }
+
+  // Log if we have no employees
+  if (employees.length === 0) {
+    console.log("ShiftSchedule - No employees found in data");
   }
 
   const filteredEmployees = employees.filter((employee) => {
@@ -735,6 +924,9 @@ export default function ShiftSchedule() {
 
     return matchesSearch && matchesDepartment;
   });
+
+  // Log filtered employees
+  console.log("Filtered employees:", filteredEmployees);
 
   // Group employees by their current shift from schedules or default
   const employeesByShift = {
@@ -777,6 +969,9 @@ export default function ShiftSchedule() {
         shift: effectiveEmployeeShifts[employee.id] || (3 as ShiftType),
       })),
   };
+
+  // Log employees grouped by shift
+  console.log("Employees grouped by shift:", employeesByShift);
 
   const handleShiftChange = async (employeeId: string, newShift: ShiftType) => {
     const employee = employees.find((e) => e.id === employeeId);

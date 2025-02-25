@@ -68,7 +68,9 @@ const getSchedulingOverviewCached = unstable_cache(
         [
           supabase
             .from("users")
-            .select("id, first_name, last_name, email, role")
+            .select(
+              "id, first_name, last_name, email, role, department, phone_number"
+            )
             .not("role", "eq", "admin"),
 
           supabase
@@ -108,15 +110,22 @@ const getSchedulingOverviewCached = unstable_cache(
       const today = format(new Date(), "yyyy-MM-dd");
       const absences = absencesResult.data as unknown as AbsenceWithUser[];
 
+      // Map phone_number to phone in the employees data
+      const employeesWithPhone =
+        employeesResult.data?.map((employee) => ({
+          ...employee,
+          phone: employee.phone_number,
+        })) || [];
+
       return {
         stats: {
-          totalEmployees: employeesResult.data.length,
-          activeShifts: shiftsResult.data.length,
+          totalEmployees: employeesResult.data?.length || 0,
+          activeShifts: shiftsResult.data?.length || 0,
           todayAbsences: absences.filter((absence) => absence.date === today)
             .length,
           error: null,
         },
-        employees: employeesResult.data as Employee[],
+        employees: employeesWithPhone as Employee[],
         absences: absences.map((absence) => ({
           ...absence,
           user: {
@@ -206,7 +215,9 @@ export async function getInitialSchedulingData(
         supabase.from("scheduling_stats_view").select("*").single(),
         supabase
           .from("users")
-          .select("id, first_name, last_name, email, role, department")
+          .select(
+            "id, first_name, last_name, email, role, department, phone_number"
+          )
           .not("role", "eq", "admin"),
         supabase
           .from("absences")
@@ -246,6 +257,17 @@ export async function getInitialSchedulingData(
       console.error("Schedules query error:", schedulesResult.error);
     }
 
+    // Map phone_number to phone in the employees data
+    const employeesWithPhone =
+      employeesResult.data?.map((employee) => ({
+        ...employee,
+        phone: employee.phone_number,
+      })) || [];
+
+    // Log raw employee data from database
+    console.log("Raw database employee data:", employeesResult.data);
+    console.log("Raw database schedules data:", schedulesResult.data);
+
     return {
       stats: {
         totalEmployees: statsResult.data?.total_employees ?? 0,
@@ -253,7 +275,7 @@ export async function getInitialSchedulingData(
         todayAbsences: statsResult.data?.today_absences ?? 0,
         error: null,
       },
-      employees: employeesResult.data ?? [],
+      employees: employeesWithPhone as Employee[],
       absences: (absencesResult.data ?? []).map((absence) => ({
         ...absence,
         user: absence.user?.[0] || { first_name: "", last_name: "", email: "" },

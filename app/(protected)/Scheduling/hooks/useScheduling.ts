@@ -63,6 +63,10 @@ export function useSchedulingData(startDate?: Date, endDate?: Date) {
         throw new Error(result.error);
       }
 
+      // Log the raw data from the API
+      console.log("Raw API data - employees:", result.employees);
+      console.log("Raw API data - schedules:", result.schedules);
+
       return {
         stats: {
           totalEmployees: result.stats?.totalEmployees ?? 0,

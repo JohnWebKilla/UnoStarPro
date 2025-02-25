@@ -4,7 +4,9 @@ export interface Employee {
   last_name: string;
   email: string;
   role: string;
-  department: string;
+  department?: string;
+  phone?: string;
+  phone_number?: string;
 }
 
 export interface Schedule {
