@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,13 +13,11 @@ import {
 import { format, startOfWeek, addDays } from "date-fns";
 import {
   useSchedulingData,
-  useEmployees,
-  useAbsences,
   useCreateAbsence,
   useUpdateSchedule,
   useDeleteAbsence,
 } from "../hooks/useScheduling";
-import { Employee, ShiftType, Absence } from "../types";
+import { Employee, ShiftType, Absence, Schedule } from "../types";
 import {
   Search,
   Calendar as CalendarIcon,
@@ -47,6 +45,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { toast } from "sonner";
 
 const DEPARTMENTS = {
   Editor: { icon: "✏️", color: "bg-blue-100 dark:bg-blue-900/50" },
@@ -81,6 +80,16 @@ const SHIFTS = {
     icon: "🌙",
   },
 } as const;
+
+// Define the schedule type as it comes from the API
+interface APISchedule {
+  id: number;
+  user_id: string;
+  working_shift: string;
+  off_days: string[];
+  created_at: string;
+  updated_at: string;
+}
 
 function WeekNavigation({
   selectedDate,
@@ -211,19 +220,18 @@ function EmployeeCard({
   shift: ShiftType;
   onShiftChange: (newShift: ShiftType) => void;
 }) {
-  const { toast } = useToast();
   const currentShift = SHIFTS[shift];
-  const absences = useAbsences();
+  const { data } = useSchedulingData();
+  const absences = data?.absences ?? [];
   const [absenceError, setAbsenceError] = useState<string | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isAbsenceDetailsOpen, setIsAbsenceDetailsOpen] = useState(false);
-  const { mutate: createAbsence } = useCreateAbsence();
-  const { mutate: updateSchedule } = useUpdateSchedule();
-  const { mutate: deleteAbsence, isLoading: isDeleting } = useDeleteAbsence();
+  const createAbsenceMutation = useCreateAbsence();
+  const deleteAbsenceMutation = useDeleteAbsence();
 
   // Check if there's an absence for this employee on the selected date
-  const currentAbsence = absences?.find(
-    (absence) =>
+  const currentAbsence = absences.find(
+    (absence: Absence) =>
       absence.user_id === employee.id &&
       absence.date === format(selectedDate, "yyyy-MM-dd")
   );
@@ -232,11 +240,8 @@ function EmployeeCard({
 
   const handleShiftChange = (newShift: string) => {
     const shiftType = parseInt(newShift) as ShiftType;
-    updateSchedule({
-      userId: employee.id,
-      workingShift: shiftType,
-      offDays: employee.off_days || ["saturday", "sunday"],
-    });
+
+    // Update UI immediately via parent component
     onShiftChange(shiftType);
   };
 
@@ -246,7 +251,12 @@ function EmployeeCard({
       return;
     }
 
-    createAbsence(
+    // Show loading toast
+    const toastId = toast.loading(
+      `Recording absence for ${employee.first_name}...`
+    );
+
+    createAbsenceMutation.mutate(
       {
         userId: employee.id,
         date: format(selectedDate, "yyyy-MM-dd"),
@@ -259,26 +269,19 @@ function EmployeeCard({
             if (response.code !== "DUPLICATE_ABSENCE") {
               setIsDialogOpen(false);
             }
-            toast({
-              variant: "destructive",
-              title: "Error",
-              description: response.error,
-            });
+            toast.error(response.error, { id: toastId });
           } else {
             setAbsenceError(null);
             setIsDialogOpen(false);
-            toast({
-              title: "Success",
-              description: "Absence has been recorded successfully.",
+            toast.success("Absence has been recorded successfully.", {
+              id: toastId,
             });
           }
         },
         onError: (error) => {
           setAbsenceError(error.message || "Failed to create absence");
-          toast({
-            variant: "destructive",
-            title: "Error",
-            description: error.message || "Failed to create absence",
+          toast.error(error.message || "Failed to create absence", {
+            id: toastId,
           });
         },
       }
@@ -287,20 +290,28 @@ function EmployeeCard({
 
   const handleAbsenceDelete = () => {
     if (currentAbsence?.id) {
-      deleteAbsence(currentAbsence.id, {
-        onSuccess: () => {
-          setIsAbsenceDetailsOpen(false);
-          toast({
-            title: "Success",
-            description: "Absence has been deleted successfully.",
-          });
+      const toastId = toast.loading("Deleting absence...");
+
+      deleteAbsenceMutation.mutate(currentAbsence.id, {
+        onSuccess: (response) => {
+          if (response.error) {
+            toast.error(`Failed to delete absence: ${response.error}`, {
+              id: toastId,
+            });
+          } else {
+            setIsAbsenceDetailsOpen(false);
+            toast.success("Absence deleted successfully", {
+              id: toastId,
+            });
+          }
         },
         onError: (error) => {
-          toast({
-            variant: "destructive",
-            title: "Error",
-            description: error.message || "Failed to delete absence",
-          });
+          toast.error(
+            `Failed to delete absence: ${error.message || "Unknown error"}`,
+            {
+              id: toastId,
+            }
+          );
         },
       });
     }
@@ -372,9 +383,11 @@ function EmployeeCard({
                         <Button
                           variant="destructive"
                           onClick={handleAbsenceDelete}
-                          disabled={isDeleting}
+                          disabled={deleteAbsenceMutation.status === "pending"}
                         >
-                          {isDeleting ? "Deleting..." : "Delete Absence"}
+                          {deleteAbsenceMutation.status === "pending"
+                            ? "Deleting..."
+                            : "Delete Absence"}
                         </Button>
                       </div>
                     </div>
@@ -600,11 +613,29 @@ export default function ShiftSchedule() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedDepartment, setSelectedDepartment] = useState<string>("all");
   const { data, isLoading: dataLoading } = useSchedulingData();
-  const employees = useEmployees();
-  const absences = useAbsences();
-  const [employeeShifts, setEmployeeShifts] = useState<
+  const updateScheduleMutation = useUpdateSchedule();
+  const employees = data?.employees ?? [];
+  const absences = data?.absences ?? [];
+  const schedules = (data?.schedules ?? []) as APISchedule[];
+
+  // Initialize employee shifts from schedules
+  const employeeShifts = useMemo(() => {
+    const shifts: Record<string, ShiftType> = {};
+    schedules.forEach((schedule) => {
+      shifts[schedule.user_id] = parseInt(schedule.working_shift) as ShiftType;
+    });
+    return shifts;
+  }, [schedules]);
+
+  // Local state to track shifts that are being updated
+  const [localEmployeeShifts, setLocalEmployeeShifts] = useState<
     Record<string, ShiftType>
   >({});
+
+  // Combine server data with local updates
+  const effectiveEmployeeShifts = useMemo(() => {
+    return { ...employeeShifts, ...localEmployeeShifts };
+  }, [employeeShifts, localEmployeeShifts]);
 
   const isLoading = dataLoading || !employees;
 
@@ -630,25 +661,25 @@ export default function ShiftSchedule() {
     return matchesSearch && matchesDepartment;
   });
 
-  // Group employees by their current shift (either from state or default)
+  // Group employees by their current shift from schedules or default
   const employeesByShift = {
     1: filteredEmployees
       .filter(
         (employee) =>
-          employeeShifts[employee.id] === 1 ||
-          (!employeeShifts[employee.id] &&
+          effectiveEmployeeShifts[employee.id] === 1 ||
+          (!effectiveEmployeeShifts[employee.id] &&
             filteredEmployees.indexOf(employee) <
               Math.floor(filteredEmployees.length / 3))
       )
       .map((employee) => ({
         employee,
-        shift: employeeShifts[employee.id] || (1 as ShiftType),
+        shift: effectiveEmployeeShifts[employee.id] || (1 as ShiftType),
       })),
     2: filteredEmployees
       .filter(
         (employee) =>
-          employeeShifts[employee.id] === 2 ||
-          (!employeeShifts[employee.id] &&
+          effectiveEmployeeShifts[employee.id] === 2 ||
+          (!effectiveEmployeeShifts[employee.id] &&
             filteredEmployees.indexOf(employee) >=
               Math.floor(filteredEmployees.length / 3) &&
             filteredEmployees.indexOf(employee) <
@@ -656,27 +687,74 @@ export default function ShiftSchedule() {
       )
       .map((employee) => ({
         employee,
-        shift: employeeShifts[employee.id] || (2 as ShiftType),
+        shift: effectiveEmployeeShifts[employee.id] || (2 as ShiftType),
       })),
     3: filteredEmployees
       .filter(
         (employee) =>
-          employeeShifts[employee.id] === 3 ||
-          (!employeeShifts[employee.id] &&
+          effectiveEmployeeShifts[employee.id] === 3 ||
+          (!effectiveEmployeeShifts[employee.id] &&
             filteredEmployees.indexOf(employee) >=
               Math.floor((2 * filteredEmployees.length) / 3))
       )
       .map((employee) => ({
         employee,
-        shift: employeeShifts[employee.id] || (3 as ShiftType),
+        shift: effectiveEmployeeShifts[employee.id] || (3 as ShiftType),
       })),
   };
 
-  const handleShiftChange = (employeeId: string, newShift: ShiftType) => {
-    setEmployeeShifts((prev) => ({
+  const handleShiftChange = async (employeeId: string, newShift: ShiftType) => {
+    const employee = employees.find((e) => e.id === employeeId);
+    if (!employee) return;
+
+    // Update local state immediately for UI feedback
+    setLocalEmployeeShifts((prev) => ({
       ...prev,
       [employeeId]: newShift,
     }));
+
+    // Show loading toast
+    const toastId = toast.loading(`Updating ${employee.first_name}'s shift...`);
+
+    try {
+      const result = await updateScheduleMutation.mutateAsync({
+        userId: employeeId,
+        workingShift: newShift,
+        offDays: ["saturday", "sunday"], // Default weekend off days
+      });
+
+      if (result.error) {
+        // If there's an error, revert the local change
+        setLocalEmployeeShifts((prev) => {
+          const newState = { ...prev };
+          delete newState[employeeId]; // Remove local override
+          return newState;
+        });
+
+        toast.error(`Failed to update shift: ${result.error}`, {
+          id: toastId,
+        });
+      } else {
+        toast.success(`${employee.first_name}'s shift updated successfully`, {
+          id: toastId,
+        });
+      }
+    } catch (error) {
+      // On error, revert the local change
+      setLocalEmployeeShifts((prev) => {
+        const newState = { ...prev };
+        delete newState[employeeId]; // Remove local override
+        return newState;
+      });
+
+      toast.error(
+        `Failed to update shift: ${error instanceof Error ? error.message : "Unknown error"}`,
+        {
+          id: toastId,
+        }
+      );
+      console.error("Error updating shift:", error);
+    }
   };
 
   const activeShifts = Object.values(employeesByShift).filter(

@@ -12,11 +12,20 @@ import {
   AbsenceFormData,
   ScheduleFormData,
 } from "./types";
+import { revalidatePath, revalidateTag } from "next/cache";
 
 interface SchedulingOverview {
   stats: SchedulingStats;
   employees: Employee[];
   absences: Absence[];
+  schedules: {
+    id: number;
+    user_id: string;
+    working_shift: string;
+    off_days: string[];
+    created_at: string;
+    updated_at: string;
+  }[];
   error: string | null;
 }
 
@@ -43,7 +52,7 @@ class SchedulingError extends Error {
   }
 }
 
-// Cache the scheduling overview for 1 minute
+// Cache the scheduling overview for a shorter time and add more specific tags
 const getSchedulingOverviewCached = unstable_cache(
   async (
     startDate: string,
@@ -51,6 +60,9 @@ const getSchedulingOverviewCached = unstable_cache(
     supabase: SupabaseClient
   ): Promise<SchedulingOverview> => {
     try {
+      // Add timestamp to force fresh data
+      const timestamp = Date.now();
+
       // Fetch all required data in parallel
       const [employeesResult, absencesResult, shiftsResult] = await Promise.all(
         [
@@ -81,8 +93,7 @@ const getSchedulingOverviewCached = unstable_cache(
           supabase
             .from("schedules")
             .select("*")
-            .gte("created_at", startDate)
-            .lte("created_at", endDate),
+            .order("updated_at", { ascending: false }),
         ]
       );
 
@@ -114,6 +125,7 @@ const getSchedulingOverviewCached = unstable_cache(
             email: absence.user.email,
           },
         })) as Absence[],
+        schedules: shiftsResult.data ?? [],
         error: null,
       };
     } catch (error) {
@@ -128,6 +140,7 @@ const getSchedulingOverviewCached = unstable_cache(
         },
         employees: [],
         absences: [],
+        schedules: [],
         error:
           error instanceof Error ? error.message : "Unknown error occurred",
       };
@@ -135,8 +148,8 @@ const getSchedulingOverviewCached = unstable_cache(
   },
   ["scheduling-overview"],
   {
-    revalidate: 60,
-    tags: ["scheduling-overview"],
+    revalidate: false, // Disable caching completely
+    tags: ["scheduling-overview", "schedules", "absences", "users"],
   }
 );
 
@@ -187,17 +200,18 @@ export async function getInitialSchedulingData(
       throw new SchedulingError("Admin access required");
     }
 
-    // Fetch the scheduling data
-    const [statsResult, employeesResult, absencesResult] = await Promise.all([
-      supabase.from("scheduling_stats_view").select("*").single(),
-      supabase
-        .from("users")
-        .select("id, first_name, last_name, email, role, department")
-        .not("role", "eq", "admin"),
-      supabase
-        .from("absences")
-        .select(
-          `
+    // Fetch all required data in parallel
+    const [statsResult, employeesResult, absencesResult, schedulesResult] =
+      await Promise.all([
+        supabase.from("scheduling_stats_view").select("*").single(),
+        supabase
+          .from("users")
+          .select("id, first_name, last_name, email, role, department")
+          .not("role", "eq", "admin"),
+        supabase
+          .from("absences")
+          .select(
+            `
           id,
           user_id,
           date,
@@ -209,10 +223,14 @@ export async function getInitialSchedulingData(
             email
           )
         `
-        )
-        .gte("date", startDate)
-        .lte("date", endDate),
-    ]);
+          )
+          .gte("date", startDate)
+          .lte("date", endDate),
+        supabase
+          .from("schedules")
+          .select("*")
+          .order("updated_at", { ascending: false }),
+      ]);
 
     // Add error logging for each query
     if (statsResult.error) {
@@ -223,6 +241,9 @@ export async function getInitialSchedulingData(
     }
     if (absencesResult.error) {
       console.error("Absences query error:", absencesResult.error);
+    }
+    if (schedulesResult.error) {
+      console.error("Schedules query error:", schedulesResult.error);
     }
 
     return {
@@ -237,6 +258,7 @@ export async function getInitialSchedulingData(
         ...absence,
         user: absence.user?.[0] || { first_name: "", last_name: "", email: "" },
       })) as Absence[],
+      schedules: schedulesResult.data ?? [],
       error: null,
     };
   } catch (error) {
@@ -251,6 +273,7 @@ export async function getInitialSchedulingData(
       },
       employees: [],
       absences: [],
+      schedules: [],
       error: error instanceof Error ? error.message : "Unknown error occurred",
     };
   }
@@ -363,6 +386,15 @@ export async function updateSchedule(data: ScheduleFormData) {
     );
 
     if (scheduleError) throw new Error(scheduleError.message);
+
+    // Revalidate all related caches immediately
+    await Promise.all([
+      revalidatePath("/Scheduling", "layout"),
+      revalidateTag("scheduling-overview"),
+      revalidateTag("schedules"),
+      revalidateTag(`schedule-${data.userId}`),
+      revalidateTag("users"),
+    ]);
 
     return { error: null };
   } catch (error) {

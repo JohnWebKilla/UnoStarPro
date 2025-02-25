@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CalendarDays, Users, Clock } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { format } from "date-fns";
-import { useSchedulingData, useCurrentStats } from "./hooks/useScheduling";
+import { useSchedulingData } from "./hooks/useScheduling";
 import ShiftSchedule from "./components/shift-schedule";
 
 // Create a client
@@ -115,6 +115,12 @@ function TabContent({ activeTab }: { activeTab: string }) {
 
 // Main Scheduling Page
 function SchedulingContent() {
+  const { data: schedulingData, isLoading } = useSchedulingData();
+
+  const stats = schedulingData?.stats;
+  const employees = schedulingData?.employees;
+  const absences = schedulingData?.absences;
+
   return (
     <div className="py-8 space-y-8">
       <StatsOverview />
