@@ -98,47 +98,128 @@ function WeekNavigation({
   selectedDate: Date;
   onDateChange: (date: Date) => void;
 }) {
+  const { data } = useSchedulingData();
+  const absences = data?.absences ?? [];
   const weekStart = startOfWeek(selectedDate);
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
 
+  // Count absences for each day
+  const absencesByDay = weekDays.reduce(
+    (acc, day) => {
+      const dateStr = format(day, "yyyy-MM-dd");
+      acc[dateStr] = absences.filter(
+        (absence) => absence.date === dateStr
+      ).length;
+      return acc;
+    },
+    {} as Record<string, number>
+  );
+
+  // Get today's date for highlighting
+  const today = format(new Date(), "yyyy-MM-dd");
+
   return (
-    <Card className="p-4">
-      <div className="flex items-center space-x-4 mb-4">
+    <Card className="border border-border/40 shadow-sm overflow-hidden">
+      <div className="bg-muted/30 px-4 py-3 border-b flex items-center justify-between">
         <Button
           variant="outline"
           size="sm"
           onClick={() => onDateChange(addDays(weekStart, -7))}
+          className="h-8 text-xs font-medium"
         >
-          <Calendar className="h-4 w-4 mr-2" />
-          Previous Week
+          <Calendar className="h-3.5 w-3.5 mr-1.5" />
+          Previous
         </Button>
-        <Badge variant="outline" className="text-sm px-4 py-1.5">
-          Week of {format(weekStart, "MMMM d, yyyy")}
-        </Badge>
+        <div className="text-center">
+          <h3 className="text-sm font-medium flex items-center">
+            <Badge variant="secondary" className="font-normal px-2 py-0.5">
+              Week
+            </Badge>
+            <span className="mx-2">
+              {format(weekStart, "MMM d")} -{" "}
+              {format(addDays(weekStart, 6), "MMM d, yyyy")}
+            </span>
+          </h3>
+        </div>
         <Button
           variant="outline"
           size="sm"
           onClick={() => onDateChange(addDays(weekStart, 7))}
+          className="h-8 text-xs font-medium"
         >
-          Next Week
-          <Calendar className="h-4 w-4 ml-2" />
+          Next
+          <Calendar className="h-3.5 w-3.5 ml-1.5" />
         </Button>
       </div>
-      <div className="grid grid-cols-7 gap-1">
-        {weekDays.map((day) => (
-          <div
-            key={day.toISOString()}
-            className={`px-2 py-3 text-center rounded-lg transition-colors cursor-pointer ${
-              format(day, "yyyy-MM-dd") === format(selectedDate, "yyyy-MM-dd")
-                ? "bg-primary text-primary-foreground"
-                : "hover:bg-muted"
-            }`}
-            onClick={() => onDateChange(day)}
-          >
-            <div className="text-xs font-medium mb-1">{format(day, "EEE")}</div>
-            <div className="text-lg font-bold">{format(day, "d")}</div>
-          </div>
-        ))}
+
+      <div className="p-3">
+        {/* Day headers */}
+        <div className="grid grid-cols-7 gap-2 mb-2">
+          {weekDays.map((day) => (
+            <div
+              key={`header-${day.toISOString()}`}
+              className="text-center text-xs font-semibold text-muted-foreground"
+            >
+              {format(day, "EEE").toUpperCase()}
+            </div>
+          ))}
+        </div>
+
+        {/* Day cells */}
+        <div className="grid grid-cols-7 gap-2">
+          {weekDays.map((day) => {
+            const dateStr = format(day, "yyyy-MM-dd");
+            const absenceCount = absencesByDay[dateStr] || 0;
+            const isSelected =
+              format(day, "yyyy-MM-dd") === format(selectedDate, "yyyy-MM-dd");
+            const isToday = dateStr === today;
+            const isWeekend = [0, 6].includes(day.getDay());
+
+            return (
+              <button
+                key={day.toISOString()}
+                onClick={() => onDateChange(day)}
+                className={`
+                  relative rounded-md cursor-pointer transition-all h-10
+                  flex items-center justify-center
+                  ${
+                    isSelected
+                      ? "bg-primary text-primary-foreground shadow-sm"
+                      : isToday
+                        ? "bg-accent text-accent-foreground shadow-sm"
+                        : isWeekend
+                          ? "bg-muted/50 hover:bg-muted"
+                          : "bg-background hover:bg-muted/40 border border-border/30"
+                  }
+                `}
+              >
+                <div className="flex items-center">
+                  <span
+                    className={`text-base ${isSelected || isToday ? "font-semibold" : "font-medium"}`}
+                  >
+                    {format(day, "d")}
+                  </span>
+                  {absenceCount > 0 && (
+                    <div
+                      className={`
+                        ml-1 text-[10px] font-bold rounded-full 
+                        min-w-[16px] h-4 flex items-center justify-center px-1 
+                        ${
+                          isSelected
+                            ? "bg-primary-foreground text-primary"
+                            : "bg-destructive text-destructive-foreground"
+                        } 
+                        shadow-sm
+                      `}
+                    >
+                      {absenceCount}
+                    </div>
+                  )}
+                </div>
+              </button>
+            );
+          })}
+        </div>
       </div>
     </Card>
   );
@@ -531,6 +612,7 @@ function ShiftGroup({
   employees,
   selectedDate,
   onShiftChange,
+  absences,
 }: {
   title: string;
   icon: string;
@@ -539,7 +621,17 @@ function ShiftGroup({
   employees: { employee: Employee; shift: ShiftType }[];
   selectedDate: Date;
   onShiftChange: (employeeId: string, newShift: ShiftType) => void;
+  absences: Absence[];
 }) {
+  // Count absences for this shift's employees on the selected date
+  const absentEmployeesCount = employees.filter(({ employee }) =>
+    absences.some(
+      (absence) =>
+        absence.user_id === employee.id &&
+        absence.date === format(selectedDate, "yyyy-MM-dd")
+    )
+  ).length;
+
   return (
     <Card className="overflow-hidden dark:border-gray-800">
       <div
@@ -552,9 +644,16 @@ function ShiftGroup({
             <p className="text-sm text-muted-foreground">{time}</p>
           </div>
         </div>
-        <Badge variant="secondary" className="px-3 py-1 dark:bg-gray-800">
-          {employees.length} employees
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Badge variant="secondary" className="px-3 py-1 dark:bg-gray-800">
+            {employees.length} employees
+          </Badge>
+          {absentEmployeesCount > 0 && (
+            <Badge variant="destructive" className="px-3 py-1">
+              {absentEmployeesCount} absent
+            </Badge>
+          )}
+        </div>
       </div>
       <ScrollArea className="h-[300px] dark:bg-background">
         <div className="p-4 space-y-2">
@@ -575,35 +674,6 @@ function ShiftGroup({
           )}
         </div>
       </ScrollArea>
-    </Card>
-  );
-}
-
-function CountCard({
-  title,
-  count,
-  icon: Icon,
-  suffix,
-}: {
-  title: string;
-  count: number;
-  icon: any;
-  suffix?: string;
-}) {
-  return (
-    <Card className="p-4 dark:border-gray-800">
-      <div className="flex items-center space-x-4">
-        <div className="h-12 w-12 rounded-lg bg-primary/10 dark:bg-primary/5 flex items-center justify-center">
-          <Icon className="h-6 w-6 text-primary" />
-        </div>
-        <div>
-          <p className="text-sm font-medium text-muted-foreground">{title}</p>
-          <h3 className="text-2xl font-bold">
-            {count}
-            {suffix && <span className="text-lg ml-1">{suffix}</span>}
-          </h3>
-        </div>
-      </div>
     </Card>
   );
 }
@@ -757,15 +827,6 @@ export default function ShiftSchedule() {
     }
   };
 
-  const activeShifts = Object.values(employeesByShift).filter(
-    (shift) => shift.length > 0
-  ).length;
-
-  const todayAbsences =
-    absences?.filter(
-      (absence) => absence.date === format(new Date(), "yyyy-MM-dd")
-    ).length || 0;
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -855,22 +916,9 @@ export default function ShiftSchedule() {
             onShiftChange={(employeeId, newShift) =>
               handleShiftChange(employeeId, newShift)
             }
+            absences={absences}
           />
         ))}
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <CountCard
-          title="Total Employees"
-          count={data?.stats.totalEmployees || 0}
-          icon={Users}
-        />
-        <CountCard title="Active Shifts" count={activeShifts} icon={Clock} />
-        <CountCard
-          title="Today's Absences"
-          count={todayAbsences}
-          icon={Calendar}
-        />
       </div>
     </div>
   );

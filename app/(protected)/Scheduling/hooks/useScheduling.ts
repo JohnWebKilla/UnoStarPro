@@ -84,6 +84,36 @@ export function useSchedulingData(startDate?: Date, endDate?: Date) {
   });
 }
 
+// New hook to get employees data
+export function useEmployees() {
+  const { data, isLoading, error } = useSchedulingData();
+
+  return {
+    employees: data?.employees ?? [],
+    isLoading,
+    error: error
+      ? error instanceof Error
+        ? error.message
+        : String(error)
+      : null,
+  };
+}
+
+// New hook to get absences data
+export function useAbsences() {
+  const { data, isLoading, error } = useSchedulingData();
+
+  return {
+    absences: data?.absences ?? [],
+    isLoading,
+    error: error
+      ? error instanceof Error
+        ? error.message
+        : String(error)
+      : null,
+  };
+}
+
 export function useEmployeeSchedule(userId: string) {
   return useQuery({
     queryKey: schedulingKeys.employeeSchedule(userId),
