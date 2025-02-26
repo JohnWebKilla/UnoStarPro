@@ -34,6 +34,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const monthParam = searchParams.get("month");
     const skipCache = searchParams.get("skipCache") === "true";
+    const startTime = Date.now();
 
     if (!monthParam) {
       return NextResponse.json(
@@ -49,28 +50,38 @@ export async function GET(request: NextRequest) {
 
     // Build cache key
     const cacheKey = `payroll:monthly-summary:${monthStart.toISOString().slice(0, 7)}`;
+    console.log(`Processing request for ${cacheKey}, skipCache=${skipCache}`);
 
     // Try to get data from cache if not skipping
     if (!skipCache) {
       try {
-        // Set a timeout for cache retrieval
+        // Set a shorter timeout for cache retrieval in serverless
+        const timeoutMs = process.env.VERCEL ? 2000 : 3000;
+
         const cachedData = await Promise.race([
           getCache<PayrollSummary[]>(cacheKey),
           new Promise<null>((_, reject) =>
             setTimeout(
               () => reject(new Error("Cache retrieval timed out")),
-              3000
+              timeoutMs
             )
           ),
         ]);
 
         if (cachedData) {
-          console.log("Payroll data retrieved from Redis cache");
+          console.log(
+            `Cache hit for ${cacheKey} (${Date.now() - startTime}ms)`
+          );
           return NextResponse.json({
             data: cachedData,
             source: "cache",
+            timing: {
+              total: Date.now() - startTime,
+              source: "cache",
+            },
           });
         }
+        console.log(`Cache miss for ${cacheKey}`);
       } catch (cacheError) {
         console.error("Cache retrieval error:", cacheError);
         // Continue to database if cache fails
@@ -84,14 +95,20 @@ export async function GET(request: NextRequest) {
     });
 
     const supabase = await createClient();
+    const dbStartTime = Date.now();
 
     // First get the monthly summary with a timeout
     const summaryPromise = supabase.from("monthly_payroll_summary").select("*");
 
+    const timeoutMs = process.env.VERCEL ? 4000 : 5000;
+
     const summaryResponse = (await Promise.race([
       summaryPromise,
       new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("Database query timed out")), 5000)
+        setTimeout(
+          () => reject(new Error("Database query timed out")),
+          timeoutMs
+        )
       ),
     ])) as { data: PayrollSummary[] | null; error: any };
 
@@ -121,7 +138,10 @@ export async function GET(request: NextRequest) {
     const transactionsResponse = (await Promise.race([
       transactionsPromise,
       new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("Database query timed out")), 5000)
+        setTimeout(
+          () => reject(new Error("Database query timed out")),
+          timeoutMs
+        )
       ),
     ])) as { data: PayrollTransaction[] | null; error: any };
 
@@ -135,6 +155,9 @@ export async function GET(request: NextRequest) {
         { status: 500 }
       );
     }
+
+    const dbEndTime = Date.now();
+    console.log(`Database queries completed in ${dbEndTime - dbStartTime}ms`);
 
     // Calculate total and paid amounts
     const combinedData = summaryData.map((summary: PayrollSummary) => {
@@ -227,17 +250,25 @@ export async function GET(request: NextRequest) {
       await Promise.race([
         setCache(cacheKey, combinedData, CACHE_EXPIRATION),
         new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Cache storage timed out")), 3000)
+          setTimeout(() => reject(new Error("Cache storage timed out")), 2000)
         ),
       ]);
+      console.log(`Data cached successfully for ${cacheKey}`);
     } catch (cacheError) {
       console.error("Failed to store data in cache:", cacheError);
       // Continue even if caching fails
     }
 
+    const totalTime = Date.now() - startTime;
+    console.log(`Total request processing time: ${totalTime}ms`);
+
     return NextResponse.json({
       data: combinedData,
       source: "database",
+      timing: {
+        total: totalTime,
+        database: dbEndTime - dbStartTime,
+      },
     });
   } catch (error: any) {
     console.error("Error fetching payroll data:", error);
@@ -265,15 +296,17 @@ export async function DELETE(request: NextRequest) {
 
     // Build cache key
     const cacheKey = `payroll:monthly-summary:${selectedMonth.toISOString().slice(0, 7)}`;
+    console.log(`Invalidating cache for ${cacheKey}`);
 
     // Delete from cache with a timeout
     try {
       await Promise.race([
         deleteCache(cacheKey),
         new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Cache deletion timed out")), 3000)
+          setTimeout(() => reject(new Error("Cache deletion timed out")), 2000)
         ),
       ]);
+      console.log(`Cache invalidated for ${cacheKey}`);
     } catch (error) {
       console.error("Error invalidating cache:", error);
       // Return success anyway since the main goal is to force a refresh

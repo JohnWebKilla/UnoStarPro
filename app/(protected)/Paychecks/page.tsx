@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { DataTable } from "./data-table";
 import { columns } from "./columns";
 import { Button } from "@/components/ui/button";
-import { Plus } from "lucide-react";
+import { Plus, Loader2 } from "lucide-react";
 import { PayrollDialog } from "./components/payroll-dialog";
 import { useToast } from "@/components/ui/use-toast";
 import { PayrollTransaction } from "./types";
@@ -81,10 +81,15 @@ interface PaycheckSummary {
   pendingAmount: number;
 }
 
-// Add this interface for the API response
+// Update the PayrollApiResponse interface
 interface PayrollApiResponse {
   data: MonthlyPayrollSummary[];
   source: "cache" | "database";
+  timing?: {
+    total: number;
+    database?: number;
+    source?: string;
+  };
 }
 
 const calculateUserSummary = (transactions: any[]): PaycheckSummary => {
@@ -186,11 +191,13 @@ function PaychecksContent() {
   );
   const { toast } = useToast();
   const supabase = createClient();
+  const [isInvalidating, setIsInvalidating] = useState(false);
 
   const fetchMonthlySummary = async (skipCache: boolean = false) => {
     try {
       setIsLoading(true);
       const monthStart = startOfMonth(selectedMonth);
+      const fetchStartTime = Date.now();
 
       console.log("Fetching data for:", {
         month: format(selectedMonth, "yyyy-MM-dd"),
@@ -199,12 +206,17 @@ function PaychecksContent() {
 
       // Use the new API endpoint with Redis caching
       const response = await fetch(
-        `/api/payroll/monthly-summary?month=${format(selectedMonth, "yyyy-MM-dd")}&skipCache=${skipCache}`,
+        `/api/payroll/monthly-summary?month=${format(
+          selectedMonth,
+          "yyyy-MM-dd"
+        )}&skipCache=${skipCache}`,
         {
           method: "GET",
           headers: {
             "Content-Type": "application/json",
           },
+          // Add cache control headers
+          cache: skipCache ? "no-store" : "default",
         }
       );
 
@@ -214,6 +226,8 @@ function PaychecksContent() {
       }
 
       const result: PayrollApiResponse = await response.json();
+      const fetchEndTime = Date.now();
+      const fetchTime = fetchEndTime - fetchStartTime;
 
       console.log("API response:", result);
       setSummaries(result.data);
@@ -222,6 +236,7 @@ function PaychecksContent() {
         ...prevDebugInfo,
         data: result.data,
         source: result.source,
+        timing: result.timing || { total: fetchTime },
         timestamp: new Date().toISOString(),
       }));
     } catch (error) {
@@ -242,6 +257,7 @@ function PaychecksContent() {
 
   const invalidateCache = async () => {
     try {
+      setIsInvalidating(true);
       const response = await fetch(
         `/api/payroll/monthly-summary?month=${format(selectedMonth, "yyyy-MM-dd")}`,
         {
@@ -263,7 +279,7 @@ function PaychecksContent() {
       });
 
       // Fetch fresh data
-      fetchMonthlySummary(true);
+      await fetchMonthlySummary(true);
     } catch (error) {
       console.error("Error invalidating cache:", error);
       toast({
@@ -271,6 +287,8 @@ function PaychecksContent() {
         description: "Failed to invalidate cache",
         variant: "destructive",
       });
+    } finally {
+      setIsInvalidating(false);
     }
   };
 
@@ -425,17 +443,38 @@ function PaychecksContent() {
             selected={selectedMonth}
             onMonthChange={setSelectedMonth}
           />
-          <Badge variant={dataSource === "cache" ? "outline" : "default"}>
-            {dataSource === "cache" ? "From Cache" : "From Database"}
+          <Badge
+            variant={dataSource === "cache" ? "outline" : "default"}
+            className="flex items-center gap-1"
+          >
+            {dataSource === "cache" ? (
+              <>
+                <span className="h-2 w-2 rounded-full bg-blue-500"></span>
+                From Cache
+              </>
+            ) : (
+              <>
+                <span className="h-2 w-2 rounded-full bg-green-500"></span>
+                From Database
+              </>
+            )}
           </Badge>
           <Button
             variant="outline"
             onClick={() => invalidateCache()}
-            disabled={isLoading}
+            disabled={isLoading || isInvalidating}
+            className="flex items-center gap-2"
           >
-            Refresh Data
+            {isInvalidating ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Refreshing...
+              </>
+            ) : (
+              <>Refresh Data</>
+            )}
           </Button>
-          <Button onClick={() => setIsDialogOpen(true)}>
+          <Button onClick={() => setIsDialogOpen(true)} disabled={isLoading}>
             <Plus className="mr-2 h-4 w-4" /> Add Transaction
           </Button>
         </div>

@@ -76,6 +76,15 @@ const getRedisConfig = (): RedisConfigOptions => {
 const createRedisClient = (): Promise<Redis> => {
   try {
     const config = getRedisConfig();
+
+    // Add more aggressive timeouts for serverless environment
+    if (process.env.VERCEL) {
+      console.log("Running on Vercel - using optimized Redis settings");
+      config.connectTimeout = 3000; // 3 seconds
+      config.commandTimeout = 2000; // 2 seconds
+      config.maxRetriesPerRequest = 1;
+    }
+
     const client = new Redis({
       ...config,
       // Enable auto reconnection
@@ -84,12 +93,16 @@ const createRedisClient = (): Promise<Redis> => {
         return true; // Always try to reconnect
       },
       retryStrategy: (times) => {
-        const delay = Math.min(times * 100, 3000);
+        // More aggressive retry strategy for serverless
+        const delay = Math.min(times * 50, 1000);
         console.log(
           `Redis retrying connection in ${delay}ms (attempt ${times})`
         );
         return delay;
       },
+      // Add connection pool settings
+      enableOfflineQueue: false, // Don't queue commands when disconnected
+      enableReadyCheck: true, // Check if Redis is ready before executing commands
     });
 
     // Add timeout for initial connection
@@ -99,7 +112,7 @@ const createRedisClient = (): Promise<Redis> => {
         console.warn("Redis connection timeout - falling back to dummy client");
         client.disconnect();
         resolve(createDummyClient());
-      }, config.connectTimeout || 5000);
+      }, config.connectTimeout || 3000); // Shorter timeout
 
       client.on("error", (err) => {
         console.error("Redis connection error:", err);
@@ -162,11 +175,13 @@ const createDummyClient = () => {
     smembers: async () => [],
     info: async () => "dummy_version:1.0.0",
     on: (event: string, callback: Function) => null,
+    status: "ready", // Add status property for compatibility
     options: {
       host: "dummy",
       port: 0,
       password: null,
     },
+    disconnect: () => {}, // Add disconnect method
     // Add other methods as needed
   } as unknown as Redis;
 };
@@ -175,11 +190,41 @@ const createDummyClient = () => {
 let redisClient: Redis | null = null;
 let redisClientPromise: Promise<Redis> | null = null;
 let isConnecting = false;
+let lastConnectionTime = 0;
 
 export const getRedisClient = async (): Promise<Redis> => {
-  // If we already have a client and it's connected, return it
-  if (redisClient && redisClient.status === "ready") {
+  const now = Date.now();
+
+  // If we already have a client and it's connected and it's recent (less than 30 seconds old)
+  if (
+    redisClient &&
+    (redisClient as any).status === "ready" &&
+    now - lastConnectionTime < 30000
+  ) {
     return redisClient;
+  }
+
+  // If we're in a serverless environment and the client is older than 30 seconds,
+  // or if the client is not ready, create a new one
+  if (
+    process.env.VERCEL &&
+    (now - lastConnectionTime > 30000 ||
+      !redisClient ||
+      (redisClient as any).status !== "ready")
+  ) {
+    // Clean up old client if it exists
+    if (redisClient) {
+      try {
+        (redisClient as any).disconnect?.();
+      } catch (e) {
+        console.error("Error disconnecting old Redis client:", e);
+      }
+      redisClient = null;
+      redisClientPromise = null;
+    }
+
+    console.log("Creating new Redis client (serverless refresh)");
+    isConnecting = false; // Reset connecting flag
   }
 
   // If we're already connecting, wait for that promise to resolve
@@ -187,6 +232,7 @@ export const getRedisClient = async (): Promise<Redis> => {
     try {
       const client = await redisClientPromise;
       redisClient = client;
+      lastConnectionTime = now;
       return client;
     } catch (error) {
       // If the promise fails, we'll create a new one below
@@ -202,6 +248,7 @@ export const getRedisClient = async (): Promise<Redis> => {
     const client = await redisClientPromise;
     redisClient = client;
     isConnecting = false;
+    lastConnectionTime = now;
     return client;
   } catch (error) {
     console.error("Failed to initialize Redis client:", error);
