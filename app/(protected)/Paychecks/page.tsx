@@ -564,9 +564,3 @@ const getStatusBadgeClass = (status: OverallStatus) => {
       return "bg-red-100 text-red-800";
   }
 };
-
-// Add this function to handle opening the transactions dialog
-const handleOpenTransactionsDialog = (userId: string) => {
-  setSelectedUserId(userId);
-  setIsTransactionsDialogOpen(true);
-};
