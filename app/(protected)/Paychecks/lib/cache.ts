@@ -28,41 +28,47 @@ export async function fetchPayrollWithCache<T>(
   fetchFn: () => Promise<T>,
   skipCache: boolean = false
 ): Promise<{ data: T | null; source: "cache" | "database" }> {
+  const cacheKey = buildPayrollCacheKey(month);
+
+  // If skipCache is true, bypass cache lookup
+  if (!skipCache) {
+    try {
+      // Try to get data from cache
+      const cachedData = await getCache<T>(cacheKey);
+
+      if (cachedData) {
+        console.log(`Cache hit for ${cacheKey}`);
+        return { data: cachedData, source: "cache" };
+      }
+      console.log(`Cache miss for ${cacheKey}`);
+    } catch (error) {
+      console.error(`Error retrieving from cache (${cacheKey}):`, error);
+      // Continue to fetch from database on cache error
+    }
+  } else {
+    console.log(`Skipping cache for ${cacheKey}`);
+  }
+
+  // Fetch fresh data from database
   try {
-    // Build cache key
-    const cacheKey = buildPayrollCacheKey(month);
-
-    // Skip cache if requested
-    if (skipCache) {
-      const data = await fetchFn();
-
-      // Update cache with fresh data
-      await setCache(cacheKey, data, CACHE_EXPIRATION);
-
-      return { data, source: "database" };
-    }
-
-    // Try to get data from cache first
-    const cachedData = await getCache<T>(cacheKey);
-
-    if (cachedData) {
-      console.log("Payroll data retrieved from Redis cache");
-      return { data: cachedData, source: "cache" };
-    }
-
-    // If not in cache, fetch from database
-    console.log("Cache miss, fetching payroll data from database");
+    console.log(`Fetching from database for ${cacheKey}`);
     const data = await fetchFn();
 
-    // Store in cache for future requests
-    await setCache(cacheKey, data, CACHE_EXPIRATION);
+    // Store in cache if we have data
+    if (data) {
+      try {
+        await setCache(cacheKey, data, CACHE_EXPIRATION);
+        console.log(`Cached data for ${cacheKey}`);
+      } catch (cacheError) {
+        console.error(`Error caching data (${cacheKey}):`, cacheError);
+        // Continue even if caching fails
+      }
+    }
 
     return { data, source: "database" };
   } catch (error) {
-    console.error("Error in fetchPayrollWithCache:", error);
-    // If Redis fails, fall back to direct database query
-    const data = await fetchFn();
-    return { data, source: "database" };
+    console.error(`Error fetching data from database:`, error);
+    return { data: null, source: "database" };
   }
 }
 

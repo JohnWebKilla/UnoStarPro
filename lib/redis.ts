@@ -76,26 +76,52 @@ const getRedisConfig = (): RedisConfigOptions => {
 const createRedisClient = (): Promise<Redis> => {
   try {
     const config = getRedisConfig();
-    const client = new Redis(config);
+    const client = new Redis({
+      ...config,
+      // Enable auto reconnection
+      reconnectOnError: (err) => {
+        console.warn("Redis reconnecting due to error:", err.message);
+        return true; // Always try to reconnect
+      },
+      retryStrategy: (times) => {
+        const delay = Math.min(times * 100, 3000);
+        console.log(
+          `Redis retrying connection in ${delay}ms (attempt ${times})`
+        );
+        return delay;
+      },
+    });
 
     // Add timeout for initial connection
     const connectionPromise = new Promise<Redis>((resolve, reject) => {
       // Set a timeout for the connection
       const timeout = setTimeout(() => {
         console.warn("Redis connection timeout - falling back to dummy client");
+        client.disconnect();
         resolve(createDummyClient());
       }, config.connectTimeout || 5000);
 
       client.on("error", (err) => {
         console.error("Redis connection error:", err);
-        clearTimeout(timeout);
-        // Don't reject, just log the error
+        // Don't clear timeout or reject on first error, let the retry strategy work
       });
 
       client.on("connect", () => {
         console.log("Connected to Redis");
         clearTimeout(timeout);
         resolve(client);
+      });
+
+      client.on("ready", () => {
+        console.log("Redis client ready");
+      });
+
+      client.on("reconnecting", () => {
+        console.log("Redis client reconnecting");
+      });
+
+      client.on("end", () => {
+        console.log("Redis connection closed");
       });
     });
 
@@ -148,25 +174,39 @@ const createDummyClient = () => {
 // Create a singleton instance
 let redisClient: Redis | null = null;
 let redisClientPromise: Promise<Redis> | null = null;
+let isConnecting = false;
 
 export const getRedisClient = async (): Promise<Redis> => {
-  if (redisClient) {
+  // If we already have a client and it's connected, return it
+  if (redisClient && redisClient.status === "ready") {
     return redisClient;
   }
 
-  if (redisClientPromise) {
-    const client = await redisClientPromise;
-    redisClient = client;
-    return client;
+  // If we're already connecting, wait for that promise to resolve
+  if (redisClientPromise && isConnecting) {
+    try {
+      const client = await redisClientPromise;
+      redisClient = client;
+      return client;
+    } catch (error) {
+      // If the promise fails, we'll create a new one below
+      redisClientPromise = null;
+    }
   }
 
+  // Start a new connection
+  isConnecting = true;
   redisClientPromise = createRedisClient();
+
   try {
     const client = await redisClientPromise;
     redisClient = client;
+    isConnecting = false;
     return client;
   } catch (error) {
     console.error("Failed to initialize Redis client:", error);
+    isConnecting = false;
+    redisClientPromise = null;
     const dummyClient = createDummyClient();
     redisClient = dummyClient;
     return dummyClient;
