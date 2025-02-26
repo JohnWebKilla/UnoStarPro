@@ -16,35 +16,15 @@ interface RedisConfigOptions {
 
 // Check if we're in production or development
 const getRedisConfig = (): RedisConfigOptions => {
-  // For production with Redis Cloud
-  if (process.env.REDIS_URL && process.env.NODE_ENV === "production") {
-    // Parse the Redis URL to extract host and port
-    const redisUrl = process.env.REDIS_URL;
-    const [hostPort] = redisUrl.split("?");
-    const [host, portStr] = hostPort.split(":");
-    const port = parseInt(portStr, 10);
-
-    return {
-      host,
-      port,
-      password: process.env.REDIS_PASSWORD,
-      // Enable TLS for Redis Cloud
-      tls: { rejectUnauthorized: false },
-      connectTimeout: 5000, // 5 seconds
-      commandTimeout: 3000, // 3 seconds
-      maxRetriesPerRequest: 2,
-      retryStrategy: (times: number) => {
-        // Retry connection with exponential backoff, but limit to 2 seconds max
-        return Math.min(times * 50, 2000);
-      },
-    };
-  }
-
-  // For development with Redis Cloud (if URL is provided)
+  // For production or development with Redis Cloud
   if (process.env.REDIS_URL) {
     // Parse the Redis URL to extract host and port
     const redisUrl = process.env.REDIS_URL;
-    const [hostPort] = redisUrl.split("?");
+    const isSecure = redisUrl.startsWith("rediss://");
+
+    // Remove protocol if present
+    const urlWithoutProtocol = redisUrl.replace(/^(rediss?:\/\/)/, "");
+    const [hostPort] = urlWithoutProtocol.split("?");
     const [host, portStr] = hostPort.split(":");
     const port = parseInt(portStr, 10);
 
@@ -52,6 +32,7 @@ const getRedisConfig = (): RedisConfigOptions => {
       host,
       port,
       password: process.env.REDIS_PASSWORD,
+      // Do NOT enable TLS for Redis Cloud - it doesn't require it
       connectTimeout: 5000, // 5 seconds
       commandTimeout: 3000, // 3 seconds
       maxRetriesPerRequest: 2,
@@ -101,7 +82,7 @@ const createRedisClient = (): Promise<Redis> => {
         return delay;
       },
       // Add connection pool settings
-      enableOfflineQueue: false, // Don't queue commands when disconnected
+      enableOfflineQueue: true, // Enable queue when disconnected
       enableReadyCheck: true, // Check if Redis is ready before executing commands
     });
 
