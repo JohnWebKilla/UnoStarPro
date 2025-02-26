@@ -10,7 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { MoreHorizontal, Eye } from "lucide-react";
-import { PayrollTransaction } from "./types";
+import { PayrollTransaction } from "./types/index";
 
 export const columns: ColumnDef<PayrollTransaction>[] = [
   {
@@ -42,12 +42,12 @@ export const columns: ColumnDef<PayrollTransaction>[] = [
         <Badge
           variant={
             type === "payment"
-              ? "default"
+              ? "success"
               : type === "advance"
                 ? "warning"
                 : type === "penalty"
                   ? "destructive"
-                  : "success"
+                  : "default"
           }
         >
           {type.charAt(0).toUpperCase() + type.slice(1)}
@@ -72,9 +72,9 @@ export const columns: ColumnDef<PayrollTransaction>[] = [
         <Badge
           variant={
             status === "pending"
-              ? "outline"
+              ? "warning"
               : status === "completed"
-                ? "default"
+                ? "success"
                 : "destructive"
           }
         >

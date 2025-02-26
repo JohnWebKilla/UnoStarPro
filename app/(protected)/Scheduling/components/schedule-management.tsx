@@ -154,7 +154,7 @@ export default function ScheduleManagement() {
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const employees = useEmployees();
 
-  if (!employees) {
+  if (employees.isLoading) {
     return (
       <div className="h-[500px] flex items-center justify-center">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
@@ -169,7 +169,7 @@ export default function ScheduleManagement() {
           <div className="space-y-1">
             <h3 className="text-lg font-medium">Schedule Management</h3>
             <p className="text-sm text-muted-foreground">
-              Set working shifts and off days for employees
+              Manage employee schedules and shifts
             </p>
           </div>
         </div>
@@ -181,7 +181,7 @@ export default function ScheduleManagement() {
           />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {employees.map((employee) => (
+            {employees.employees?.map((employee) => (
               <EmployeeCard
                 key={employee.id}
                 employee={employee}

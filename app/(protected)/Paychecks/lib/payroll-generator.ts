@@ -66,7 +66,7 @@ export async function generatePayroll(userId?: string) {
           {
             user_id: user.id,
             transaction_type: "payment",
-            amount: user.payroll_base?.base_salary || 0,
+            amount: user.payroll_base[0]?.base_salary || 0,
             transaction_date: new Date().toISOString(),
             status: "pending",
             payment_period_start: new Date(year, month - 1, 1).toISOString(),

@@ -30,7 +30,11 @@ import { Switch } from "@/components/ui/switch";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { NotificationMessage } from "../types";
+import { NotificationMessage, LanguageCode } from "../types";
+import { StaticImageData } from "next/image";
+
+// Create a language enum for Zod
+const languageEnum = z.enum(["en", "uz", "ru"] as const);
 
 const notificationSchema = z.object({
   title: z.string().min(1, "Title is required"),
@@ -42,7 +46,7 @@ const notificationSchema = z.object({
   showFrom: z.string().optional(),
   showUntil: z.string().optional(),
   image: z.string().optional(),
-  translateTo: z.array(z.string()).optional(),
+  translateTo: z.array(languageEnum).optional(),
 });
 
 type NotificationForm = z.infer<typeof notificationSchema>;
@@ -71,16 +75,18 @@ export const EditNotificationDialog = ({
       dismissible: notification.dismissible ?? true,
       showFrom: notification.showFrom?.toISOString().slice(0, 16) || "",
       showUntil: notification.showUntil?.toISOString().slice(0, 16) || "",
-      image: notification.image || "",
+      image: typeof notification.image === "string" ? notification.image : "",
       translateTo: notification.translateTo || [],
     },
   });
 
   const handleSubmit = (data: NotificationForm) => {
+    const { showFrom, showUntil, image, ...rest } = data;
     const updates: Partial<NotificationMessage> = {
-      ...data,
-      showFrom: data.showFrom ? new Date(data.showFrom) : undefined,
-      showUntil: data.showUntil ? new Date(data.showUntil) : undefined,
+      ...rest,
+      showFrom: showFrom ? new Date(showFrom) : undefined,
+      showUntil: showUntil ? new Date(showUntil) : undefined,
+      image: typeof image === "string" ? image : undefined,
     };
     onSubmit(notification.id, updates);
   };

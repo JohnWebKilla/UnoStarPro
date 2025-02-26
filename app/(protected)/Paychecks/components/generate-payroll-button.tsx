@@ -27,7 +27,7 @@ export function GeneratePayrollButton({
         });
         onSuccess?.();
       } else {
-        throw new Error(error);
+        throw new Error(error || "Failed to generate payroll");
       }
     } catch (error) {
       toast({

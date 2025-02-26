@@ -63,6 +63,11 @@ export const NotificationProvider = ({
     autoTranslate: false,
     supportedLanguages: ["en"],
     ...initialSettings,
+    defaultLanguage:
+      initialSettings?.defaultLanguage &&
+      ["en", "uz", "ru"].includes(initialSettings.defaultLanguage)
+        ? initialSettings.defaultLanguage
+        : "en",
   });
   const { toast } = useToast();
 

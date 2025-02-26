@@ -71,7 +71,7 @@ function AbsenceForm({ onClose }: { onClose: () => void }) {
             <SelectValue placeholder="Select employee" />
           </SelectTrigger>
           <SelectContent>
-            {employees?.map((employee) => (
+            {employees.employees?.map((employee) => (
               <SelectItem key={employee.id} value={employee.id}>
                 {employee.first_name} {employee.last_name}
               </SelectItem>
@@ -117,7 +117,7 @@ function AbsenceList() {
   const absences = useAbsences();
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
 
-  const dayAbsences = absences?.filter((absence) =>
+  const dayAbsences = absences.absences?.filter((absence) =>
     isSameDay(new Date(absence.date), selectedDate)
   );
 

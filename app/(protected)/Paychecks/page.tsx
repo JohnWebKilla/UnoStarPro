@@ -24,7 +24,6 @@ import { MoreHorizontal } from "lucide-react";
 import { startOfMonth, endOfMonth } from "date-fns";
 import { TransactionsDialog } from "./components/transactions-dialog";
 import { ColumnDef } from "@tanstack/react-table";
-import { ShiftSchedule } from "./components/shift-schedule";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 // Add this type for payment status
