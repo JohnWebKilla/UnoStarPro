@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { DataTable } from "./components/data-table";
-import { columns } from "./components/columns";
+import { DataTable } from "./data-table";
+import { columns } from "./columns";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 import { PayrollDialog } from "./components/payroll-dialog";
@@ -21,10 +21,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { MoreHorizontal } from "lucide-react";
-import { startOfMonth, endOfMonth } from "date-fns";
+import { startOfMonth, endOfMonth, format } from "date-fns";
 import { TransactionsDialog } from "./components/transactions-dialog";
 import { ColumnDef } from "@tanstack/react-table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
 
 // Add this type for payment status
 type OverallStatus = "paid" | "partially_paid" | "pending" | "unpaid";
@@ -78,6 +79,12 @@ interface PaycheckSummary {
   status: string;
   paidAmount: number;
   pendingAmount: number;
+}
+
+// Add this interface for the API response
+interface PayrollApiResponse {
+  data: MonthlyPayrollSummary[];
+  source: "cache" | "database";
 }
 
 const calculateUserSummary = (transactions: any[]): PaycheckSummary => {
@@ -148,10 +155,10 @@ const calculateUserSummary = (transactions: any[]): PaycheckSummary => {
   // Determine overall status
   if (summary.paidAmount === 0 && summary.pendingAmount === 0) {
     summary.status = "Unpaid";
-  } else if (summary.pendingAmount > 0) {
-    summary.status = "Partially Paid";
-  } else {
+  } else if (summary.paidAmount > 0 && summary.pendingAmount === 0) {
     summary.status = "Paid";
+  } else {
+    summary.status = "Partially Paid";
   }
 
   return summary;
@@ -166,174 +173,63 @@ export default function PaychecksPage() {
 }
 
 function PaychecksContent() {
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [selectedMonth, setSelectedMonth] = useState(startOfMonth(new Date()));
-  const [summaries, setSummaries] = useState<MonthlyPayrollSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [summaries, setSummaries] = useState<MonthlyPayrollSummary[]>([]);
+  const [selectedMonth, setSelectedMonth] = useState<Date>(new Date());
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isTransactionsDialogOpen, setIsTransactionsDialogOpen] =
+    useState(false);
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [debugInfo, setDebugInfo] = useState<Record<string, any>>({});
+  const [dataSource, setDataSource] = useState<"cache" | "database">(
+    "database"
+  );
   const { toast } = useToast();
   const supabase = createClient();
 
-  // Add state for debug info
-  const [debugInfo, setDebugInfo] = useState<{ data: any; error: any }>({
-    data: null,
-    error: null,
-  });
-
-  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
-
-  // Add state for transactions dialog
-  const [transactionsDialogOpen, setTransactionsDialogOpen] = useState(false);
-  const [selectedTransactions, setSelectedTransactions] = useState<number[]>(
-    []
-  );
-
-  // Add this function to calculate overall status
-  const getOverallStatus = (summary: MonthlyPayrollSummary): OverallStatus => {
-    if (summary.total_amount <= 0) return "paid";
-    if (summary.paid_amount >= summary.total_amount) return "paid";
-    if (summary.paid_amount > 0) return "partially_paid";
-    if (summary.pending_amount > 0) return "pending";
-    return "unpaid";
-  };
-
-  // Add this function to get status badge class
-  const getStatusBadgeClass = (status: OverallStatus) => {
-    switch (status) {
-      case "paid":
-        return "bg-green-100 text-green-800";
-      case "partially_paid":
-        return "bg-blue-100 text-blue-800";
-      case "pending":
-        return "bg-yellow-100 text-yellow-800";
-      case "unpaid":
-        return "bg-red-100 text-red-800";
-    }
-  };
-
-  const fetchMonthlySummary = async () => {
+  const fetchMonthlySummary = async (skipCache: boolean = false) => {
     try {
+      setIsLoading(true);
       const monthStart = startOfMonth(selectedMonth);
-      const monthEnd = endOfMonth(selectedMonth);
 
       console.log("Fetching data for:", {
-        start: monthStart.toISOString(),
-        end: monthEnd.toISOString(),
+        month: format(selectedMonth, "yyyy-MM-dd"),
+        skipCache,
       });
 
-      // First get the monthly summary
-      const { data: summaryData, error: summaryError } = await supabase
-        .from("monthly_payroll_summary")
-        .select("*");
-
-      if (summaryError) {
-        console.error("Supabase error:", summaryError);
-        throw summaryError;
-      }
-
-      // Then get the transactions for the selected month
-      const { data: transactionsData, error: transactionsError } =
-        await supabase
-          .from("payroll_transactions")
-          .select(
-            "id, user_id, amount, status, transaction_date, transaction_type"
-          )
-          .gte("transaction_date", monthStart.toISOString())
-          .lt("transaction_date", monthEnd.toISOString())
-          .neq("status", "cancelled");
-
-      if (transactionsError) {
-        console.error("Supabase error:", transactionsError);
-        throw transactionsError;
-      }
-
-      // Create a map of user_id to transaction_ids for the selected month
-      const transactionMap = new Map<string, number[]>();
-      (transactionsData as PayrollTransactionSummary[]).forEach((t) => {
-        const ids = transactionMap.get(t.user_id) || [];
-        ids.push(t.id);
-        transactionMap.set(t.user_id, ids);
-      });
-
-      // Calculate total and paid amounts
-      const combinedData = summaryData.map((summary) => {
-        const transactions = (
-          transactionsData as PayrollTransactionSummary[]
-        ).filter((t) => t.user_id === summary.user_id);
-
-        // Calculate base total first
-        const baseTotal = summary.base_payment;
-
-        // Handle different transaction types
-        const {
-          paidAmount,
-          pendingAmount,
-          pendingPenalties,
-          deductedPenalties,
-          totalBonuses,
-          totalAdvances,
-          totalPenalties,
-        } = transactions.reduce(
-          (acc, t) => {
-            const amount = t.amount;
-            switch (t.transaction_type) {
-              case "bonus":
-                acc.totalBonuses += amount;
-                if (t.status === "paid") acc.paidAmount += amount;
-                if (t.status === "pending") acc.pendingAmount += amount;
-                break;
-              case "penalty":
-                if (t.status === "charged") {
-                  acc.totalPenalties += amount;
-                  acc.paidAmount -= amount;
-                }
-                if (t.status === "pending") acc.pendingPenalties += amount;
-                break;
-              case "advance":
-                acc.totalAdvances += amount;
-                if (t.status === "paid") {
-                  acc.paidAmount -= amount;
-                }
-                if (t.status === "pending") acc.pendingAmount += amount;
-                break;
-              case "payment":
-                if (t.status === "paid") acc.paidAmount += amount;
-                if (t.status === "pending") acc.pendingAmount += amount;
-                break;
-            }
-            return acc;
+      // Use the new API endpoint with Redis caching
+      const response = await fetch(
+        `/api/payroll/monthly-summary?month=${format(selectedMonth, "yyyy-MM-dd")}&skipCache=${skipCache}`,
+        {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
           },
-          {
-            paidAmount: 0,
-            pendingAmount: 0,
-            pendingPenalties: 0,
-            deductedPenalties: 0,
-            totalBonuses: 0,
-            totalAdvances: 0,
-            totalPenalties: 0,
-          }
-        );
+        }
+      );
 
-        // Final total calculation:
-        // base + bonuses - (advances + penalties)
-        const total = baseTotal + totalBonuses - totalAdvances - totalPenalties;
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to fetch payroll data");
+      }
 
-        return {
-          ...summary,
-          transaction_ids: transactions.map((t) => t.id),
-          total_amount: total,
-          paid_amount: Math.max(0, paidAmount),
-          pending_amount: Math.max(0, pendingAmount),
-          pending_penalties: pendingPenalties,
-          deducted_penalties: deductedPenalties,
-        };
-      });
+      const result: PayrollApiResponse = await response.json();
 
-      console.log("Combined data:", combinedData);
-      setSummaries(combinedData);
-      setDebugInfo((prev) => ({ ...prev, data: combinedData }));
+      console.log("API response:", result);
+      setSummaries(result.data);
+      setDataSource(result.source);
+      setDebugInfo((prevDebugInfo) => ({
+        ...prevDebugInfo,
+        data: result.data,
+        source: result.source,
+        timestamp: new Date().toISOString(),
+      }));
     } catch (error) {
       console.error("Error fetching summary:", error);
-      setDebugInfo((prev) => ({ ...prev, error }));
+      setDebugInfo((prevDebugInfo) => ({
+        ...prevDebugInfo,
+        error,
+      }));
       toast({
         title: "Error",
         description: "Failed to load payroll summary",
@@ -341,6 +237,40 @@ function PaychecksContent() {
       });
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const invalidateCache = async () => {
+    try {
+      const response = await fetch(
+        `/api/payroll/monthly-summary?month=${format(selectedMonth, "yyyy-MM-dd")}`,
+        {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to invalidate cache");
+      }
+
+      toast({
+        title: "Success",
+        description: "Cache invalidated successfully. Refreshing data...",
+      });
+
+      // Fetch fresh data
+      fetchMonthlySummary(true);
+    } catch (error) {
+      console.error("Error invalidating cache:", error);
+      toast({
+        title: "Error",
+        description: "Failed to invalidate cache",
+        variant: "destructive",
+      });
     }
   };
 
@@ -354,12 +284,12 @@ function PaychecksContent() {
 
   const viewTransactions = (userId: string) => {
     setSelectedUserId(userId);
-    setTransactionsDialogOpen(true);
+    setIsTransactionsDialogOpen(true);
   };
 
   const addTransaction = (userId: string) => {
     setSelectedUserId(userId);
-    setDialogOpen(true);
+    setIsDialogOpen(true);
   };
 
   // Move columns definition here so it has access to the handlers
@@ -487,42 +417,55 @@ function PaychecksContent() {
   ];
 
   return (
-    <div className="px-4 py-10 space-y-8">
-      <div className="flex justify-between items-center">
+    <div className="container mx-auto py-10">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-2xl font-bold">Paychecks</h1>
         <div className="flex items-center gap-4">
-          <h1 className="text-2xl font-bold">Monthly Payroll</h1>
           <MonthPicker
             selected={selectedMonth}
             onMonthChange={setSelectedMonth}
           />
+          <Badge variant={dataSource === "cache" ? "outline" : "default"}>
+            {dataSource === "cache" ? "From Cache" : "From Database"}
+          </Badge>
+          <Button
+            variant="outline"
+            onClick={() => invalidateCache()}
+            disabled={isLoading}
+          >
+            Refresh Data
+          </Button>
+          <Button onClick={() => setIsDialogOpen(true)}>
+            <Plus className="mr-2 h-4 w-4" /> Add Transaction
+          </Button>
         </div>
-        <Button onClick={() => setDialogOpen(true)}>
-          <Plus className="h-4 w-4 mr-2" />
-          New Transaction
-        </Button>
       </div>
 
-      <div className="space-y-4">
-        <DataTable columns={columns} data={summaries} isLoading={isLoading} />
-      </div>
+      {isLoading ? (
+        <div className="flex justify-center items-center h-64">
+          <p>Loading payroll data...</p>
+        </div>
+      ) : (
+        <DataTable columns={columns} data={summaries} />
+      )}
 
-      <PayrollDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        onSuccess={onTransactionCreated}
-        defaultUserId={selectedUserId}
-      />
+      {isDialogOpen && (
+        <PayrollDialog
+          open={isDialogOpen}
+          onOpenChange={setIsDialogOpen}
+          onSuccess={() => fetchMonthlySummary(true)}
+          defaultUserId={selectedUserId}
+        />
+      )}
 
-      <TransactionsDialog
-        open={transactionsDialogOpen}
-        onOpenChange={setTransactionsDialogOpen}
-        onTransactionUpdated={fetchMonthlySummary}
-        userId={selectedUserId || undefined}
-      />
-
-      {/* {process.env.NODE_ENV === "development" && (
-        <DebugPanel data={debugInfo.data} error={debugInfo.error} />
-      )} */}
+      {isTransactionsDialogOpen && selectedUserId && (
+        <TransactionsDialog
+          open={isTransactionsDialogOpen}
+          onOpenChange={setIsTransactionsDialogOpen}
+          userId={selectedUserId}
+          onTransactionUpdated={() => fetchMonthlySummary(true)}
+        />
+      )}
     </div>
   );
 }
@@ -597,4 +540,33 @@ const fetchMetrics = async () => {
 const fetchSchedule = async () => {
   // For testing, return mock data
   return mockShiftData;
+};
+
+// Add this function to calculate overall status
+const getOverallStatus = (summary: MonthlyPayrollSummary): OverallStatus => {
+  if (summary.total_amount <= 0) return "paid";
+  if (summary.paid_amount >= summary.total_amount) return "paid";
+  if (summary.paid_amount > 0) return "partially_paid";
+  if (summary.pending_amount > 0) return "pending";
+  return "unpaid";
+};
+
+// Add this function to get status badge class
+const getStatusBadgeClass = (status: OverallStatus) => {
+  switch (status) {
+    case "paid":
+      return "bg-green-100 text-green-800";
+    case "partially_paid":
+      return "bg-blue-100 text-blue-800";
+    case "pending":
+      return "bg-yellow-100 text-yellow-800";
+    case "unpaid":
+      return "bg-red-100 text-red-800";
+  }
+};
+
+// Add this function to handle opening the transactions dialog
+const handleOpenTransactionsDialog = (userId: string) => {
+  setSelectedUserId(userId);
+  setIsTransactionsDialogOpen(true);
 };

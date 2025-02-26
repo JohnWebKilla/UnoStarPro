@@ -43,6 +43,7 @@
     "framer-motion": "^11.13.1",
     "geist": "^1.2.1",
     "grammy": "^1.35.0",
+    "ioredis": "^5.5.0",
     "lucide-react": "^0.456.0",
     "next": "latest",
     "next-i18next": "^15.4.2",
@@ -61,7 +62,7 @@
     "recharts": "^2.15.1",
     "sonner": "^1.7.4",
     "tsparticles": "^3.7.1",
-    "uuid": "^11.0.5",
+    "uuid": "^11.1.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
