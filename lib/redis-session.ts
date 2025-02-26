@@ -17,7 +17,7 @@ export async function createSession(
   data: Record<string, any>,
   expiryInSeconds: number = DEFAULT_SESSION_EXPIRY
 ): Promise<string> {
-  const redis = getRedisClient();
+  const redis = await getRedisClient();
 
   // Generate a unique session ID
   const sessionId = uuidv4();
@@ -55,7 +55,7 @@ export async function createSession(
 export async function getSession<T = Record<string, any>>(
   sessionId: string
 ): Promise<T | null> {
-  const redis = getRedisClient();
+  const redis = await getRedisClient();
   const sessionKey = `session:${sessionId}`;
 
   // Get session data
@@ -97,7 +97,7 @@ export async function updateSession(
   sessionId: string,
   data: Record<string, any>
 ): Promise<boolean> {
-  const redis = getRedisClient();
+  const redis = await getRedisClient();
   const sessionKey = `session:${sessionId}`;
 
   // Get current session
@@ -137,7 +137,7 @@ export async function updateSession(
  * @returns Success status
  */
 export async function deleteSession(sessionId: string): Promise<boolean> {
-  const redis = getRedisClient();
+  const redis = await getRedisClient();
   const sessionKey = `session:${sessionId}`;
 
   // Get session to find user ID
@@ -169,7 +169,7 @@ export async function deleteSession(sessionId: string): Promise<boolean> {
  * @returns Array of session IDs
  */
 export async function getUserSessions(userId: string): Promise<string[]> {
-  const redis = getRedisClient();
+  const redis = await getRedisClient();
   const userSessionsKey = `user-sessions:${userId}`;
 
   // Get all session IDs for the user
@@ -184,7 +184,7 @@ export async function getUserSessions(userId: string): Promise<string[]> {
  * @returns Number of sessions deleted
  */
 export async function deleteUserSessions(userId: string): Promise<number> {
-  const redis = getRedisClient();
+  const redis = await getRedisClient();
   const userSessionsKey = `user-sessions:${userId}`;
 
   // Get all session IDs for the user

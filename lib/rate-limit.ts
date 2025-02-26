@@ -33,7 +33,7 @@ export async function rateLimit(
   const key = `rate-limit:${identifier}:${ip}`;
 
   try {
-    const redis = getRedisClient();
+    const redis = await getRedisClient();
 
     // Get current count
     const currentCount = await redis.get(key);

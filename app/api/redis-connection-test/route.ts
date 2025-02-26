@@ -3,7 +3,8 @@ import { getRedisClient } from "@/lib/redis";
 
 export async function GET() {
   try {
-    const redis = getRedisClient();
+    // Get Redis client (now returns a Promise<Redis>)
+    const redis = await getRedisClient();
 
     // Test basic connection
     const pingResult = await redis.ping();
