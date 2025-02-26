@@ -6,6 +6,29 @@ import { startOfMonth, endOfMonth, parseISO } from "date-fns";
 // Cache expiration time in seconds (5 minutes)
 const CACHE_EXPIRATION = 300;
 
+// Define types for our data
+interface PayrollSummary {
+  user_id: string;
+  month: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  base_payment: number;
+  advances: number;
+  penalties: number;
+  bonuses: number;
+  [key: string]: any; // Allow additional properties
+}
+
+interface PayrollTransaction {
+  id: number;
+  user_id: string;
+  amount: number;
+  status: string;
+  transaction_date: string;
+  transaction_type: string;
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -29,13 +52,28 @@ export async function GET(request: NextRequest) {
 
     // Try to get data from cache if not skipping
     if (!skipCache) {
-      const cachedData = await getCache(cacheKey);
-      if (cachedData) {
-        console.log("Payroll data retrieved from Redis cache");
-        return NextResponse.json({
-          data: cachedData,
-          source: "cache",
-        });
+      try {
+        // Set a timeout for cache retrieval
+        const cachedData = await Promise.race([
+          getCache<PayrollSummary[]>(cacheKey),
+          new Promise<null>((_, reject) =>
+            setTimeout(
+              () => reject(new Error("Cache retrieval timed out")),
+              3000
+            )
+          ),
+        ]);
+
+        if (cachedData) {
+          console.log("Payroll data retrieved from Redis cache");
+          return NextResponse.json({
+            data: cachedData,
+            source: "cache",
+          });
+        }
+      } catch (cacheError) {
+        console.error("Cache retrieval error:", cacheError);
+        // Continue to database if cache fails
       }
     }
 
@@ -47,10 +85,17 @@ export async function GET(request: NextRequest) {
 
     const supabase = await createClient();
 
-    // First get the monthly summary
-    const { data: summaryData, error: summaryError } = await supabase
-      .from("monthly_payroll_summary")
-      .select("*");
+    // First get the monthly summary with a timeout
+    const summaryPromise = supabase.from("monthly_payroll_summary").select("*");
+
+    const summaryResponse = (await Promise.race([
+      summaryPromise,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Database query timed out")), 5000)
+      ),
+    ])) as { data: PayrollSummary[] | null; error: any };
+
+    const { data: summaryData, error: summaryError } = summaryResponse;
 
     if (summaryError) {
       console.error("Supabase error:", summaryError);
@@ -60,13 +105,28 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Then get the transactions for the selected month
-    const { data: transactionsData, error: transactionsError } = await supabase
+    if (!summaryData) {
+      console.error("No summary data returned from database");
+      return NextResponse.json({ error: "No data found" }, { status: 404 });
+    }
+
+    // Then get the transactions for the selected month with a timeout
+    const transactionsPromise = supabase
       .from("payroll_transactions")
       .select("id, user_id, amount, status, transaction_date, transaction_type")
       .gte("transaction_date", monthStart.toISOString())
       .lt("transaction_date", monthEnd.toISOString())
       .neq("status", "cancelled");
+
+    const transactionsResponse = (await Promise.race([
+      transactionsPromise,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Database query timed out")), 5000)
+      ),
+    ])) as { data: PayrollTransaction[] | null; error: any };
+
+    const { error: transactionsError } = transactionsResponse;
+    let transactionsData = transactionsResponse.data || [];
 
     if (transactionsError) {
       console.error("Supabase error:", transactionsError);
@@ -77,9 +137,9 @@ export async function GET(request: NextRequest) {
     }
 
     // Calculate total and paid amounts
-    const combinedData = summaryData.map((summary) => {
+    const combinedData = summaryData.map((summary: PayrollSummary) => {
       const transactions = transactionsData.filter(
-        (t) => t.user_id === summary.user_id
+        (t: PayrollTransaction) => t.user_id === summary.user_id
       );
 
       // Calculate base total first
@@ -95,7 +155,18 @@ export async function GET(request: NextRequest) {
         totalAdvances,
         totalPenalties,
       } = transactions.reduce(
-        (acc, t) => {
+        (
+          acc: {
+            paidAmount: number;
+            pendingAmount: number;
+            pendingPenalties: number;
+            deductedPenalties: number;
+            totalBonuses: number;
+            totalAdvances: number;
+            totalPenalties: number;
+          },
+          t: PayrollTransaction
+        ) => {
           const amount = t.amount;
           switch (t.transaction_type) {
             case "bonus":
@@ -141,7 +212,7 @@ export async function GET(request: NextRequest) {
 
       return {
         ...summary,
-        transaction_ids: transactions.map((t) => t.id),
+        transaction_ids: transactions.map((t: PayrollTransaction) => t.id),
         total_amount: total,
         paid_amount: Math.max(0, paidAmount),
         pending_amount: Math.max(0, pendingAmount),
@@ -151,7 +222,18 @@ export async function GET(request: NextRequest) {
     });
 
     // Store in cache for future requests
-    await setCache(cacheKey, combinedData, CACHE_EXPIRATION);
+    try {
+      // Set a timeout for cache storage
+      await Promise.race([
+        setCache(cacheKey, combinedData, CACHE_EXPIRATION),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("Cache storage timed out")), 3000)
+        ),
+      ]);
+    } catch (cacheError) {
+      console.error("Failed to store data in cache:", cacheError);
+      // Continue even if caching fails
+    }
 
     return NextResponse.json({
       data: combinedData,
@@ -184,8 +266,18 @@ export async function DELETE(request: NextRequest) {
     // Build cache key
     const cacheKey = `payroll:monthly-summary:${selectedMonth.toISOString().slice(0, 7)}`;
 
-    // Delete from cache
-    await deleteCache(cacheKey);
+    // Delete from cache with a timeout
+    try {
+      await Promise.race([
+        deleteCache(cacheKey),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("Cache deletion timed out")), 3000)
+        ),
+      ]);
+    } catch (error) {
+      console.error("Error invalidating cache:", error);
+      // Return success anyway since the main goal is to force a refresh
+    }
 
     return NextResponse.json({
       success: true,
