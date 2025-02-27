@@ -5,10 +5,9 @@ import { DataTable } from "./data-table";
 import { columns } from "./columns";
 import { User, UserRole } from "./types";
 import { Button } from "@/components/ui/button";
-import { PlusCircle } from "lucide-react";
+import { PlusCircle, Loader2 } from "lucide-react";
 import { UserDialog } from "./user-dialog";
 import { useToast } from "@/components/ui/use-toast";
-import { TableSkeleton } from "./table-skeleton";
 import {
   getUsers,
   updateUser,
@@ -18,6 +17,18 @@ import {
 import { createClient } from "@/utils/supabase/client";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { CompanyManagement } from "./company-management";
+import { Badge } from "@/components/ui/badge";
+
+// Add this interface for the API response
+interface UsersApiResponse {
+  data: User[];
+  source: "cache" | "database";
+  timing?: {
+    total: number;
+    database?: number;
+    source?: string;
+  };
+}
 
 export default function UsersPage() {
   const [users, setUsers] = useState<User[]>([]);
@@ -33,6 +44,10 @@ export default function UsersPage() {
   const [lastUpdatedUserId, setLastUpdatedUserId] = useState<string | null>(
     null
   );
+  const [dataSource, setDataSource] = useState<"cache" | "database">(
+    "database"
+  );
+  const [isInvalidating, setIsInvalidating] = useState(false);
 
   useEffect(() => {
     let channel: RealtimeChannel;
@@ -87,9 +102,8 @@ export default function UsersPage() {
         },
         async (payload: any) => {
           console.log("Users change received!", payload);
-          const { users: updatedUsers, error } = await getUsers();
-          if (error || !updatedUsers) return;
-          setUsers(updatedUsers);
+          // Invalidate cache and fetch fresh data
+          await invalidateCache();
         }
       )
       .on(
@@ -101,9 +115,8 @@ export default function UsersPage() {
         },
         async (payload: any) => {
           console.log("User companies change received!", payload);
-          const { users: updatedUsers, error } = await getUsers();
-          if (error || !updatedUsers) return;
-          setUsers(updatedUsers);
+          // Invalidate cache and fetch fresh data
+          await invalidateCache();
         }
       )
       .subscribe();
@@ -111,17 +124,37 @@ export default function UsersPage() {
     return channel;
   };
 
-  const fetchUsers = async () => {
+  const fetchUsers = async (skipCache: boolean = false) => {
     try {
       setIsLoading(true);
-      const { users: fetchedUsers, error } = await getUsers();
+      const fetchStartTime = Date.now();
 
-      if (error) {
-        throw new Error(error);
+      console.log("Fetching users data:", { skipCache });
+
+      // Use the new API endpoint with Redis caching
+      const response = await fetch(`/api/users/cached?skipCache=${skipCache}`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        // Add cache control headers
+        cache: skipCache ? "no-store" : "default",
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to fetch users data");
       }
 
-      setUsers(fetchedUsers as User[]);
+      const result: UsersApiResponse = await response.json();
+      const fetchEndTime = Date.now();
+      const fetchTime = fetchEndTime - fetchStartTime;
+
+      console.log("API response:", result);
+      setUsers(result.data);
+      setDataSource(result.source);
     } catch (error) {
+      console.error("Error fetching users:", error);
       toast({
         title: "Error",
         description: "Failed to fetch users",
@@ -129,6 +162,40 @@ export default function UsersPage() {
       });
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const invalidateCache = async () => {
+    try {
+      setIsInvalidating(true);
+      const response = await fetch(`/api/users/cached`, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to invalidate cache");
+      }
+
+      toast({
+        title: "Success",
+        description: "Cache invalidated successfully. Refreshing data...",
+      });
+
+      // Fetch fresh data
+      await fetchUsers(true);
+    } catch (error) {
+      console.error("Error invalidating cache:", error);
+      toast({
+        title: "Error",
+        description: "Failed to invalidate cache",
+        variant: "destructive",
+      });
+    } finally {
+      setIsInvalidating(false);
     }
   };
 
@@ -253,10 +320,7 @@ export default function UsersPage() {
       });
     } catch (error: any) {
       // On error, revert the optimistic update
-      const { users: revertUsers } = await getUsers();
-      if (revertUsers) {
-        setUsers(revertUsers);
-      }
+      await fetchUsers(true);
 
       toast({
         title: "Error",
@@ -300,18 +364,64 @@ export default function UsersPage() {
     <div className="px-4 py-10">
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-2xl font-bold">Users</h1>
-        <Button onClick={() => setDialogOpen(true)}>
-          <PlusCircle className="h-4 w-4 mr-2" />
-          Add User
-        </Button>
+        <div className="flex items-center gap-4">
+          <Badge
+            variant={dataSource === "cache" ? "outline" : "default"}
+            className="flex items-center gap-1"
+          >
+            {dataSource === "cache" ? (
+              <>
+                <span className="h-2 w-2 rounded-full bg-blue-500"></span>
+                From Cache
+              </>
+            ) : (
+              <>
+                <span className="h-2 w-2 rounded-full bg-green-500"></span>
+                From Database
+              </>
+            )}
+          </Badge>
+          <Button
+            variant="outline"
+            onClick={() => invalidateCache()}
+            disabled={isLoading || isInvalidating}
+            className="flex items-center gap-2"
+          >
+            {isInvalidating ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Refreshing...
+              </>
+            ) : (
+              <>Refresh Data</>
+            )}
+          </Button>
+          <Button onClick={() => setDialogOpen(true)}>
+            <PlusCircle className="h-4 w-4 mr-2" />
+            Add User
+          </Button>
+        </div>
       </div>
 
       {isLoading ? (
-        <TableSkeleton />
+        <DataTable
+          columns={columns}
+          data={[]}
+          isLoading={true}
+          skeletonRowCount={5}
+          meta={{
+            onEdit: handleEdit,
+            onToggleStatus: handleToggleStatus,
+            onApprove: handleApprove,
+            onManageCompanies: handleManageCompanies,
+            companies,
+          }}
+        />
       ) : (
         <DataTable
           columns={columns}
           data={users}
+          isLoading={false}
           meta={{
             onEdit: handleEdit,
             onToggleStatus: handleToggleStatus,

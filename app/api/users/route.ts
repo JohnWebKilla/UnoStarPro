@@ -93,8 +93,17 @@ export async function POST(request: NextRequest): Promise<Response> {
       },
     });
 
-    if (authError) throw authError;
-    if (!authUser.user) throw new Error("No user returned from auth signup");
+    if (authError) {
+      console.error("Auth error:", authError);
+      return Response.json({ error: authError.message }, { status: 500 });
+    }
+    if (!authUser.user) {
+      console.error("No user returned from auth signup");
+      return Response.json(
+        { error: "No user returned from auth signup" },
+        { status: 500 }
+      );
+    }
 
     // Then create the user record
     const { data: user, error: dbError } = await supabase
@@ -112,12 +121,18 @@ export async function POST(request: NextRequest): Promise<Response> {
       .select()
       .single();
 
-    if (dbError) throw dbError;
+    if (dbError) {
+      console.error("Database error:", dbError);
+      return Response.json({ error: dbError.message }, { status: 500 });
+    }
 
     return Response.json(user);
   } catch (error: any) {
     console.error("Error creating user:", error);
-    return Response.json({ error: "Failed to create user" }, { status: 500 });
+    return Response.json(
+      { error: error.message || "Failed to create user" },
+      { status: 500 }
+    );
   }
 }
 

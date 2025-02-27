@@ -26,6 +26,7 @@ import { TransactionsDialog } from "./components/transactions-dialog";
 import { ColumnDef } from "@tanstack/react-table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 
 // Add this type for payment status
 type OverallStatus = "paid" | "partially_paid" | "pending" | "unpaid";
@@ -435,7 +436,7 @@ function PaychecksContent() {
   ];
 
   return (
-    <div className="container mx-auto py-10">
+    <div className="px-2 py-10">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Paychecks</h1>
         <div className="flex items-center gap-4">
@@ -481,11 +482,14 @@ function PaychecksContent() {
       </div>
 
       {isLoading ? (
-        <div className="flex justify-center items-center h-64">
-          <p>Loading payroll data...</p>
-        </div>
+        <DataTable
+          columns={columns}
+          data={[]}
+          isLoading={true}
+          skeletonRowCount={5}
+        />
       ) : (
-        <DataTable columns={columns} data={summaries} />
+        <DataTable columns={columns} data={summaries} isLoading={false} />
       )}
 
       {isDialogOpen && (

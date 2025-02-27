@@ -29,15 +29,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
   data?: TData[];
+  isLoading?: boolean;
+  skeletonRowCount?: number;
 }
 
 export function DataTable<TData, TValue>({
   columns,
   data = [],
+  isLoading = false,
+  skeletonRowCount = 5,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -61,6 +66,21 @@ export function DataTable<TData, TValue>({
     },
   });
 
+  // Generate skeleton rows
+  const renderSkeletonRows = () => {
+    return Array(skeletonRowCount)
+      .fill(0)
+      .map((_, index) => (
+        <TableRow key={`skeleton-${index}`}>
+          {columns.map((column, colIndex) => (
+            <TableCell key={`skeleton-cell-${index}-${colIndex}`}>
+              <Skeleton className="h-6 w-full" />
+            </TableCell>
+          ))}
+        </TableRow>
+      ));
+  };
+
   return (
     <div>
       {/* Filters Section */}
@@ -71,9 +91,14 @@ export function DataTable<TData, TValue>({
             value={globalFilter}
             onChange={(event) => setGlobalFilter(event.target.value)}
             className="max-w-sm"
+            disabled={isLoading}
           />
           <div className="flex gap-2">
-            <Select value={typeFilter} onValueChange={setTypeFilter}>
+            <Select
+              value={typeFilter}
+              onValueChange={setTypeFilter}
+              disabled={isLoading}
+            >
               <SelectTrigger className="w-[180px]">
                 <SelectValue placeholder="Transaction Type" />
               </SelectTrigger>
@@ -86,7 +111,11 @@ export function DataTable<TData, TValue>({
               </SelectContent>
             </Select>
 
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <Select
+              value={statusFilter}
+              onValueChange={setStatusFilter}
+              disabled={isLoading}
+            >
               <SelectTrigger className="w-[180px]">
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
@@ -121,7 +150,9 @@ export function DataTable<TData, TValue>({
             ))}
           </TableHeader>
           <TableBody>
-            {table.getRowModel().rows?.length ? (
+            {isLoading ? (
+              renderSkeletonRows()
+            ) : table.getRowModel().rows?.length ? (
               table.getRowModel().rows.map((row) => (
                 <TableRow
                   key={row.id}
@@ -154,14 +185,16 @@ export function DataTable<TData, TValue>({
       {/* Pagination */}
       <div className="flex items-center justify-between py-4">
         <span className="text-sm text-muted-foreground">
-          {table.getFilteredRowModel().rows.length} transactions
+          {isLoading
+            ? "Loading..."
+            : `${table.getFilteredRowModel().rows.length} transactions`}
         </span>
         <div className="flex items-center space-x-2">
           <Button
             variant="outline"
             size="sm"
             onClick={() => table.previousPage()}
-            disabled={!table.getCanPreviousPage()}
+            disabled={!table.getCanPreviousPage() || isLoading}
           >
             Previous
           </Button>
@@ -169,7 +202,7 @@ export function DataTable<TData, TValue>({
             variant="outline"
             size="sm"
             onClick={() => table.nextPage()}
-            disabled={!table.getCanNextPage()}
+            disabled={!table.getCanNextPage() || isLoading}
           >
             Next
           </Button>
