@@ -72,6 +72,7 @@ interface DataTableProps<TData extends User, TValue> {
   data: TData[];
   isLoading?: boolean;
   skeletonRowCount?: number;
+  lastUpdatedUserId?: string | null;
   meta: {
     onEdit: (user: User) => void;
     onToggleStatus: (user: User) => Promise<void>;
@@ -91,6 +92,7 @@ export function DataTable<TData extends User, TValue>({
   data,
   isLoading = false,
   skeletonRowCount = 5,
+  lastUpdatedUserId = null,
   meta,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -100,8 +102,7 @@ export function DataTable<TData extends User, TValue>({
   const [globalFilter, setGlobalFilter] = useState("");
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
-  // Add this state to track open menus at the component level
+  const [expandedRows, setExpandedRows] = useState<string[]>([]);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   // Memoize the table instance
@@ -184,27 +185,27 @@ export function DataTable<TData extends User, TValue>({
   });
 
   const toggleRow = (rowId: string) => {
-    setExpandedRows((prev) => ({
-      ...prev,
-      [rowId]: !prev[rowId],
-    }));
+    setExpandedRows((prev) =>
+      prev.includes(rowId)
+        ? prev.filter((id) => id !== rowId)
+        : [...prev, rowId]
+    );
   };
 
   const renderMobileCard = (user: User) => {
-    const isExpanded = expandedRows[user.id];
+    const isExpanded = expandedRows.includes(user.id);
     const birthdayStatus = user.dob ? getBirthdayStatus(user.dob) : null;
 
     const handleAction = (action: () => void) => {
-      // Close menu first
-      setOpenMenuId(null);
-      // Small delay before action to ensure menu is closed
-      setTimeout(() => {
-        action();
-      }, 100);
+      action();
+      setExpandedRows((prev) => prev.filter((id) => id !== user.id));
     };
 
     return (
-      <div key={user.id} className="bg-card rounded-lg shadow-sm mb-4 p-4">
+      <div
+        key={user.id}
+        className={`p-4 border-b last:border-b-0 ${isHighlighted(user.id) ? "bg-blue-50 dark:bg-blue-900/20 transition-colors duration-500" : ""}`}
+      >
         <div className="flex justify-between items-start">
           <div className="flex items-start space-x-3">
             <Avatar>
@@ -218,172 +219,86 @@ export function DataTable<TData extends User, TValue>({
               </AvatarFallback>
             </Avatar>
             <div>
-              <h3 className="font-medium">
+              <div className="font-medium">
                 {user.first_name} {user.last_name}
-              </h3>
-              <p className="text-sm text-muted-foreground">{user.email}</p>
-              <div className="flex items-center gap-2 mt-1">
+              </div>
+              <div className="text-sm text-muted-foreground">{user.email}</div>
+              <div className="flex items-center space-x-2 mt-1">
                 <Badge
-                  variant={variantMap[user.status as keyof typeof variantMap]}
+                  variant={user.status === "active" ? "default" : "secondary"}
                 >
-                  {user.status}
+                  {user.status === "active" ? "Active" : "Inactive"}
                 </Badge>
-                <span className="text-sm text-muted-foreground capitalize">
-                  {user.role}
-                </span>
+                <Badge variant="outline">{user.role}</Badge>
               </div>
             </div>
           </div>
-
-          <div className="flex items-center">
-            <DropdownMenu
-              open={openMenuId === user.id}
-              onOpenChange={(open) => setOpenMenuId(open ? user.id : null)}
-            >
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  className="h-8 w-8 p-0"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                  }}
-                >
-                  <MoreHorizontal className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                align="end"
-                className="w-[160px]"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <DropdownMenuItem
-                  onClick={() => handleAction(() => meta.onEdit(user))}
-                >
-                  <Pencil className="mr-2 h-4 w-4" />
-                  Edit
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() =>
-                    handleAction(() => meta.onManageCompanies(user))
-                  }
-                >
-                  <Building className="mr-2 h-4 w-4" />
-                  Companies
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={() => handleAction(() => meta.onToggleStatus(user))}
-                >
-                  <Power className="mr-2 h-4 w-4" />
-                  {user.status === "active" ? "Deactivate" : "Activate"}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="ml-2"
-              onClick={() => toggleRow(user.id)}
-            >
-              {isExpanded ? (
-                <ChevronUp className="h-4 w-4" />
-              ) : (
-                <ChevronDown className="h-4 w-4" />
-              )}
-            </Button>
-          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => toggleRow(user.id)}
+            aria-label={isExpanded ? "Collapse" : "Expand"}
+          >
+            {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </Button>
         </div>
 
         {isExpanded && (
-          <div className="mt-4 pt-4 border-t">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="mt-4 space-y-4">
+            <div className="grid grid-cols-2 gap-2">
               <div>
-                <h4 className="text-sm font-medium mb-2">
-                  Contact Information
-                </h4>
-                <div className="space-y-2">
-                  <div>
-                    <span className="text-xs text-muted-foreground">
-                      Email:
-                    </span>
-                    <p className="text-sm">{user.email}</p>
-                  </div>
-                  <div>
-                    <span className="text-xs text-muted-foreground">
-                      Phone:
-                    </span>
-                    <p className="text-sm">
-                      {user.phone_number || "Not provided"}
-                    </p>
-                  </div>
-                </div>
+                <div className="text-sm font-medium">Role</div>
+                <div className="text-sm">{user.role}</div>
               </div>
               <div>
-                <h4 className="text-sm font-medium mb-2">Account Details</h4>
-                <div className="space-y-2">
-                  <div>
-                    <span className="text-xs text-muted-foreground">Role:</span>
-                    <p className="text-sm capitalize">{user.role}</p>
-                  </div>
-                  <div>
-                    <span className="text-xs text-muted-foreground">
-                      Status:
-                    </span>
-                    <p className="text-sm capitalize">{user.status}</p>
-                  </div>
-                  {user.dob && (
-                    <div>
-                      <span className="text-xs text-muted-foreground">
-                        Birthday:
-                      </span>
-                      <p className="text-sm flex items-center">
-                        {formatDate(user.dob)}
-                        {birthdayStatus && (
-                          <span className="ml-2">
-                            {birthdayStatus === "today" ? (
-                              <Cake className="h-4 w-4 text-pink-500" />
-                            ) : birthdayStatus === "upcoming" ? (
-                              <Bell className="h-4 w-4 text-blue-500" />
-                            ) : null}
-                          </span>
-                        )}
-                      </p>
-                    </div>
-                  )}
-                </div>
+                <div className="text-sm font-medium">Status</div>
+                <div className="text-sm">{user.status}</div>
               </div>
+              {user.phone_number && (
+                <div>
+                  <div className="text-sm font-medium">Phone</div>
+                  <div className="text-sm">{user.phone_number}</div>
+                </div>
+              )}
+              {user.dob && (
+                <div>
+                  <div className="text-sm font-medium">Birthday</div>
+                  <div className="text-sm flex items-center">
+                    {formatDate(user.dob)}
+                    {birthdayStatus === "today" && (
+                      <Cake className="ml-1 h-4 w-4 text-yellow-500" />
+                    )}
+                    {birthdayStatus === "upcoming" && (
+                      <Bell className="ml-1 h-4 w-4 text-blue-500" />
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
-            {user.companies && user.companies.length > 0 && (
-              <div className="mt-4">
-                <h4 className="text-sm font-medium mb-2">
-                  Associated Companies
-                </h4>
-                <div className="flex flex-wrap gap-2">
-                  {user.companies.map((company) => (
-                    <Badge key={company.id} variant="outline">
-                      {company.name}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div className="mt-4 flex justify-end space-x-2">
+            <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => meta.onEdit(user)}
+                onClick={() => handleAction(() => meta.onEdit(user))}
               >
-                <Pencil className="mr-2 h-4 w-4" />
+                <Pencil className="h-4 w-4 mr-1" />
                 Edit
               </Button>
               <Button
                 size="sm"
-                variant={user.status === "active" ? "destructive" : "default"}
-                onClick={() => meta.onToggleStatus(user)}
+                variant="outline"
+                onClick={() => handleAction(() => meta.onManageCompanies(user))}
               >
-                <Power className="mr-2 h-4 w-4" />
+                <Building className="h-4 w-4 mr-1" />
+                Companies
+              </Button>
+              <Button
+                size="sm"
+                variant={user.status === "active" ? "destructive" : "default"}
+                onClick={() => handleAction(() => meta.onToggleStatus(user))}
+              >
+                <Power className="h-4 w-4 mr-1" />
                 {user.status === "active" ? "Deactivate" : "Activate"}
               </Button>
             </div>
@@ -418,6 +333,11 @@ export function DataTable<TData extends User, TValue>({
           ))}
         </TableRow>
       ));
+  };
+
+  // Add this function to determine if a row should be highlighted
+  const isHighlighted = (userId: string) => {
+    return lastUpdatedUserId === userId;
   };
 
   return (
@@ -495,6 +415,11 @@ export function DataTable<TData extends User, TValue>({
                 <TableRow
                   key={row.id}
                   data-state={row.getIsSelected() && "selected"}
+                  className={
+                    isHighlighted(row.original.id)
+                      ? "bg-blue-50 dark:bg-blue-900/20 transition-colors duration-500"
+                      : ""
+                  }
                 >
                   {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id}>

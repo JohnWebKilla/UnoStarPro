@@ -2,16 +2,12 @@
 
 import { useState, useEffect } from "react";
 import { DataTable } from "./data-table";
-import { columns } from "./columns";
 import { Button } from "@/components/ui/button";
 import { Plus, Loader2 } from "lucide-react";
 import { PayrollDialog } from "./components/payroll-dialog";
 import { useToast } from "@/components/ui/use-toast";
-import { PayrollTransaction } from "./types";
-import { GeneratePayrollButton } from "./components/generate-payroll-button";
 import { createClient } from "@/utils/supabase/client";
 import { ErrorBoundary } from "./components/error-boundary";
-import { DebugPanel } from "./components/debug-panel";
 import { MonthPicker } from "@/components/ui/month-picker";
 import {
   DropdownMenu,
@@ -24,9 +20,7 @@ import { MoreHorizontal } from "lucide-react";
 import { startOfMonth, endOfMonth, format } from "date-fns";
 import { TransactionsDialog } from "./components/transactions-dialog";
 import { ColumnDef } from "@tanstack/react-table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
 
 // Add this type for payment status
 type OverallStatus = "paid" | "partially_paid" | "pending" | "unpaid";
@@ -92,83 +86,6 @@ interface PayrollApiResponse {
     source?: string;
   };
 }
-
-const calculateUserSummary = (transactions: any[]): PaycheckSummary => {
-  const summary = {
-    basePayment: 0,
-    advances: 0,
-    penalties: 0,
-    bonuses: 0,
-    total: 0,
-    paidAmount: 0,
-    pendingAmount: 0,
-    status: "Pending",
-  };
-
-  transactions.forEach((t) => {
-    const amount = t.amount;
-
-    switch (t.transaction_type) {
-      case "payment":
-        summary.basePayment += amount;
-        if (t.status === "paid") {
-          summary.paidAmount += amount;
-        } else if (t.status === "pending") {
-          summary.pendingAmount += amount;
-        }
-        break;
-
-      case "bonus":
-        summary.bonuses += amount;
-        if (t.status === "paid") {
-          summary.paidAmount += amount;
-        } else if (t.status === "pending") {
-          summary.pendingAmount += amount;
-        }
-        break;
-
-      case "advance":
-        summary.advances += amount;
-        if (t.status === "paid") {
-          summary.paidAmount -= amount;
-        } else if (t.status === "pending") {
-          summary.pendingAmount += amount;
-        }
-        break;
-
-      case "penalty":
-        if (t.status === "charged") {
-          summary.penalties += amount;
-          summary.paidAmount -= amount;
-        } else if (t.status === "pending") {
-          summary.pendingAmount += amount;
-        }
-        break;
-    }
-  });
-
-  // Calculate total: base + bonus - (advances + charged penalties)
-  summary.total =
-    summary.basePayment +
-    summary.bonuses -
-    summary.advances -
-    summary.penalties;
-
-  // Ensure amounts don't go below zero
-  summary.paidAmount = Math.max(0, summary.paidAmount);
-  summary.pendingAmount = Math.max(0, summary.pendingAmount);
-
-  // Determine overall status
-  if (summary.paidAmount === 0 && summary.pendingAmount === 0) {
-    summary.status = "Unpaid";
-  } else if (summary.paidAmount > 0 && summary.pendingAmount === 0) {
-    summary.status = "Paid";
-  } else {
-    summary.status = "Partially Paid";
-  }
-
-  return summary;
-};
 
 export default function PaychecksPage() {
   return (

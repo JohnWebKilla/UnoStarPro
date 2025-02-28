@@ -65,6 +65,11 @@ import {
 } from "@tanstack/react-table";
 import { SortingState } from "@tanstack/react-table";
 import React from "react";
+import {
+  getClientCache,
+  setClientCache,
+  deleteClientCache,
+} from "@/utils/client-cache";
 
 interface Expense {
   id: number;
@@ -93,7 +98,7 @@ interface Expense {
   };
 }
 
-function ExpensesContent() {
+function ExpensesContent(): React.ReactNode {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedExpense, setSelectedExpense] = useState<Expense | undefined>();
@@ -117,6 +122,12 @@ function ExpensesContent() {
   const [changedFields, setChangedFields] = useState<
     { id: number; fields: string[]; timestamp: number }[]
   >([]);
+  const [dataSource, setDataSource] = useState<"cache" | "database">(
+    "database"
+  );
+  const [chartDataSource, setChartDataSource] = useState<"cache" | "database">(
+    "database"
+  );
 
   const statuses = [
     {
@@ -348,6 +359,21 @@ function ExpensesContent() {
 
       if (!user) return;
 
+      // Create a cache key based on the month and user
+      const cacheKey = `expenses:${format(monthStart, "yyyy-MM")}:${user.id}`;
+
+      // Try to get data from cache first using client-side cache utility
+      const { data: cachedData, source } =
+        await getClientCache<Expense[]>(cacheKey);
+
+      if (cachedData) {
+        setExpenses(cachedData);
+        setDataSource(source);
+        setIsLoadingData(false);
+        setIsInitializing(false);
+        return;
+      }
+
       // First, ensure payroll expenses are up to date
       await supabase.rpc("sync_monthly_payroll", {
         month_date: monthStart.toISOString(),
@@ -380,6 +406,9 @@ function ExpensesContent() {
               : expense.amount,
         })) || [];
 
+      // Store in cache for 5 minutes (300 seconds) using client-side cache utility
+      await setClientCache(cacheKey, formattedData, 300);
+      setDataSource("database");
       setExpenses(formattedData);
     } catch (error) {
       toast({
@@ -395,6 +424,21 @@ function ExpensesContent() {
 
   const fetchChartData = useCallback(async () => {
     try {
+      if (!user) return;
+
+      // Create a cache key based on the date range and user
+      const cacheKey = `expenses:chart:${format(dateRange.start, "yyyy-MM")}:${format(dateRange.end, "yyyy-MM")}:${user.id}`;
+
+      // Try to get data from cache first using client-side cache utility
+      const { data: cachedData, source } =
+        await getClientCache<any[]>(cacheKey);
+
+      if (cachedData) {
+        setChartData(cachedData);
+        setChartDataSource(source);
+        return;
+      }
+
       interface ExpenseWithCategory {
         amount: number;
         currency: "USD" | "UZS";
@@ -454,11 +498,14 @@ function ExpensesContent() {
         return new Date(a.date).getTime() - new Date(b.date).getTime();
       });
 
+      // Store in cache for 5 minutes (300 seconds) using client-side cache utility
+      await setClientCache(cacheKey, chartData, 300);
+      setChartDataSource("database");
       setChartData(chartData);
     } catch (error) {
       console.error("Error fetching chart data:", error);
     }
-  }, [dateRange, supabase]);
+  }, [dateRange, supabase, user]);
 
   useEffect(() => {
     const getCurrentUser = async () => {
@@ -483,16 +530,19 @@ function ExpensesContent() {
         expense.id === updatedExpense.id ? updatedExpense : expense
       )
     );
+    invalidateExpensesCache();
   };
 
   const addExpenseInPlace = (newExpense: Expense) => {
     setExpenses((currentExpenses) => [newExpense, ...currentExpenses]);
+    invalidateExpensesCache();
   };
 
   const removeExpenseInPlace = (expenseId: number) => {
     setExpenses((currentExpenses) =>
       currentExpenses.filter((expense) => expense.id !== expenseId)
     );
+    invalidateExpensesCache();
   };
 
   useEffect(() => {
@@ -677,15 +727,40 @@ function ExpensesContent() {
     });
   };
 
+  // Update the invalidateExpensesCache function to use client-side cache utility
+  const invalidateExpensesCache = useCallback(async () => {
+    if (!user) return;
+    const monthStart = startOfMonth(selectedMonth);
+    const cacheKey = `expenses:${format(monthStart, "yyyy-MM")}:${user.id}`;
+
+    // Use client-side cache utility to delete cache
+    await deleteClientCache(cacheKey);
+
+    // Also invalidate chart data cache
+    const chartCacheKey = `expenses:chart:${format(dateRange.start, "yyyy-MM")}:${format(dateRange.end, "yyyy-MM")}:${user.id}`;
+    await deleteClientCache(chartCacheKey);
+  }, [selectedMonth, dateRange, user]);
+
+  // Add data source indicators to the UI
+  const renderDataSourceIndicator = () => {
+    return (
+      <div className="text-xs text-muted-foreground mb-2">
+        Data source: {dataSource === "cache" ? "Cache" : "Database"} | Chart
+        data: {chartDataSource === "cache" ? "Cache" : "Database"}
+      </div>
+    );
+  };
+
   return (
     <div className="p-6 space-y-6 max-w-[1920px] mx-auto">
       {/* Header Section */}
       <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between bg-card p-6 rounded-lg border">
-        <div className="flex flex-col gap-2">
-          <h1 className="text-3xl font-bold tracking-tight">Expenses</h1>
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Expenses</h1>
           <p className="text-muted-foreground">
             Manage and track your business expenses
           </p>
+          {renderDataSourceIndicator()}
         </div>
         <div className="flex flex-col sm:flex-row gap-3">
           <MonthPicker
