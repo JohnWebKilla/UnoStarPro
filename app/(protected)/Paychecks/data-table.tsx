@@ -41,6 +41,7 @@ interface DataTableProps<TData, TValue> {
   lastUpdatedUserId?: string | null;
   onViewTransactions?: (userId: string) => void;
   onRefresh?: () => Promise<void>;
+  emptyMessage?: string;
 }
 
 export function DataTable<TData extends MonthlyPayrollSummary, TValue>({
@@ -51,6 +52,7 @@ export function DataTable<TData extends MonthlyPayrollSummary, TValue>({
   lastUpdatedUserId = null,
   onViewTransactions,
   onRefresh,
+  emptyMessage,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -252,7 +254,7 @@ export function DataTable<TData extends MonthlyPayrollSummary, TValue>({
                   colSpan={columns.length}
                   className="h-24 text-center"
                 >
-                  No payroll data found.
+                  {emptyMessage || "No payroll data found."}
                 </TableCell>
               </TableRow>
             )}

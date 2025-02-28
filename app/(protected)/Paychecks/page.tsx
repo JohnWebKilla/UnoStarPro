@@ -33,6 +33,7 @@ import {
   deleteClientCache,
 } from "@/utils/client-cache";
 import { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
+import { GeneratePayrollDialog } from "./components/generate-payroll-dialog";
 
 // Add this type for payment status
 type OverallStatus = "paid" | "partially_paid" | "pending" | "unpaid";
@@ -91,6 +92,8 @@ function PaychecksContent() {
   const [lastFetchTime, setLastFetchTime] = useState<Date | null>(null);
   const { toast } = useToast();
   const supabase = createClient();
+  const [isAdvancedPayrollDialogOpen, setIsAdvancedPayrollDialogOpen] =
+    useState(false);
 
   // Fetch monthly summaries for the selected month
   const fetchMonthlySummary = useCallback(
@@ -161,6 +164,20 @@ function PaychecksContent() {
         const fetchTime = fetchEndTime - fetchStartTime;
 
         console.log(`Summaries loaded from API in ${fetchTime}ms:`, result);
+
+        // Check if the result contains data for the selected month
+        const selectedMonthStr = format(selectedMonth, "yyyy-MM");
+        const hasDataForSelectedMonth = result.data.some(
+          (summary) => summary.month === selectedMonthStr
+        );
+
+        console.log(
+          `Has data for ${selectedMonthStr}: ${hasDataForSelectedMonth}`
+        );
+
+        if (!hasDataForSelectedMonth) {
+          console.log(`No payroll data found for ${selectedMonthStr}`);
+        }
 
         // Store in cache for 5 minutes (300 seconds)
         await setClientCache(cacheKey, result.data, 300);
@@ -376,7 +393,7 @@ function PaychecksContent() {
           </Button>
           <Button
             variant="outline"
-            onClick={handleGeneratePayroll}
+            onClick={() => setIsAdvancedPayrollDialogOpen(true)}
             disabled={isLoading}
           >
             Generate Payroll
@@ -395,6 +412,7 @@ function PaychecksContent() {
         onViewTransactions={handleViewTransactions}
         onRefresh={invalidateCache}
         lastUpdatedUserId={lastUpdatedUserId}
+        emptyMessage={`No payroll data found for ${format(selectedMonth, "MMMM yyyy")}`}
       />
 
       <PayrollDialog
@@ -411,6 +429,12 @@ function PaychecksContent() {
           onTransactionUpdated={handleTransactionUpdated}
         />
       )}
+
+      <GeneratePayrollDialog
+        open={isAdvancedPayrollDialogOpen}
+        onOpenChange={setIsAdvancedPayrollDialogOpen}
+        onSuccess={handlePayrollDialogSuccess}
+      />
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { getCache, setCache, deleteCache } from "@/lib/redis";
-import { startOfMonth, endOfMonth, parseISO } from "date-fns";
+import { startOfMonth, endOfMonth, parseISO, format } from "date-fns";
 
 // Cache expiration time in seconds (5 minutes)
 const CACHE_EXPIRATION = 300;
@@ -47,9 +47,14 @@ export async function GET(request: NextRequest) {
     const selectedMonth = parseISO(monthParam);
     const monthStart = startOfMonth(selectedMonth);
     const monthEnd = endOfMonth(selectedMonth);
+    const monthString = monthStart.toISOString().slice(0, 7); // YYYY-MM format
+
+    console.log(
+      `Processing payroll for month: ${monthString} (${format(monthStart, "MMMM yyyy")})`
+    );
 
     // Build cache key
-    const cacheKey = `payroll:monthly-summary:${monthStart.toISOString().slice(0, 7)}`;
+    const cacheKey = `payroll:monthly-summary:${monthString}`;
     console.log(`Processing request for ${cacheKey}, skipCache=${skipCache}`);
 
     // Try to get data from cache if not skipping
@@ -97,179 +102,168 @@ export async function GET(request: NextRequest) {
     const supabase = await createClient();
     const dbStartTime = Date.now();
 
-    // First get the monthly summary with a timeout
-    const summaryPromise = supabase.from("monthly_payroll_summary").select("*");
-
-    const timeoutMs = process.env.VERCEL ? 4000 : 5000;
-
-    const summaryResponse = (await Promise.race([
-      summaryPromise,
-      new Promise((_, reject) =>
-        setTimeout(
-          () => reject(new Error("Database query timed out")),
-          timeoutMs
-        )
-      ),
-    ])) as { data: PayrollSummary[] | null; error: any };
-
-    const { data: summaryData, error: summaryError } = summaryResponse;
-
-    if (summaryError) {
-      console.error("Supabase error:", summaryError);
-      return NextResponse.json(
-        { error: summaryError.message },
-        { status: 500 }
-      );
-    }
-
-    if (!summaryData) {
-      console.error("No summary data returned from database");
-      return NextResponse.json({ error: "No data found" }, { status: 404 });
-    }
-
-    // Then get the transactions for the selected month with a timeout
-    const transactionsPromise = supabase
+    // First, let's just get the transactions for the month
+    // This is more reliable since we know the transaction_date format
+    console.log(
+      `Fetching transactions for period: ${monthStart.toISOString()} to ${monthEnd.toISOString()}`
+    );
+    const { data: transactionsData, error: transactionsError } = await supabase
       .from("payroll_transactions")
       .select("id, user_id, amount, status, transaction_date, transaction_type")
       .gte("transaction_date", monthStart.toISOString())
       .lt("transaction_date", monthEnd.toISOString())
       .neq("status", "cancelled");
 
-    const transactionsResponse = (await Promise.race([
-      transactionsPromise,
-      new Promise((_, reject) =>
-        setTimeout(
-          () => reject(new Error("Database query timed out")),
-          timeoutMs
-        )
-      ),
-    ])) as { data: PayrollTransaction[] | null; error: any };
-
-    const { error: transactionsError } = transactionsResponse;
-    let transactionsData = transactionsResponse.data || [];
-
     if (transactionsError) {
-      console.error("Supabase error:", transactionsError);
-      return NextResponse.json(
-        { error: transactionsError.message },
-        { status: 500 }
-      );
-    }
-
-    const dbEndTime = Date.now();
-    console.log(`Database queries completed in ${dbEndTime - dbStartTime}ms`);
-
-    // Calculate total and paid amounts
-    const combinedData = summaryData.map((summary: PayrollSummary) => {
-      const transactions = transactionsData.filter(
-        (t: PayrollTransaction) => t.user_id === summary.user_id
-      );
-
-      // Calculate base total first
-      const baseTotal = summary.base_payment;
-
-      // Handle different transaction types
-      const {
-        paidAmount,
-        pendingAmount,
-        pendingPenalties,
-        deductedPenalties,
-        totalBonuses,
-        totalAdvances,
-        totalPenalties,
-      } = transactions.reduce(
-        (
-          acc: {
-            paidAmount: number;
-            pendingAmount: number;
-            pendingPenalties: number;
-            deductedPenalties: number;
-            totalBonuses: number;
-            totalAdvances: number;
-            totalPenalties: number;
-          },
-          t: PayrollTransaction
-        ) => {
-          const amount = t.amount;
-          switch (t.transaction_type) {
-            case "bonus":
-              acc.totalBonuses += amount;
-              if (t.status === "paid") acc.paidAmount += amount;
-              if (t.status === "pending") acc.pendingAmount += amount;
-              break;
-            case "penalty":
-              if (t.status === "charged") {
-                acc.totalPenalties += amount;
-                acc.paidAmount -= amount;
-              }
-              if (t.status === "pending") acc.pendingPenalties += amount;
-              break;
-            case "advance":
-              acc.totalAdvances += amount;
-              if (t.status === "paid") {
-                acc.paidAmount -= amount;
-              }
-              if (t.status === "pending") acc.pendingAmount += amount;
-              break;
-            case "payment":
-              if (t.status === "paid") acc.paidAmount += amount;
-              if (t.status === "pending") acc.pendingAmount += amount;
-              break;
-          }
-          return acc;
+      console.error("Error fetching transactions:", transactionsError);
+      // Return empty data instead of error
+      return NextResponse.json({
+        data: [],
+        source: "database",
+        timing: {
+          total: Date.now() - startTime,
+          database: Date.now() - dbStartTime,
         },
-        {
-          paidAmount: 0,
-          pendingAmount: 0,
-          pendingPenalties: 0,
-          deductedPenalties: 0,
-          totalBonuses: 0,
-          totalAdvances: 0,
-          totalPenalties: 0,
-        }
-      );
-
-      // Final total calculation:
-      // base + bonuses - (advances + penalties)
-      const total = baseTotal + totalBonuses - totalAdvances - totalPenalties;
-
-      return {
-        ...summary,
-        transaction_ids: transactions.map((t: PayrollTransaction) => t.id),
-        total_amount: total,
-        paid_amount: Math.max(0, paidAmount),
-        pending_amount: Math.max(0, pendingAmount),
-        pending_penalties: pendingPenalties,
-        deducted_penalties: deductedPenalties,
-      };
-    });
-
-    // Store in cache for future requests
-    try {
-      // Set a timeout for cache storage
-      await Promise.race([
-        setCache(cacheKey, combinedData, CACHE_EXPIRATION),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Cache storage timed out")), 2000)
-        ),
-      ]);
-      console.log(`Data cached successfully for ${cacheKey}`);
-    } catch (cacheError) {
-      console.error("Failed to store data in cache:", cacheError);
-      // Continue even if caching fails
+      });
     }
 
-    const totalTime = Date.now() - startTime;
-    console.log(`Total request processing time: ${totalTime}ms`);
+    // Log transaction data
+    if (transactionsData && transactionsData.length > 0) {
+      console.log(
+        `Found ${transactionsData.length} transactions for month ${monthString}`
+      );
+      console.log("Sample transaction data:", transactionsData.slice(0, 2));
 
-    return NextResponse.json({
-      data: combinedData,
-      source: "database",
-      timing: {
-        total: totalTime,
-        database: dbEndTime - dbStartTime,
-      },
-    });
+      // Extract unique user IDs from transactions
+      const userIds = Array.from(
+        new Set(transactionsData.map((t) => t.user_id))
+      );
+      console.log(`Found ${userIds.length} unique users with transactions`);
+
+      // Fetch user details for these users
+      const { data: userData, error: userError } = await supabase
+        .from("users")
+        .select("id, first_name, last_name, email")
+        .in("id", userIds);
+
+      if (userError) {
+        console.error("Error fetching user data:", userError);
+      }
+
+      // Create summary data from transactions and user data
+      const summaryData = userIds.map((userId) => {
+        const userTransactions = transactionsData.filter(
+          (t) => t.user_id === userId
+        );
+        const user = userData?.find((u) => u.id === userId) || {
+          first_name: "Unknown",
+          last_name: "User",
+          email: userId,
+        };
+
+        // Calculate totals
+        const basePayment = userTransactions
+          .filter((t) => t.transaction_type === "payment")
+          .reduce((sum, t) => sum + t.amount, 0);
+
+        const advances = userTransactions
+          .filter((t) => t.transaction_type === "advance")
+          .reduce((sum, t) => sum + t.amount, 0);
+
+        const penalties = userTransactions
+          .filter((t) => t.transaction_type === "penalty")
+          .reduce((sum, t) => sum + t.amount, 0);
+
+        const bonuses = userTransactions
+          .filter((t) => t.transaction_type === "bonus")
+          .reduce((sum, t) => sum + t.amount, 0);
+
+        // Calculate paid and pending amounts
+        const paidAmount = userTransactions
+          .filter((t) => t.status === "paid")
+          .reduce((sum, t) => {
+            if (
+              t.transaction_type === "payment" ||
+              t.transaction_type === "bonus"
+            ) {
+              return sum + t.amount;
+            } else if (
+              t.transaction_type === "advance" ||
+              t.transaction_type === "penalty"
+            ) {
+              return sum - t.amount;
+            }
+            return sum;
+          }, 0);
+
+        const pendingAmount = userTransactions
+          .filter((t) => t.status === "pending")
+          .reduce((sum, t) => {
+            if (
+              t.transaction_type === "payment" ||
+              t.transaction_type === "bonus"
+            ) {
+              return sum + t.amount;
+            }
+            return sum;
+          }, 0);
+
+        // Calculate total amount
+        const totalAmount = basePayment + bonuses - advances - penalties;
+
+        return {
+          user_id: userId,
+          month: monthString,
+          first_name: user.first_name,
+          last_name: user.last_name,
+          email: user.email,
+          base_payment: basePayment,
+          advances: advances,
+          penalties: penalties,
+          bonuses: bonuses,
+          total_amount: totalAmount,
+          paid_amount: Math.max(0, paidAmount),
+          pending_amount: Math.max(0, pendingAmount),
+          transaction_ids: userTransactions.map((t) => t.id),
+        };
+      });
+
+      console.log(
+        `Created ${summaryData.length} summary records from transactions`
+      );
+
+      // Store in cache for future requests
+      try {
+        await setCache(cacheKey, summaryData, CACHE_EXPIRATION);
+        console.log(`Data cached successfully for ${cacheKey}`);
+      } catch (cacheError) {
+        console.error("Failed to store data in cache:", cacheError);
+      }
+
+      const totalTime = Date.now() - startTime;
+      console.log(`Total request processing time: ${totalTime}ms`);
+
+      return NextResponse.json({
+        data: summaryData,
+        source: "database",
+        timing: {
+          total: totalTime,
+          database: Date.now() - dbStartTime,
+        },
+      });
+    } else {
+      console.log(`No transactions found for month ${monthString}`);
+
+      // Return empty data
+      return NextResponse.json({
+        data: [],
+        source: "database",
+        timing: {
+          total: Date.now() - startTime,
+          database: Date.now() - dbStartTime,
+        },
+      });
+    }
   } catch (error: any) {
     console.error("Error fetching payroll data:", error);
     return NextResponse.json(
