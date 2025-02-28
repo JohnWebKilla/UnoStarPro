@@ -137,6 +137,18 @@ export function UserDialog({
         ? new Date(user.dob).toISOString().split("T")[0]
         : "";
 
+      console.log("Resetting form with user data:", user);
+
+      // Ensure we have working_shift and off_days with proper defaults
+      const working_shift = user.working_shift || "1";
+      const off_days =
+        Array.isArray(user.off_days) && user.off_days.length > 0
+          ? user.off_days
+          : ["saturday", "sunday"];
+
+      console.log("Working shift:", working_shift);
+      console.log("Off days:", off_days);
+
       form.reset({
         first_name: user.first_name || "",
         last_name: user.last_name || "",
@@ -145,8 +157,8 @@ export function UserDialog({
         role: user.role || "user",
         department: user.department,
         dob: formattedDate,
-        working_shift: user.working_shift || "1",
-        off_days: user.off_days || ["saturday", "sunday"],
+        working_shift: working_shift,
+        off_days: off_days,
       });
     }
   }, [user, open, form]);
@@ -183,27 +195,35 @@ export function UserDialog({
     async (values: z.infer<typeof formSchema>) => {
       if (dialogState.isSubmitting) return;
 
+      setDialogState((prev) => ({ ...prev, isSubmitting: true }));
+
       try {
-        setDialogState((prev) => ({ ...prev, isSubmitting: true }));
+        console.log("Submitting form with values:", values);
+        console.log("Working shift:", values.working_shift);
+        console.log("Off days:", values.off_days);
+
         const formData = new FormData();
 
-        // Handle array values separately
-        const { off_days, ...otherValues } = values;
-
-        // Add non-array values
-        Object.entries(otherValues).forEach(([key, value]) => {
-          if (value) formData.append(key, value);
-        });
-
-        // Add array values as JSON strings
-        if (off_days) {
-          formData.append("off_days", JSON.stringify(off_days));
+        // Add all form values
+        for (const key in values) {
+          const value = values[key as keyof typeof values];
+          if (value !== undefined && value !== null) {
+            if (key === "off_days" && Array.isArray(value)) {
+              // Handle off_days array properly
+              value.forEach((day) => {
+                formData.append("off_days", day);
+              });
+            } else {
+              formData.append(key, String(value));
+            }
+          }
         }
 
+        // If editing, add the user ID
         if (user) {
           formData.append("id", user.id);
 
-          // Create optimistic user update
+          // Create an optimistic update of the user object with the new values
           const optimisticUser: User = {
             ...user,
             first_name: values.first_name,
@@ -212,48 +232,76 @@ export function UserDialog({
             phone_number: values.phone_number,
             role: values.role as UserRole,
             department: values.department,
-            dob: values.dob,
-            working_shift: values.working_shift,
-            off_days: values.off_days,
+            dob: values.dob ? values.dob : undefined,
+            working_shift: values.working_shift || "1",
+            off_days: values.off_days || ["saturday", "sunday"],
           };
 
-          // Call onSuccess immediately with optimistic data
+          // Close the dialog and notify parent with the optimistic user data
+          handleDialogChange(false);
           onSuccess?.(optimisticUser);
 
-          // Make the API call in the background
-          const response = await updateUser(formData);
-          if (response.error) throw new Error(response.error);
-          if (!response.user || !response.user.user)
-            throw new Error("User update failed");
-        } else {
-          const response = await createUser(formData);
-          if (response.error) throw new Error(response.error);
-          if (!response.user || !response.user.user)
-            throw new Error("User creation failed");
+          // Update the user in the background
+          updateUser(formData)
+            .then((result) => {
+              if (result.error) {
+                console.error("Background user update failed:", result.error);
+                toast({
+                  title: "Update Error",
+                  description: result.error,
+                  variant: "destructive",
+                });
+              } else if (result.user) {
+                // Log the updated user data
+                console.log("User updated successfully:", result.user);
 
-          const newUser = formatUser(response.user.user);
-          setCreatedUser(newUser);
-          setDialogState((prev) => ({ ...prev, companyDialogOpen: true }));
+                // Create an updated user object with the returned data
+                const updatedUserData = {
+                  ...optimisticUser,
+                  working_shift:
+                    result.user.user_metadata?.working_shift ||
+                    optimisticUser.working_shift,
+                  off_days:
+                    result.user.user_metadata?.off_days ||
+                    optimisticUser.off_days,
+                };
+
+                // Update the user in the table silently (without reopening the dialog)
+                setTimeout(() => {
+                  onSuccess?.(updatedUserData);
+                }, 500);
+              }
+            })
+            .catch((error) => {
+              console.error("Error updating user:", error);
+            });
+        } else {
+          // Create new user
+          const result = await createUser(formData);
+
+          if (result.error) {
+            throw new Error(result.error);
+          }
 
           toast({
-            title: "Success",
-            description:
-              "User created successfully. Please configure company access.",
+            title: "User Created",
+            description: "New user has been created",
           });
+
+          // For new users, open the company dialog
+          setDialogState((prev) => ({ ...prev, companyDialogOpen: true }));
         }
       } catch (error: any) {
+        console.error("Error submitting form:", error);
         toast({
           title: "Error",
-          description: error.message || "An error occurred",
+          description: error.message || "Something went wrong",
           variant: "destructive",
         });
-        // If there was an error, we need to close the dialog and let the parent know
-        onOpenChange(false);
-      } finally {
         setDialogState((prev) => ({ ...prev, isSubmitting: false }));
       }
     },
-    [user, toast, onSuccess, onOpenChange, dialogState.isSubmitting]
+    [user, toast, onSuccess, handleDialogChange, dialogState.isSubmitting]
   );
 
   const handleCompanyDialogChange = useCallback(
@@ -278,27 +326,33 @@ export function UserDialog({
     }
   }, [handleDialogChange, createdUser, onSuccess]);
 
+  // Log user data for debugging
+  useEffect(() => {
+    if (user) {
+      console.log("UserDialog received user data:", user);
+      console.log("Working shift:", user.working_shift);
+      console.log("Off days:", user.off_days);
+    }
+  }, [user]);
+
   return (
     <>
       <Dialog open={open} onOpenChange={handleDialogChange}>
         <DialogContent
-          className="sm:max-w-[425px] w-[95vw] max-h-[90vh] overflow-y-auto"
-          onEscapeKeyDown={(e) =>
-            dialogState.isSubmitting && e.preventDefault()
-          }
-          onInteractOutside={(e) =>
-            dialogState.isSubmitting && e.preventDefault()
-          }
-          onCloseAutoFocus={(e) =>
-            dialogState.isSubmitting && e.preventDefault()
-          }
+          className="sm:max-w-[600px] w-[95vw] max-h-[90vh] overflow-y-auto"
+          onPointerDownOutside={(e) => {
+            if (dialogState.isSubmitting) e.preventDefault();
+          }}
+          onInteractOutside={(e) => {
+            if (dialogState.isSubmitting) e.preventDefault();
+          }}
         >
           <DialogHeader>
-            <DialogTitle>{user ? "Edit User" : "Create User"}</DialogTitle>
+            <DialogTitle>{user ? "Edit User" : "Add New User"}</DialogTitle>
             <DialogDescription>
               {user
-                ? "Update the user details below."
-                : "Fill in the details to create a new user."}
+                ? "Update user information"
+                : "Fill in the details to create a new user"}
             </DialogDescription>
           </DialogHeader>
 
@@ -308,217 +362,281 @@ export function UserDialog({
               onSubmit={form.handleSubmit(handleSubmit)}
               className="space-y-4"
             >
-              <FormField
-                control={form.control}
-                name="first_name"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>First Name</FormLabel>
-                    <FormControl>
-                      <Input {...field} className="rounded-md" />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="last_name"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Last Name</FormLabel>
-                    <FormControl>
-                      <Input {...field} className="rounded-md" />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="email"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Email</FormLabel>
-                    <FormControl>
-                      <Input {...field} type="email" className="rounded-md" />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="phone_number"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Phone Number</FormLabel>
-                    <FormControl>
-                      <Input {...field} type="tel" className="rounded-md" />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="role"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Role</FormLabel>
-                    <Select
-                      onValueChange={field.onChange}
-                      defaultValue={field.value}
-                    >
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select a role" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="admin">Admin</SelectItem>
-                        <SelectItem value="user">User</SelectItem>
-                        <SelectItem value="driver">Driver</SelectItem>
-                        <SelectItem value="customer">Customer</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="department"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Department</FormLabel>
-                    <Select
-                      onValueChange={field.onChange}
-                      defaultValue={field.value}
-                    >
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select a department" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {Object.entries(DEPARTMENTS).map(
-                          ([value, { icon, label }]) => (
-                            <SelectItem key={value} value={value}>
-                              <span className="flex items-center gap-2">
-                                {icon} {label}
-                              </span>
-                            </SelectItem>
-                          )
-                        )}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="dob"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Date of Birth</FormLabel>
-                    <FormControl>
-                      <Input {...field} type="date" className="rounded-md" />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              {form.watch("role") === "user" && (
-                <>
-                  <FormField
-                    control={form.control}
-                    name="working_shift"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Working Shift</FormLabel>
-                        <Select
-                          onValueChange={field.onChange}
-                          defaultValue={field.value}
-                        >
-                          <FormControl>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select a shift" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {SHIFTS.map((shift) => (
-                              <SelectItem key={shift.id} value={shift.id}>
-                                {shift.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name="off_days"
-                    render={() => (
-                      <FormItem>
-                        <FormLabel>Off Days</FormLabel>
-                        <div className="flex flex-col gap-2">
-                          {DAYS.map((day) => (
-                            <div
-                              key={day.id}
-                              className="flex items-center space-x-2"
-                            >
-                              <Checkbox
-                                id={day.id}
-                                checked={form
-                                  .watch("off_days")
-                                  ?.includes(day.id)}
-                                onCheckedChange={(checked) => {
-                                  const currentOffDays =
-                                    form.watch("off_days") || [];
-                                  const newOffDays = checked
-                                    ? [...currentOffDays, day.id]
-                                    : currentOffDays.filter(
-                                        (d) => d !== day.id
-                                      );
-                                  form.setValue("off_days", newOffDays);
-                                }}
-                              />
-                              <label htmlFor={day.id}>{day.label}</label>
-                            </div>
-                          ))}
-                        </div>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </>
-              )}
-              {!user && (
+              {/* Row 1: First Name and Last Name */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <FormField
                   control={form.control}
-                  name="password"
+                  name="first_name"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Password</FormLabel>
+                      <FormLabel>First Name</FormLabel>
                       <FormControl>
                         <Input
+                          placeholder="John"
                           {...field}
-                          type="password"
-                          className="rounded-md"
-                          placeholder="Leave empty for auto-generated password"
+                          disabled={dialogState.isSubmitting}
                         />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
-              )}
-              <DialogFooter>
+
+                <FormField
+                  control={form.control}
+                  name="last_name"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Last Name</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="Doe"
+                          {...field}
+                          disabled={dialogState.isSubmitting}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              {/* Row 2: Email and Phone Number */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="email"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Email</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="email"
+                          placeholder="john.doe@example.com"
+                          {...field}
+                          disabled={dialogState.isSubmitting || !!user}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="phone_number"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Phone Number</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="+1 (555) 123-4567"
+                          {...field}
+                          disabled={dialogState.isSubmitting}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              {/* Row 3: Role and Department */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="role"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Role</FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        defaultValue={field.value}
+                        disabled={dialogState.isSubmitting}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select role" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="admin">Admin</SelectItem>
+                          <SelectItem value="manager">Manager</SelectItem>
+                          <SelectItem value="user">User</SelectItem>
+                          <SelectItem value="driver">Driver</SelectItem>
+                          <SelectItem value="customer">Customer</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="department"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Department</FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        defaultValue={field.value}
+                        disabled={dialogState.isSubmitting}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select department" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {Object.entries(DEPARTMENTS).map(
+                            ([key, { icon, label }]) => (
+                              <SelectItem key={key} value={key}>
+                                <span className="flex items-center">
+                                  <span className="mr-2">{icon}</span>
+                                  {label}
+                                </span>
+                              </SelectItem>
+                            )
+                          )}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              {/* Row 4: Password (only for new users) and Date of Birth */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {!user && (
+                  <FormField
+                    control={form.control}
+                    name="password"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Password</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="password"
+                            placeholder="••••••••"
+                            {...field}
+                            disabled={dialogState.isSubmitting}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
+
+                <FormField
+                  control={form.control}
+                  name="dob"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Date of Birth</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="date"
+                          {...field}
+                          disabled={dialogState.isSubmitting}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              {/* Row 5: Working Shift */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="working_shift"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Working Shift</FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        defaultValue={field.value}
+                        disabled={dialogState.isSubmitting}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select shift" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {SHIFTS.map((shift) => (
+                            <SelectItem key={shift.id} value={shift.id}>
+                              {shift.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              {/* Row 6: Off Days */}
+              <div className="grid grid-cols-1 gap-4">
+                <FormField
+                  control={form.control}
+                  name="off_days"
+                  render={() => (
+                    <FormItem>
+                      <div className="mb-2">
+                        <FormLabel>Off Days</FormLabel>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {DAYS.map((day) => (
+                          <FormField
+                            key={day.id}
+                            control={form.control}
+                            name="off_days"
+                            render={({ field }) => {
+                              return (
+                                <FormItem
+                                  key={day.id}
+                                  className="flex flex-row items-start space-x-3 space-y-0"
+                                >
+                                  <FormControl>
+                                    <Checkbox
+                                      checked={field.value?.includes(day.id)}
+                                      onCheckedChange={(checked) => {
+                                        return checked
+                                          ? field.onChange([
+                                              ...(field.value || []),
+                                              day.id,
+                                            ])
+                                          : field.onChange(
+                                              field.value?.filter(
+                                                (value) => value !== day.id
+                                              )
+                                            );
+                                      }}
+                                      disabled={dialogState.isSubmitting}
+                                    />
+                                  </FormControl>
+                                  <FormLabel className="font-normal">
+                                    {day.label}
+                                  </FormLabel>
+                                </FormItem>
+                              );
+                            }}
+                          />
+                        ))}
+                      </div>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <DialogFooter className="sm:justify-between">
                 <Button
                   type="button"
                   variant="outline"
@@ -528,7 +646,35 @@ export function UserDialog({
                   Cancel
                 </Button>
                 <Button type="submit" disabled={dialogState.isSubmitting}>
-                  {user ? "Save Changes" : "Create User"}
+                  {dialogState.isSubmitting ? (
+                    <>
+                      <svg
+                        className="animate-spin -ml-1 mr-2 h-4 w-4"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        ></circle>
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        ></path>
+                      </svg>
+                      {user ? "Updating..." : "Creating..."}
+                    </>
+                  ) : user ? (
+                    "Update User"
+                  ) : (
+                    "Create User"
+                  )}
                 </Button>
               </DialogFooter>
             </form>
@@ -539,16 +685,29 @@ export function UserDialog({
       {createdUser && (
         <CompanyManagement
           open={dialogState.companyDialogOpen}
-          onOpenChange={handleCompanyDialogChange}
+          onOpenChange={(open) => {
+            setDialogState((prev) => ({ ...prev, companyDialogOpen: open }));
+            if (!open) {
+              // Close the main dialog after company management is done
+              handleDialogChange(false);
+              // Call onSuccess with the created user
+              onSuccess?.(createdUser);
+            }
+          }}
           userId={createdUser.id}
           userRole={createdUser.role}
-          currentCompanyIds={
-            createdUser.company_id ? [createdUser.company_id] : []
-          }
-          hasAllAccess={createdUser.has_all_access}
+          currentCompanyIds={[]}
+          hasAllAccess={false}
           companies={companies}
           userName={`${createdUser.first_name} ${createdUser.last_name}`}
-          onSuccess={handleCompanyManagementSuccess}
+          onSuccess={() => {
+            // Close the company dialog
+            setDialogState((prev) => ({ ...prev, companyDialogOpen: false }));
+            // Close the main dialog
+            handleDialogChange(false);
+            // Call onSuccess with the created user
+            onSuccess?.(createdUser);
+          }}
         />
       )}
     </>

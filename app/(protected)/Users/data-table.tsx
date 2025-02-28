@@ -32,6 +32,8 @@ import {
   Pencil,
   Building,
   Power,
+  X,
+  Search,
 } from "lucide-react";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -58,7 +60,7 @@ import {
 import { getBirthdayStatus } from "./columns"; // Only import getBirthdayStatus
 import { User } from "./types"; // Import User from types
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { EditUserDialog } from "./edit-user-dialog";
+import { UserDialog } from "./user-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const variantMap = {
@@ -105,9 +107,43 @@ export function DataTable<TData extends User, TValue>({
   const [expandedRows, setExpandedRows] = useState<string[]>([]);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
-  // Memoize the table instance
+  // Create filtered data based on role and status
+  const filteredData = useMemo(() => {
+    return data.filter((item: User) => {
+      const matchesRole = roleFilter === "all" || item.role === roleFilter;
+      const matchesStatus =
+        statusFilter === "all" || item.status === statusFilter;
+
+      // Apply global filter to search across multiple fields
+      const searchTerm = globalFilter.toLowerCase().trim();
+
+      // Skip search if no search term
+      if (!searchTerm) return matchesRole && matchesStatus;
+
+      // Helper function to safely check if a field includes the search term
+      const includes = (field: string | null | undefined) =>
+        field?.toLowerCase().includes(searchTerm) || false;
+
+      // Check all relevant fields
+      const matchesSearch =
+        includes(item.first_name) ||
+        includes(item.last_name) ||
+        includes(item.email) ||
+        includes(item.role) ||
+        includes(item.status) ||
+        includes(item.phone_number) ||
+        // Also search for full name
+        `${item.first_name || ""} ${item.last_name || ""}`
+          .toLowerCase()
+          .includes(searchTerm);
+
+      return matchesRole && matchesStatus && matchesSearch;
+    });
+  }, [data, roleFilter, statusFilter, globalFilter]);
+
+  // Use the filtered data for the table
   const table = useReactTable({
-    data,
+    data: filteredData,
     columns,
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
@@ -118,7 +154,9 @@ export function DataTable<TData extends User, TValue>({
     state: {
       sorting,
       columnFilters,
+      globalFilter,
     },
+    onGlobalFilterChange: setGlobalFilter,
     meta,
   });
 
@@ -128,61 +166,58 @@ export function DataTable<TData extends User, TValue>({
       // Cleanup on unmount
       setSelectedUser(undefined);
       setDialogOpen(false);
+      setExpandedRows([]);
+      setOpenMenuId(null);
     };
   }, []);
 
   // Simplify the handlers to be synchronous
-  const handleDialogChange = useCallback((open: boolean) => {
-    setDialogOpen(open);
-    if (!open) {
-      // Clear selection after dialog is fully closed
-      const timeout = setTimeout(() => {
-        setSelectedUser(undefined);
-      }, 100);
-      return () => clearTimeout(timeout);
-    }
+  const handleDialogChange = useCallback(
+    (open: boolean) => {
+      if (!open) {
+        // Only close the dialog if it's currently open
+        if (dialogOpen) {
+          setDialogOpen(false);
+          // Clear selection after dialog is fully closed
+          setTimeout(() => {
+            setSelectedUser(undefined);
+          }, 300);
+        }
+      } else {
+        setDialogOpen(true);
+      }
+    },
+    [dialogOpen]
+  );
+
+  const handleEdit = useCallback((user: User) => {
+    // Set the selected user first, then open the dialog
+    setSelectedUser(user as TData);
+    setTimeout(() => {
+      setDialogOpen(true);
+    }, 0);
   }, []);
 
   const handleSuccess = useCallback(async () => {
     if (!selectedUser) return;
 
     try {
-      await meta.onEdit?.(selectedUser);
+      console.log("DataTable handling edit success for user:", selectedUser.id);
+
       // Close dialog immediately
       setDialogOpen(false);
-      // Clear user after a frame to allow dialog to start closing
-      requestAnimationFrame(() => {
+
+      // Pass the selected user directly to the parent component's onEdit function
+      meta.onEdit?.(selectedUser);
+
+      // Clear user after dialog is closed
+      setTimeout(() => {
         setSelectedUser(undefined);
-      });
+      }, 300);
     } catch (error) {
       console.error("Error handling edit:", error);
     }
   }, [meta.onEdit, selectedUser]);
-
-  // Create filtered data based on role and status
-  const filteredData = useMemo(() => {
-    return data.filter((item: User) => {
-      const matchesRole = roleFilter === "all" || item.role === roleFilter;
-      const matchesStatus =
-        statusFilter === "all" || item.status === statusFilter;
-      return matchesRole && matchesStatus;
-    });
-  }, [data, roleFilter, statusFilter]);
-
-  const tableFiltered = useReactTable({
-    data: filteredData,
-    columns,
-    getCoreRowModel: getCoreRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    state: {
-      sorting,
-      globalFilter,
-    },
-    onSortingChange: setSorting,
-    onGlobalFilterChange: setGlobalFilter,
-  });
 
   const toggleRow = (rowId: string) => {
     setExpandedRows((prev) =>
@@ -199,6 +234,31 @@ export function DataTable<TData extends User, TValue>({
     const handleAction = (action: () => void) => {
       action();
       setExpandedRows((prev) => prev.filter((id) => id !== user.id));
+    };
+
+    // Map of shift names
+    const shiftNames: Record<string, string> = {
+      "1": "Shift 1 (08:00 - 16:00)",
+      "2": "Shift 2 (16:00 - 00:00)",
+      "3": "Shift 3 (00:00 - 08:00)",
+    };
+
+    // Map of department icons
+    const departmentIcons: Record<string, string> = {
+      Editor: "✏️",
+      Manager: "👔",
+      Dispatcher: "📡",
+      Safety: "🛡️",
+    };
+
+    // Format off days
+    const formatOffDays = (offDays: string[] | undefined) => {
+      if (!offDays || !Array.isArray(offDays) || offDays.length === 0) {
+        return "-";
+      }
+      return offDays
+        .map((day) => day.charAt(0).toUpperCase() + day.slice(1))
+        .join(", ");
     };
 
     return (
@@ -254,6 +314,33 @@ export function DataTable<TData extends User, TValue>({
                 <div className="text-sm font-medium">Status</div>
                 <div className="text-sm">{user.status}</div>
               </div>
+              {user.department && (
+                <div>
+                  <div className="text-sm font-medium">Department</div>
+                  <div className="text-sm flex items-center">
+                    {departmentIcons[user.department] && (
+                      <span className="mr-1">
+                        {departmentIcons[user.department]}
+                      </span>
+                    )}
+                    {user.department}
+                  </div>
+                </div>
+              )}
+              {user.working_shift && (
+                <div>
+                  <div className="text-sm font-medium">Working Shift</div>
+                  <div className="text-sm">
+                    {shiftNames[user.working_shift] || user.working_shift}
+                  </div>
+                </div>
+              )}
+              {user.off_days && (
+                <div>
+                  <div className="text-sm font-medium">Off Days</div>
+                  <div className="text-sm">{formatOffDays(user.off_days)}</div>
+                </div>
+              )}
               {user.phone_number && (
                 <div>
                   <div className="text-sm font-medium">Phone</div>
@@ -280,7 +367,7 @@ export function DataTable<TData extends User, TValue>({
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => handleAction(() => meta.onEdit(user))}
+                onClick={() => handleEdit(user)}
               >
                 <Pencil className="h-4 w-4 mr-1" />
                 Edit
@@ -309,7 +396,7 @@ export function DataTable<TData extends User, TValue>({
   };
 
   // Filter options
-  const roleOptions = ["all", "admin", "driver", "customer"];
+  const roleOptions = ["all", "admin", "manager", "user", "driver", "customer"];
   const statusOptions = ["all", "active", "pending", "inactive"];
 
   const handleRoleChange = (value: string) => {
@@ -345,13 +432,25 @@ export function DataTable<TData extends User, TValue>({
       {/* Filters Section */}
       <div className="flex flex-col space-y-4 py-4">
         <div className="flex flex-col md:flex-row gap-4">
-          <Input
-            placeholder="Search users..."
-            value={globalFilter}
-            onChange={(event) => setGlobalFilter(event.target.value)}
-            className="max-w-sm"
-            disabled={isLoading}
-          />
+          <div className="relative max-w-sm">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search users..."
+              value={globalFilter}
+              onChange={(event) => setGlobalFilter(event.target.value)}
+              className="pl-8 pr-8 max-w-sm"
+              disabled={isLoading}
+            />
+            {globalFilter && (
+              <button
+                onClick={() => setGlobalFilter("")}
+                className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
+                aria-label="Clear search"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
           <div className="flex gap-2">
             <Select
               value={roleFilter}
@@ -365,7 +464,9 @@ export function DataTable<TData extends User, TValue>({
                 <SelectItem value="all">All Roles</SelectItem>
                 <SelectItem value="admin">Admin</SelectItem>
                 <SelectItem value="manager">Manager</SelectItem>
-                <SelectItem value="employee">Employee</SelectItem>
+                <SelectItem value="user">User</SelectItem>
+                <SelectItem value="driver">Driver</SelectItem>
+                <SelectItem value="customer">Customer</SelectItem>
               </SelectContent>
             </Select>
 
@@ -475,7 +576,7 @@ export function DataTable<TData extends User, TValue>({
         <span className="text-sm text-muted-foreground">
           {isLoading
             ? "Loading..."
-            : `${table.getFilteredRowModel().rows.length} users`}
+            : `Showing ${filteredData.length} of ${data.length} users`}
         </span>
         <div className="flex items-center space-x-2">
           <Button
@@ -497,13 +598,15 @@ export function DataTable<TData extends User, TValue>({
         </div>
       </div>
 
-      {/* Edit User Dialog */}
+      {/* Edit User Dialog - Replace with UserDialog */}
       {selectedUser && (
-        <EditUserDialog
+        <UserDialog
+          key={`edit-${selectedUser.id}`}
           open={dialogOpen}
-          onOpenChange={setDialogOpen}
+          onOpenChange={handleDialogChange}
           user={selectedUser}
           onSuccess={handleSuccess}
+          companies={meta.companies}
         />
       )}
     </div>

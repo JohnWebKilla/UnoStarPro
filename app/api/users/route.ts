@@ -10,6 +10,7 @@ export async function GET(request: NextRequest): Promise<Response> {
 
     // If userId is provided, fetch specific user
     if (userId) {
+      // Fetch user data
       const { data: user, error: userError } = await supabase
         .from("users")
         .select("*")
@@ -20,7 +21,21 @@ export async function GET(request: NextRequest): Promise<Response> {
         return Response.json({ error: "User not found" }, { status: 404 });
       }
 
-      return Response.json(user);
+      // Fetch schedule data separately
+      const { data: schedule } = await supabase
+        .from("schedules")
+        .select("working_shift, off_days")
+        .eq("user_id", userId)
+        .single();
+
+      // Combine user and schedule data
+      const combinedUser = {
+        ...user,
+        working_shift: schedule?.working_shift || null,
+        off_days: schedule?.off_days || null,
+      };
+
+      return Response.json(combinedUser);
     }
 
     // Otherwise, fetch all users
@@ -42,7 +57,28 @@ export async function GET(request: NextRequest): Promise<Response> {
 
     if (error) throw error;
 
-    // Transform the data to include company information
+    // Fetch all schedules
+    const { data: schedules, error: schedulesError } = await supabase
+      .from("schedules")
+      .select("user_id, working_shift, off_days");
+
+    if (schedulesError) {
+      console.error("Error fetching schedules:", schedulesError);
+      // Continue without schedules if there's an error
+    }
+
+    // Create a map of schedules by user_id for quick lookup
+    const schedulesMap = new Map();
+    if (schedules) {
+      schedules.forEach((schedule) => {
+        schedulesMap.set(schedule.user_id, {
+          working_shift: schedule.working_shift,
+          off_days: schedule.off_days,
+        });
+      });
+    }
+
+    // Transform the data to include company information and schedules
     const transformedUsers = users.map((user: any) => {
       let assignedCompanies = [];
 
@@ -59,8 +95,14 @@ export async function GET(request: NextRequest): Promise<Response> {
         }
       }
 
+      // Get schedule data from the map
+      const schedule = schedulesMap.get(user.id);
+
+      // Combine user, company, and schedule data
       return {
         ...user,
+        working_shift: schedule?.working_shift || null,
+        off_days: schedule?.off_days || null,
         companies: assignedCompanies,
       };
     });
@@ -105,6 +147,9 @@ export async function POST(request: NextRequest): Promise<Response> {
       );
     }
 
+    // Extract schedule data
+    const { working_shift, off_days, ...userData } = body;
+
     // Then create the user record
     const { data: user, error: dbError } = await supabase
       .from("users")
@@ -117,6 +162,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         role: body.role,
         status: "pending",
         dob: body.dob,
+        department: body.department,
       })
       .select()
       .single();
@@ -126,7 +172,38 @@ export async function POST(request: NextRequest): Promise<Response> {
       return Response.json({ error: dbError.message }, { status: 500 });
     }
 
-    return Response.json(user);
+    // Create schedule record if shift data is provided
+    if (working_shift || off_days) {
+      const scheduleData: {
+        user_id: string;
+        working_shift: any;
+        off_days: any;
+        created_at: string;
+        updated_at: string;
+      } = {
+        user_id: user.id,
+        working_shift: working_shift || null,
+        off_days: off_days || null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      const { error: scheduleError } = await supabase
+        .from("schedules")
+        .insert([scheduleData]);
+
+      if (scheduleError) {
+        console.error("Error creating schedule:", scheduleError);
+        // Continue even if schedule creation fails
+      }
+    }
+
+    // Return user with schedule data
+    return Response.json({
+      ...user,
+      working_shift: working_shift || null,
+      off_days: off_days || null,
+    });
   } catch (error: any) {
     console.error("Error creating user:", error);
     return Response.json(
@@ -200,15 +277,71 @@ export async function PUT(request: NextRequest): Promise<Response> {
 
       default:
         // Regular user update
+        // Extract schedule data from the body
+        const { working_shift, off_days, ...userData } = body;
+
+        // Update user data
         const { data: user, error } = await supabase
           .from("users")
-          .update(body)
+          .update(userData)
           .eq("id", userId)
           .select()
           .single();
 
         if (error) throw error;
-        return Response.json(user);
+
+        // Check if schedule data is provided
+        if (working_shift !== undefined || off_days !== undefined) {
+          // First check if a schedule record exists for this user
+          const { data: existingSchedule } = await supabase
+            .from("schedules")
+            .select("id")
+            .eq("user_id", userId)
+            .single();
+
+          // Define schedule data with proper typing
+          const scheduleData: {
+            user_id: string;
+            working_shift: any;
+            off_days: any;
+            updated_at: string;
+            created_at?: string;
+          } = {
+            user_id: userId,
+            working_shift: working_shift,
+            off_days: off_days,
+            updated_at: new Date().toISOString(),
+          };
+
+          if (existingSchedule) {
+            // Update existing schedule
+            const { error: scheduleError } = await supabase
+              .from("schedules")
+              .update(scheduleData)
+              .eq("user_id", userId);
+
+            if (scheduleError) {
+              console.error("Error updating schedule:", scheduleError);
+            }
+          } else {
+            // Create new schedule
+            scheduleData.created_at = new Date().toISOString();
+            const { error: scheduleError } = await supabase
+              .from("schedules")
+              .insert([scheduleData]);
+
+            if (scheduleError) {
+              console.error("Error creating schedule:", scheduleError);
+            }
+          }
+        }
+
+        // Return user with schedule data
+        return Response.json({
+          ...user,
+          working_shift,
+          off_days,
+        });
     }
   } catch (error) {
     console.error("Error updating user:", error);
@@ -228,7 +361,10 @@ export async function DELETE(request: NextRequest): Promise<Response> {
 
     const supabase = await createClient();
 
-    // Delete user's company associations first
+    // Delete user's schedule record
+    await supabase.from("schedules").delete().eq("user_id", userId);
+
+    // Delete user's company associations
     await supabase.from("user_companies").delete().eq("user_id", userId);
 
     // Then delete the user

@@ -23,6 +23,7 @@ import {
   setClientCache,
   deleteClientCache,
 } from "@/utils/client-cache";
+import { getEmployeeSchedule } from "../Scheduling/actions";
 
 // Add this interface for the API response
 interface UsersApiResponse {
@@ -421,7 +422,12 @@ export default function UsersPage() {
     }
   };
 
+  // Handle edit user
   const handleEdit = useCallback((user: User) => {
+    console.log("Edit user:", user);
+
+    // No need to fetch additional data - we already have everything we need
+    // Just set the selected user and open the dialog
     setSelectedUser(user);
     setDialogOpen(true);
   }, []);
@@ -568,10 +574,24 @@ export default function UsersPage() {
         .map((uc: any) => uc.companies);
     }
 
+    // Ensure schedule data is preserved
+    const working_shift =
+      userData.working_shift ||
+      (userData.user_metadata && userData.user_metadata.working_shift) ||
+      "1";
+
+    const off_days = userData.off_days ||
+      (userData.user_metadata && userData.user_metadata.off_days) || [
+        "saturday",
+        "sunday",
+      ];
+
     // Return the formatted user
     const formattedUser = {
       ...userWithoutCompanies,
       companies: assignedCompanies,
+      working_shift,
+      off_days,
     };
 
     console.log("Transformed user data:", formattedUser);
@@ -585,6 +605,12 @@ export default function UsersPage() {
       const formattedUser = transformUserData(updatedUser);
       console.log("Updating user in place with formatted data:", formattedUser);
 
+      // Ensure schedule data is preserved
+      console.log("Schedule data being preserved:", {
+        working_shift: formattedUser.working_shift,
+        off_days: formattedUser.off_days,
+      });
+
       // Update the user in the local state
       setUsers((prevUsers) => {
         const userExists = prevUsers.some((u) => u.id === formattedUser.id);
@@ -593,9 +619,17 @@ export default function UsersPage() {
           return [formattedUser, ...prevUsers];
         }
         console.log("User found in current list, updating it");
-        return prevUsers.map((u) =>
-          u.id === formattedUser.id ? formattedUser : u
-        );
+        return prevUsers.map((u) => {
+          if (u.id === formattedUser.id) {
+            // Ensure we preserve the schedule data
+            return {
+              ...formattedUser,
+              working_shift: formattedUser.working_shift || u.working_shift,
+              off_days: formattedUser.off_days || u.off_days,
+            };
+          }
+          return u;
+        });
       });
 
       // Highlight the updated user
@@ -686,15 +720,28 @@ export default function UsersPage() {
         return;
       }
 
-      // Invalidate the cache immediately
-      await invalidateUsersCache();
-      console.log("Cache invalidated due to user update via dialog");
+      console.log("Dialog success with updated user:", updatedUser);
+
+      // Log schedule information specifically
+      console.log("Updated user schedule data:", {
+        working_shift: updatedUser.working_shift,
+        off_days: updatedUser.off_days,
+      });
 
       // Close dialog immediately
       setDialogOpen(false);
 
       // Use the helper function to update the user in place
+      // This will update just the specific user in the table without a full refresh
       await updateUserInPlace(updatedUser);
+
+      // No need to invalidate cache immediately - we'll let the realtime subscription
+      // handle that in the background to avoid a full table refresh
+      setTimeout(() => {
+        invalidateUsersCache().then(() => {
+          console.log("Cache invalidated in background after user update");
+        });
+      }, 1000);
     },
     [updateUserInPlace, invalidateUsersCache]
   );

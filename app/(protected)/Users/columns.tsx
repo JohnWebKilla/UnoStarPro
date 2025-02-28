@@ -123,6 +123,63 @@ export const columns: ColumnDef<User>[] = [
     header: "Role",
   },
   {
+    accessorKey: "department",
+    header: "Department",
+    cell: ({ row }) => {
+      const department = row.getValue("department") as string | undefined;
+      if (!department) return "-";
+
+      // Map of department icons
+      const departmentIcons: Record<string, string> = {
+        Editor: "✏️",
+        Manager: "👔",
+        Dispatcher: "📡",
+        Safety: "🛡️",
+      };
+
+      return (
+        <div className="flex items-center gap-2">
+          <span>{departmentIcons[department] || ""}</span>
+          <span>{department}</span>
+        </div>
+      );
+    },
+  },
+  {
+    accessorKey: "working_shift",
+    header: "Working Shift",
+    cell: ({ row }) => {
+      const shift = row.getValue("working_shift") as string;
+
+      // Map of shift names
+      const shiftNames: Record<string, string> = {
+        "1": "Shift 1 (08:00 - 16:00)",
+        "2": "Shift 2 (16:00 - 00:00)",
+        "3": "Shift 3 (00:00 - 08:00)",
+      };
+
+      return shiftNames[shift] || shift || "-";
+    },
+  },
+  {
+    accessorKey: "off_days",
+    header: "Off Days",
+    cell: ({ row }) => {
+      const offDays = row.getValue("off_days") as string[];
+
+      if (!offDays || !Array.isArray(offDays) || offDays.length === 0) {
+        return "-";
+      }
+
+      // Capitalize first letter of each day
+      const formattedDays = offDays
+        .map((day) => day.charAt(0).toUpperCase() + day.slice(1))
+        .join(", ");
+
+      return formattedDays;
+    },
+  },
+  {
     accessorKey: "dob",
     header: "Date of Birth",
     cell: ({ row }) => {

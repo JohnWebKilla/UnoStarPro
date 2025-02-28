@@ -116,9 +116,13 @@ export async function createUser(formData: FormData) {
     const password = formData.get("password") as string;
     const dob = formData.get("dob") as string;
     const working_shift = (formData.get("working_shift") as string) || "1";
-    const off_days = JSON.parse(
-      (formData.get("off_days") as string) || '["saturday", "sunday"]'
-    );
+
+    // Get all off_days values as an array
+    const off_days = formData.getAll("off_days").map((value) => String(value));
+    // Use default if no off_days are provided
+    if (off_days.length === 0) {
+      off_days.push("saturday", "sunday");
+    }
 
     // Create the user in Supabase Auth
     const { data: authData, error: authError } = await supabase.auth.signUp({
@@ -188,9 +192,13 @@ export async function updateUser(formData: FormData) {
     const department = formData.get("department") as string;
     const dob = formData.get("dob") as string;
     const working_shift = (formData.get("working_shift") as string) || "1";
-    const off_days = JSON.parse(
-      (formData.get("off_days") as string) || '["saturday", "sunday"]'
-    );
+
+    // Get all off_days values as an array
+    const off_days = formData.getAll("off_days").map((value) => String(value));
+    // Use default if no off_days are provided
+    if (off_days.length === 0) {
+      off_days.push("saturday", "sunday");
+    }
 
     console.log("Update data prepared:", {
       id,
@@ -199,34 +207,35 @@ export async function updateUser(formData: FormData) {
       email,
       role,
       department,
+      working_shift,
+      off_days,
     });
 
-    // First update the user's schedule
+    // Update user's schedule
     try {
-      console.log("Attempting to update schedule first");
+      console.log("Updating user schedule with:", {
+        working_shift,
+        off_days,
+      });
 
-      // Simple upsert operation
       const { error: scheduleError } = await supabase.from("schedules").upsert(
         {
           user_id: id,
           working_shift,
           off_days,
-          updated_at: new Date().toISOString(),
         },
-        {
-          onConflict: "user_id",
-          ignoreDuplicates: false,
-        }
+        { onConflict: "user_id" }
       );
 
       if (scheduleError) {
-        console.warn("Warning: Schedule operation failed:", scheduleError);
-      } else {
-        console.log("Schedule updated successfully");
+        console.error("Error updating schedule:", scheduleError);
+        throw new Error(`Failed to update schedule: ${scheduleError.message}`);
       }
-    } catch (scheduleError) {
-      console.warn("Warning: Schedule operation failed:", scheduleError);
-      // Continue with user update even if schedule update fails
+
+      console.log("Schedule updated successfully");
+    } catch (error) {
+      console.error("Error updating schedule:", error);
+      throw new Error("Failed to update schedule");
     }
 
     // Get current user data with error logging
@@ -304,7 +313,29 @@ export async function updateUser(formData: FormData) {
       }
       console.log("User metadata updated successfully");
 
-      return { user: userData, error: null };
+      // Fetch the updated schedule to ensure we have the latest data
+      const { data: scheduleData, error: scheduleQueryError } = await supabase
+        .from("schedules")
+        .select("*")
+        .eq("user_id", id)
+        .single();
+
+      if (scheduleQueryError && scheduleQueryError.code !== "PGRST116") {
+        console.error("Error fetching updated schedule:", scheduleQueryError);
+      }
+
+      // Return user data with schedule information
+      return {
+        user: {
+          ...userData.user,
+          user_metadata: {
+            ...userData.user.user_metadata,
+            working_shift: scheduleData?.working_shift || working_shift,
+            off_days: scheduleData?.off_days || off_days,
+          },
+        },
+        error: null,
+      };
     } catch (error: any) {
       console.error("Update error:", error);
       return { error: error.message };
