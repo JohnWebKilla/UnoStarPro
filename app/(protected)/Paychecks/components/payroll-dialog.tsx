@@ -33,6 +33,7 @@ import { useState, useEffect } from "react";
 import { startOfMonth } from "date-fns";
 import { MonthPicker } from "@/components/ui/month-picker";
 import { Label } from "@/components/ui/label";
+import { TransactionType, PaymentStatus } from "../types";
 
 const formSchema = z.object({
   user_id: z.string().min(1, "Employee is required"),
@@ -48,7 +49,7 @@ interface PayrollDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess?: () => void;
-  defaultUserId?: string | null;
+  defaultUserId?: string;
 }
 
 export function PayrollDialog({
@@ -57,10 +58,12 @@ export function PayrollDialog({
   onSuccess,
   defaultUserId,
 }: PayrollDialogProps) {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [employees, setEmployees] = useState<
+    Array<{ id: string; name: string; email: string }>
+  >([]);
   const { toast } = useToast();
   const supabase = createClient();
-  const [users, setUsers] = useState<{ id: string; name: string }[]>([]);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [amount, setAmount] = useState<string>("");
 
   const form = useForm<FormValues>({
@@ -70,32 +73,48 @@ export function PayrollDialog({
       transaction_type: "payment",
       amount: 0,
       description: "",
-      transaction_date: new Date(),
+      transaction_date: startOfMonth(new Date()),
     },
   });
 
-  const fetchUsers = async () => {
-    const { data, error } = await supabase
-      .from("users")
-      .select("id, first_name, last_name")
-      .eq("status", "active");
-
-    if (error) {
-      console.error("Error fetching users:", error);
-      return;
-    }
-
-    setUsers(
-      data.map((user) => ({
-        id: user.id,
-        name: `${user.first_name} ${user.last_name}`,
-      }))
-    );
-  };
-
   useEffect(() => {
+    const fetchEmployees = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("users")
+          .select("id, first_name, last_name, email")
+          .eq("status", "active")
+          .order("first_name");
+
+        if (error) throw error;
+
+        const formattedEmployees = data.map((user) => ({
+          id: user.id,
+          name: `${user.first_name} ${user.last_name}`,
+          email: user.email,
+        }));
+
+        setEmployees(formattedEmployees);
+      } catch (error) {
+        console.error("Error fetching employees:", error);
+        toast({
+          title: "Error",
+          description: "Failed to load employees",
+          variant: "destructive",
+        });
+      }
+    };
+
     if (open) {
-      fetchUsers();
+      fetchEmployees();
+      form.reset({
+        user_id: defaultUserId || "",
+        transaction_type: "payment",
+        amount: 0,
+        description: "",
+        transaction_date: startOfMonth(new Date()),
+      });
+      setAmount("");
     }
   }, [open]);
 
@@ -117,8 +136,35 @@ export function PayrollDialog({
       if (userError) throw userError;
       if (!user?.id) throw new Error("No authenticated user found");
 
+      // Get employee details for optimistic update
+      const selectedEmployee = employees.find((e) => e.id === values.user_id);
+      if (!selectedEmployee) throw new Error("Employee not found");
+
       const amountNumber = parseFloat(amount || "0");
 
+      // Create optimistic transaction
+      const optimisticTransaction = {
+        id: Date.now(), // Temporary ID
+        user_id: values.user_id,
+        transaction_type: values.transaction_type as TransactionType,
+        amount: amountNumber,
+        description: values.description,
+        transaction_date: values.transaction_date.toISOString(),
+        status: "pending" as PaymentStatus,
+        created_by: user.id,
+        created_at: new Date().toISOString(),
+        first_name: selectedEmployee.name.split(" ")[0],
+        last_name: selectedEmployee.name.split(" ").slice(1).join(" "),
+        email: selectedEmployee.email,
+      };
+
+      // Close dialog immediately with optimistic data
+      onOpenChange(false);
+
+      // Notify parent of success with optimistic data
+      onSuccess?.();
+
+      // Actually perform the insert in the background
       const { error } = await supabase.from("payroll_transactions").insert({
         user_id: values.user_id,
         transaction_type: values.transaction_type,
@@ -130,15 +176,26 @@ export function PayrollDialog({
         created_at: new Date().toISOString(),
       });
 
-      if (error) throw error;
+      if (error) {
+        // If there's an error, show it but don't reopen the dialog
+        console.error("Create transaction error:", {
+          error,
+          message: error.message,
+          timestamp: new Date().toISOString(),
+        });
 
-      toast({
-        title: "Success",
-        description: "Transaction created successfully",
-      });
-
-      onSuccess?.();
-      onOpenChange(false);
+        toast({
+          title: "Error",
+          description: "Failed to create transaction in the background",
+          variant: "destructive",
+        });
+      } else {
+        // Success toast
+        toast({
+          title: "Success",
+          description: "Transaction created successfully",
+        });
+      }
     } catch (error) {
       console.error("Create transaction error:", {
         error,
@@ -151,7 +208,7 @@ export function PayrollDialog({
         description: "Failed to create transaction",
         variant: "destructive",
       });
-    } finally {
+
       setIsSubmitting(false);
     }
   };
@@ -173,6 +230,7 @@ export function PayrollDialog({
                   <Select
                     onValueChange={field.onChange}
                     defaultValue={field.value}
+                    disabled={isSubmitting}
                   >
                     <FormControl>
                       <SelectTrigger>
@@ -180,9 +238,9 @@ export function PayrollDialog({
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      {users.map((user) => (
-                        <SelectItem key={user.id} value={user.id}>
-                          {user.name}
+                      {employees.map((employee) => (
+                        <SelectItem key={employee.id} value={employee.id}>
+                          {employee.name} ({employee.email})
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -197,14 +255,15 @@ export function PayrollDialog({
               name="transaction_type"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Type</FormLabel>
+                  <FormLabel>Transaction Type</FormLabel>
                   <Select
                     onValueChange={field.onChange}
                     defaultValue={field.value}
+                    disabled={isSubmitting}
                   >
                     <FormControl>
                       <SelectTrigger>
-                        <SelectValue placeholder="Select transaction type" />
+                        <SelectValue placeholder="Select type" />
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
@@ -225,26 +284,19 @@ export function PayrollDialog({
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Amount</FormLabel>
-                  <div className="grid gap-2">
+                  <FormControl>
                     <Input
-                      id="amount"
                       type="number"
+                      step="0.01"
+                      placeholder="0.00"
                       value={amount}
                       onChange={(e) => {
-                        const value = e.target.value;
-                        setAmount(value === "" ? "" : value);
+                        setAmount(e.target.value);
+                        field.onChange(parseFloat(e.target.value) || 0);
                       }}
-                      onBlur={(e) => {
-                        const value = e.target.value;
-                        if (value === "") {
-                          setAmount("0");
-                        }
-                      }}
-                      placeholder="0.00"
-                      step="0.01"
-                      min="0"
+                      disabled={isSubmitting}
                     />
-                  </div>
+                  </FormControl>
                   <FormMessage />
                 </FormItem>
               )}
@@ -255,9 +307,13 @@ export function PayrollDialog({
               name="description"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Description</FormLabel>
+                  <FormLabel>Description (Optional)</FormLabel>
                   <FormControl>
-                    <Textarea {...field} />
+                    <Textarea
+                      placeholder="Enter description"
+                      {...field}
+                      disabled={isSubmitting}
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -271,10 +327,20 @@ export function PayrollDialog({
                 <FormItem>
                   <FormLabel>Transaction Date</FormLabel>
                   <FormControl>
-                    <MonthPicker
-                      selected={field.value}
-                      onMonthChange={field.onChange}
-                      placeholder="Select date"
+                    <Input
+                      type="date"
+                      value={
+                        field.value
+                          ? new Date(field.value).toISOString().split("T")[0]
+                          : ""
+                      }
+                      onChange={(e) => {
+                        const date = e.target.value
+                          ? new Date(e.target.value)
+                          : new Date();
+                        field.onChange(date);
+                      }}
+                      disabled={isSubmitting}
                     />
                   </FormControl>
                   <FormMessage />
@@ -282,7 +348,7 @@ export function PayrollDialog({
               )}
             />
 
-            <div className="flex justify-end space-x-2">
+            <div className="flex justify-end space-x-2 pt-4">
               <Button
                 type="button"
                 variant="outline"

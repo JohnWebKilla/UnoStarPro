@@ -1,14 +1,15 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { DataTable } from "./data-table";
+import { columns } from "./columns";
 import { Button } from "@/components/ui/button";
-import { Plus, Loader2 } from "lucide-react";
+import { Plus, RefreshCw, Loader2 } from "lucide-react";
 import { PayrollDialog } from "./components/payroll-dialog";
 import { useToast } from "@/components/ui/use-toast";
 import { createClient } from "@/utils/supabase/client";
 import { ErrorBoundary } from "./components/error-boundary";
-import { MonthPicker } from "@/components/ui/month-picker";
+import { MonthPicker } from "./components/month-picker";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,28 +22,20 @@ import { startOfMonth, endOfMonth, format } from "date-fns";
 import { TransactionsDialog } from "./components/transactions-dialog";
 import { ColumnDef } from "@tanstack/react-table";
 import { Badge } from "@/components/ui/badge";
+import { PayrollTransaction, MonthlyPayrollSummary } from "./types";
+import {
+  generatePayrollAction,
+  updateTransactionAction,
+} from "./actions/payroll";
+import {
+  getClientCache,
+  setClientCache,
+  deleteClientCache,
+} from "@/utils/client-cache";
+import { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 
 // Add this type for payment status
 type OverallStatus = "paid" | "partially_paid" | "pending" | "unpaid";
-
-// Update the MonthlyPayrollSummary interface
-interface MonthlyPayrollSummary {
-  user_id: string;
-  month: string;
-  first_name: string;
-  last_name: string;
-  email: string;
-  base_payment: number;
-  advances: number;
-  penalties: number;
-  bonuses: number;
-  transaction_ids: number[];
-  paid_amount: number;
-  total_amount: number;
-  pending_amount: number;
-  pending_penalties: number;
-  deducted_penalties: number;
-}
 
 // Add this interface for transaction data
 interface PayrollTransactionSummary {
@@ -59,21 +52,6 @@ interface TransactionsDialogProps {
   onOpenChange: (open: boolean) => void;
   onTransactionUpdated?: () => void;
   userId?: string;
-}
-
-// Add this type if not already present
-type TransactionType = "payment" | "advance" | "penalty" | "bonus";
-type PaymentStatus = "pending" | "paid" | "unpaid" | "charged" | "deducted";
-
-interface PaycheckSummary {
-  basePayment: number;
-  advances: number;
-  penalties: number;
-  bonuses: number;
-  total: number;
-  status: string;
-  paidAmount: number;
-  pendingAmount: number;
 }
 
 // Update the PayrollApiResponse interface
@@ -99,331 +77,338 @@ function PaychecksContent() {
   const [isLoading, setIsLoading] = useState(true);
   const [summaries, setSummaries] = useState<MonthlyPayrollSummary[]>([]);
   const [selectedMonth, setSelectedMonth] = useState<Date>(new Date());
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isPayrollDialogOpen, setIsPayrollDialogOpen] = useState(false);
   const [isTransactionsDialogOpen, setIsTransactionsDialogOpen] =
     useState(false);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
-  const [debugInfo, setDebugInfo] = useState<Record<string, any>>({});
   const [dataSource, setDataSource] = useState<"cache" | "database">(
     "database"
   );
+  const [isInvalidating, setIsInvalidating] = useState(false);
+  const [lastUpdatedUserId, setLastUpdatedUserId] = useState<string | null>(
+    null
+  );
+  const [lastFetchTime, setLastFetchTime] = useState<Date | null>(null);
   const { toast } = useToast();
   const supabase = createClient();
-  const [isInvalidating, setIsInvalidating] = useState(false);
 
-  const fetchMonthlySummary = async (skipCache: boolean = false) => {
-    try {
-      setIsLoading(true);
-      const monthStart = startOfMonth(selectedMonth);
-      const fetchStartTime = Date.now();
+  // Fetch monthly summaries for the selected month
+  const fetchMonthlySummary = useCallback(
+    async (skipCache: boolean = false) => {
+      try {
+        setIsLoading(true);
+        const monthStart = startOfMonth(selectedMonth);
+        const fetchStartTime = Date.now();
 
-      console.log("Fetching data for:", {
-        month: format(selectedMonth, "yyyy-MM-dd"),
-        skipCache,
-      });
+        console.log("Fetching payroll summary for:", {
+          month: format(selectedMonth, "yyyy-MM-dd"),
+          skipCache,
+        });
 
-      // Use the new API endpoint with Redis caching
-      const response = await fetch(
-        `/api/payroll/monthly-summary?month=${format(
-          selectedMonth,
-          "yyyy-MM-dd"
-        )}&skipCache=${skipCache}`,
-        {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          // Add cache control headers
-          cache: skipCache ? "no-store" : "default",
+        // Get the current user
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+
+        if (!user) {
+          throw new Error("User not authenticated");
         }
-      );
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to fetch payroll data");
+        // Create a cache key based on the month and user
+        const cacheKey = `payroll:summary:${format(monthStart, "yyyy-MM")}:${user.id}`;
+
+        // If skipCache is true, invalidate the cache first
+        if (skipCache) {
+          await deleteClientCache(cacheKey);
+          console.log("Cache invalidated before fetching fresh data");
+        }
+
+        // Try to get data from cache first
+        const { data: cachedData, source } =
+          await getClientCache<MonthlyPayrollSummary[]>(cacheKey);
+
+        if (cachedData && !skipCache) {
+          console.log(
+            `Summaries loaded from ${source} in ${Date.now() - fetchStartTime}ms`
+          );
+          setSummaries(cachedData);
+          setDataSource(source);
+          setLastFetchTime(new Date());
+          setIsLoading(false);
+          setIsInvalidating(false);
+          return;
+        }
+
+        // If no cache or skipCache is true, fetch from API
+        const response = await fetch(
+          `/api/payroll/monthly-summary?month=${format(selectedMonth, "yyyy-MM-dd")}&skipCache=${skipCache}`,
+          {
+            method: "GET",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            cache: skipCache ? "no-store" : "default",
+          }
+        );
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || "Failed to fetch payroll data");
+        }
+
+        const result: PayrollApiResponse = await response.json();
+        const fetchEndTime = Date.now();
+        const fetchTime = fetchEndTime - fetchStartTime;
+
+        console.log(`Summaries loaded from API in ${fetchTime}ms:`, result);
+
+        // Store in cache for 5 minutes (300 seconds)
+        await setClientCache(cacheKey, result.data, 300);
+        setDataSource(result.source);
+        setSummaries(result.data);
+        setLastFetchTime(new Date());
+      } catch (error) {
+        console.error("Error fetching summaries:", error);
+        toast({
+          title: "Error",
+          description: "Failed to load payroll summaries",
+          variant: "destructive",
+        });
+      } finally {
+        setIsLoading(false);
+        setIsInvalidating(false);
       }
+    },
+    [selectedMonth, supabase, toast]
+  );
 
-      const result: PayrollApiResponse = await response.json();
-      const fetchEndTime = Date.now();
-      const fetchTime = fetchEndTime - fetchStartTime;
-
-      console.log("API response:", result);
-      setSummaries(result.data);
-      setDataSource(result.source);
-      setDebugInfo((prevDebugInfo) => ({
-        ...prevDebugInfo,
-        data: result.data,
-        source: result.source,
-        timing: result.timing || { total: fetchTime },
-        timestamp: new Date().toISOString(),
-      }));
-    } catch (error) {
-      console.error("Error fetching summary:", error);
-      setDebugInfo((prevDebugInfo) => ({
-        ...prevDebugInfo,
-        error,
-      }));
-      toast({
-        title: "Error",
-        description: "Failed to load payroll summary",
-        variant: "destructive",
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
+  // Invalidate cache and fetch fresh data
   const invalidateCache = async () => {
     try {
       setIsInvalidating(true);
-      const response = await fetch(
-        `/api/payroll/monthly-summary?month=${format(selectedMonth, "yyyy-MM-dd")}`,
-        {
-          method: "DELETE",
-          headers: {
-            "Content-Type": "application/json",
-          },
-        }
-      );
+      toast({
+        title: "Refreshing",
+        description: "Fetching fresh data from the database...",
+      });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to invalidate cache");
-      }
+      await fetchMonthlySummary(true);
 
       toast({
         title: "Success",
-        description: "Cache invalidated successfully. Refreshing data...",
+        description: "Data refreshed successfully",
       });
-
-      // Fetch fresh data
-      await fetchMonthlySummary(true);
     } catch (error) {
-      console.error("Error invalidating cache:", error);
+      console.error("Error refreshing data:", error);
       toast({
         title: "Error",
-        description: "Failed to invalidate cache",
+        description: "Failed to refresh data",
         variant: "destructive",
       });
-    } finally {
       setIsInvalidating(false);
     }
   };
 
+  // Initial data fetch
   useEffect(() => {
     fetchMonthlySummary();
-  }, [selectedMonth]);
+  }, [fetchMonthlySummary]);
 
-  const onTransactionCreated = () => {
-    fetchMonthlySummary();
+  // Set up realtime subscription for payroll transactions
+  useEffect(() => {
+    const channel = supabase
+      .channel("payroll-changes")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "payroll_transactions",
+        },
+        async (payload: RealtimePostgresChangesPayload<PayrollTransaction>) => {
+          console.log("Payroll transaction change received:", payload);
+
+          const relevantDate =
+            payload.eventType === "DELETE"
+              ? (payload.old as PayrollTransaction | undefined)
+                  ?.transaction_date
+              : (payload.new as PayrollTransaction | undefined)
+                  ?.transaction_date;
+
+          if (!relevantDate) return;
+
+          const changeDate = new Date(relevantDate);
+          const currentMonthStart = startOfMonth(selectedMonth);
+          const currentMonthEnd = endOfMonth(selectedMonth);
+
+          // Only process changes relevant to the current month view
+          if (
+            changeDate >= currentMonthStart &&
+            changeDate <= currentMonthEnd
+          ) {
+            // Invalidate cache
+            const {
+              data: { user },
+            } = await supabase.auth.getUser();
+            if (user) {
+              const cacheKey = `payroll:summary:${format(currentMonthStart, "yyyy-MM")}:${user.id}`;
+              await deleteClientCache(cacheKey);
+              console.log("Cache invalidated due to realtime update");
+            }
+
+            // Refresh data after a short delay to allow for multiple changes
+            setTimeout(() => {
+              fetchMonthlySummary(true);
+            }, 500);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [selectedMonth, supabase, fetchMonthlySummary]);
+
+  // Handle month change
+  const handleMonthChange = (newMonth: Date) => {
+    setSelectedMonth(newMonth);
   };
 
-  const viewTransactions = (userId: string) => {
+  // Handle view transactions
+  const handleViewTransactions = (userId: string) => {
     setSelectedUserId(userId);
     setIsTransactionsDialogOpen(true);
   };
 
-  const addTransaction = (userId: string) => {
-    setSelectedUserId(userId);
-    setIsDialogOpen(true);
+  // Handle dialog close
+  const handleTransactionsDialogClose = (open: boolean) => {
+    setIsTransactionsDialogOpen(open);
+    if (!open) {
+      setTimeout(() => {
+        setSelectedUserId(null);
+      }, 300);
+    }
   };
 
-  // Move columns definition here so it has access to the handlers
-  const columns: ColumnDef<MonthlyPayrollSummary>[] = [
-    {
-      accessorKey: "employee",
-      header: "Employee",
-      cell: ({ row }) => {
-        const data = row.original;
-        return (
-          <div>
-            <div className="font-medium">
-              {data.first_name} {data.last_name}
-            </div>
-            <div className="text-sm text-muted-foreground">{data.email}</div>
-          </div>
-        );
-      },
-    },
-    {
-      accessorKey: "base_payment",
-      header: "Base Payment",
-      cell: ({ row }) => {
-        const amount = row.getValue("base_payment") as number;
-        return <div className="font-medium">${amount.toFixed(2)}</div>;
-      },
-    },
-    {
-      accessorKey: "advances",
-      header: "Advances",
-      cell: ({ row }) => {
-        const amount = row.getValue("advances") as number;
-        return amount > 0 ? (
-          <div className="text-yellow-600">${amount.toFixed(2)}</div>
-        ) : null;
-      },
-    },
-    {
-      accessorKey: "penalties",
-      header: "Penalties",
-      cell: ({ row }) => {
-        const amount = row.getValue("penalties") as number;
-        return amount > 0 ? (
-          <div className="text-red-600">${amount.toFixed(2)}</div>
-        ) : null;
-      },
-    },
-    {
-      accessorKey: "bonuses",
-      header: "Bonuses",
-      cell: ({ row }) => {
-        const amount = row.getValue("bonuses") as number;
-        return amount > 0 ? (
-          <div className="text-green-600">${amount.toFixed(2)}</div>
-        ) : null;
-      },
-    },
-    {
-      accessorKey: "total_amount",
-      header: "Total",
-      cell: ({ row }) => {
-        const data = row.original;
-        return <div className="font-bold">${data.total_amount.toFixed(2)}</div>;
-      },
-    },
-    {
-      accessorKey: "status",
-      header: "Status",
-      cell: ({ row }) => {
-        const data = row.original;
-        const status = getOverallStatus(data);
-        return (
-          <span
-            className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusBadgeClass(
-              status
-            )}`}
-          >
-            {status === "partially_paid"
-              ? "Partially Paid"
-              : status.charAt(0).toUpperCase() + status.slice(1)}
+  // Handle payroll dialog success
+  const handlePayrollDialogSuccess = () => {
+    setIsPayrollDialogOpen(false);
+    fetchMonthlySummary(true);
+    toast({
+      title: "Success",
+      description: "Transaction created successfully",
+    });
+  };
+
+  // Handle transaction update
+  const handleTransactionUpdated = () => {
+    fetchMonthlySummary(true);
+  };
+
+  // Generate payroll
+  const handleGeneratePayroll = async () => {
+    try {
+      const result = await generatePayrollAction();
+      if (result.success) {
+        toast({
+          title: "Success",
+          description: "Payroll generated successfully",
+        });
+        fetchMonthlySummary(true);
+      } else {
+        throw new Error(result.error || "Failed to generate payroll");
+      }
+    } catch (error) {
+      console.error("Error generating payroll:", error);
+      toast({
+        title: "Error",
+        description: "Failed to generate payroll",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Render data source indicator
+  const renderDataSourceIndicator = () => {
+    return (
+      <div className="text-xs text-muted-foreground mt-1">
+        Data source: {dataSource === "cache" ? "Cache" : "Database"}
+        {lastFetchTime && (
+          <span className="ml-2">
+            • Last updated: {lastFetchTime.toLocaleTimeString()}
           </span>
-        );
-      },
-    },
-    {
-      accessorKey: "paid_amount",
-      header: "Paid Amount",
-      cell: ({ row }) => {
-        const data = row.original;
-        return (
-          <div className="space-y-1">
-            <div className="font-medium">${data.paid_amount.toFixed(2)}</div>
-            <div className="text-xs text-muted-foreground">
-              of ${data.total_amount.toFixed(2)}
-            </div>
-          </div>
-        );
-      },
-    },
-    {
-      id: "actions",
-      cell: ({ row }) => {
-        const data = row.original;
-        return (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="h-8 w-8 p-0">
-                <span className="sr-only">Open menu</span>
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>Actions</DropdownMenuLabel>
-              <DropdownMenuItem onClick={() => viewTransactions(data.user_id)}>
-                View Transactions
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => addTransaction(data.user_id)}>
-                Add Transaction
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        );
-      },
-    },
-  ];
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="px-2 py-10">
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Paychecks</h1>
-        <div className="flex items-center gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Paychecks</h1>
+          <p className="text-muted-foreground">
+            Manage employee payroll transactions
+          </p>
+          {renderDataSourceIndicator()}
+        </div>
+        <div className="flex gap-2">
           <MonthPicker
             selected={selectedMonth}
-            onMonthChange={setSelectedMonth}
+            onMonthChange={handleMonthChange}
           />
-          <Badge
-            variant={dataSource === "cache" ? "outline" : "default"}
-            className="flex items-center gap-1"
-          >
-            {dataSource === "cache" ? (
-              <>
-                <span className="h-2 w-2 rounded-full bg-blue-500"></span>
-                From Cache
-              </>
-            ) : (
-              <>
-                <span className="h-2 w-2 rounded-full bg-green-500"></span>
-                From Database
-              </>
-            )}
-          </Badge>
           <Button
             variant="outline"
-            onClick={() => invalidateCache()}
-            disabled={isLoading || isInvalidating}
-            className="flex items-center gap-2"
+            onClick={invalidateCache}
+            disabled={isInvalidating}
           >
             {isInvalidating ? (
               <>
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Refreshing...
               </>
             ) : (
-              <>Refresh Data</>
+              <>
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Refresh
+              </>
             )}
           </Button>
-          <Button onClick={() => setIsDialogOpen(true)} disabled={isLoading}>
-            <Plus className="mr-2 h-4 w-4" /> Add Transaction
+          <Button
+            variant="outline"
+            onClick={handleGeneratePayroll}
+            disabled={isLoading}
+          >
+            Generate Payroll
+          </Button>
+          <Button onClick={() => setIsPayrollDialogOpen(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            New Transaction
           </Button>
         </div>
       </div>
 
-      {isLoading ? (
-        <DataTable
-          columns={columns}
-          data={[]}
-          isLoading={true}
-          skeletonRowCount={5}
-        />
-      ) : (
-        <DataTable columns={columns} data={summaries} isLoading={false} />
-      )}
+      <DataTable
+        columns={columns}
+        data={summaries}
+        isLoading={isLoading || isInvalidating}
+        onViewTransactions={handleViewTransactions}
+        onRefresh={invalidateCache}
+        lastUpdatedUserId={lastUpdatedUserId}
+      />
 
-      {isDialogOpen && (
-        <PayrollDialog
-          open={isDialogOpen}
-          onOpenChange={setIsDialogOpen}
-          onSuccess={() => fetchMonthlySummary(true)}
-          defaultUserId={selectedUserId}
-        />
-      )}
+      <PayrollDialog
+        open={isPayrollDialogOpen}
+        onOpenChange={setIsPayrollDialogOpen}
+        onSuccess={handlePayrollDialogSuccess}
+      />
 
-      {isTransactionsDialogOpen && selectedUserId && (
+      {selectedUserId && (
         <TransactionsDialog
           open={isTransactionsDialogOpen}
-          onOpenChange={setIsTransactionsDialogOpen}
+          onOpenChange={handleTransactionsDialogClose}
           userId={selectedUserId}
-          onTransactionUpdated={() => fetchMonthlySummary(true)}
+          onTransactionUpdated={handleTransactionUpdated}
         />
       )}
     </div>

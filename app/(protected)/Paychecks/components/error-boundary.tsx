@@ -1,48 +1,65 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Component, ErrorInfo, ReactNode } from "react";
+import { AlertTriangle } from "lucide-react";
 
-interface Props {
-  children?: ReactNode;
+interface ErrorBoundaryProps {
+  children: React.ReactNode;
 }
 
-interface State {
-  hasError: boolean;
-  error: Error | null;
-}
+export function ErrorBoundary({ children }: ErrorBoundaryProps) {
+  const [hasError, setHasError] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
 
-export class ErrorBoundary extends Component<Props, State> {
-  public state: State = {
-    hasError: false,
-    error: null,
-  };
+  useEffect(() => {
+    const errorHandler = (error: ErrorEvent) => {
+      console.error("Error caught by boundary:", error);
+      setHasError(true);
+      setError(error.error);
+    };
 
-  public static getDerivedStateFromError(error: Error): State {
-    return { hasError: true, error };
-  }
+    window.addEventListener("error", errorHandler);
 
-  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error("Uncaught error:", error, errorInfo);
-  }
+    return () => {
+      window.removeEventListener("error", errorHandler);
+    };
+  }, []);
 
-  public render() {
-    if (this.state.hasError) {
-      return (
-        <div className="p-4 text-center">
-          <h2 className="text-lg font-semibold mb-2">Something went wrong</h2>
-          <p className="text-sm text-muted-foreground mb-4">
-            {this.state.error?.message}
+  if (hasError) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[50vh] p-6">
+        <div className="w-full max-w-md p-6 bg-white dark:bg-gray-800 rounded-lg shadow-lg">
+          <div className="flex items-center gap-3 mb-4">
+            <AlertTriangle className="h-6 w-6 text-red-500" />
+            <h2 className="text-xl font-bold">Something went wrong</h2>
+          </div>
+          <p className="text-gray-600 dark:text-gray-300 mb-4">
+            An error occurred while loading the Paychecks page. Please try again
+            or contact support if the problem persists.
           </p>
-          <Button
-            onClick={() => this.setState({ hasError: false, error: null })}
-          >
-            Try again
-          </Button>
+          {error && (
+            <div className="bg-red-50 dark:bg-red-900/20 p-3 rounded-md mb-4 overflow-auto max-h-32">
+              <p className="text-sm font-mono text-red-800 dark:text-red-300">
+                {error.toString()}
+              </p>
+            </div>
+          )}
+          <div className="flex justify-end">
+            <Button
+              onClick={() => {
+                setHasError(false);
+                setError(null);
+                window.location.reload();
+              }}
+            >
+              Try Again
+            </Button>
+          </div>
         </div>
-      );
-    }
-
-    return this.props.children;
+      </div>
+    );
   }
+
+  return <>{children}</>;
 }

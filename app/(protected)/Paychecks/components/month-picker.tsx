@@ -1,55 +1,96 @@
 "use client";
 
+import * as React from "react";
+import { format, addMonths, subMonths } from "date-fns";
+import {
+  Calendar as CalendarIcon,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Calendar } from "@/components/ui/calendar";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { format, startOfMonth } from "date-fns";
-import { CalendarIcon } from "lucide-react";
+import { Calendar } from "@/components/ui/calendar";
 
 interface MonthPickerProps {
   selected: Date;
   onMonthChange: (date: Date) => void;
-  placeholder?: string;
+  className?: string;
 }
 
 export function MonthPicker({
   selected,
   onMonthChange,
-  placeholder = "Select month",
+  className,
 }: MonthPickerProps) {
+  const [open, setOpen] = React.useState(false);
+
+  const handlePreviousMonth = () => {
+    onMonthChange(subMonths(selected, 1));
+  };
+
+  const handleNextMonth = () => {
+    onMonthChange(addMonths(selected, 1));
+  };
+
+  const handleSelect = (date: Date | undefined) => {
+    if (date) {
+      onMonthChange(date);
+      setOpen(false);
+    }
+  };
+
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button
-          variant={"outline"}
-          className={cn("w-[200px] justify-start text-left font-normal")}
-        >
-          <CalendarIcon className="mr-2 h-4 w-4" />
-          {selected ? format(selected, "MMMM yyyy") : placeholder}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-auto p-0">
-        <Calendar
-          mode="single"
-          selected={selected}
-          onSelect={(date) => {
-            if (date) {
-              // Always set to first day of the month
-              onMonthChange(startOfMonth(date));
-            }
-          }}
-          initialFocus
-          showOutsideDays={false}
-          // Only show month picker
-          defaultMonth={selected}
-          ISOWeek
-        />
-      </PopoverContent>
-    </Popover>
+    <div className={cn("flex items-center gap-1", className)}>
+      <Button
+        variant="outline"
+        size="icon"
+        onClick={handlePreviousMonth}
+        className="h-8 w-8"
+      >
+        <ChevronLeft className="h-4 w-4" />
+        <span className="sr-only">Previous month</span>
+      </Button>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            variant="outline"
+            className={cn(
+              "w-[180px] justify-start text-left font-normal",
+              !selected && "text-muted-foreground"
+            )}
+          >
+            <CalendarIcon className="mr-2 h-4 w-4" />
+            {format(selected, "MMMM yyyy")}
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-auto p-0" align="start">
+          <Calendar
+            mode="single"
+            selected={selected}
+            onSelect={handleSelect}
+            initialFocus
+            month={selected}
+            onMonthChange={handleSelect}
+            captionLayout="dropdown-buttons"
+            fromMonth={new Date(2020, 0)}
+            toMonth={new Date(2030, 11)}
+          />
+        </PopoverContent>
+      </Popover>
+      <Button
+        variant="outline"
+        size="icon"
+        onClick={handleNextMonth}
+        className="h-8 w-8"
+      >
+        <ChevronRight className="h-4 w-4" />
+        <span className="sr-only">Next month</span>
+      </Button>
+    </div>
   );
 }

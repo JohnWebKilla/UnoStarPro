@@ -28,6 +28,7 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { MoreHorizontal } from "lucide-react";
+import { updateTransactionAction } from "../actions/payroll";
 
 type TransactionType = "payment" | "advance" | "penalty" | "bonus";
 type PaymentStatus = "pending" | "paid" | "unpaid" | "charged" | "deducted";
@@ -328,38 +329,46 @@ export function TransactionsDialog({
     try {
       setUpdatingId(transaction.id);
 
-      const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
+      // Create an optimistic version of the updated transaction
+      const optimisticTransaction: Transaction = {
+        ...transaction,
+        status: newStatus,
+        updated_at: new Date().toISOString(),
+      };
 
-      if (userError) {
-        logError("get_user", userError, transaction);
-        throw userError;
+      // Optimistically update the UI
+      setTransactions((prevTransactions) =>
+        prevTransactions.map((t) =>
+          t.id === transaction.id ? optimisticTransaction : t
+        )
+      );
+
+      // Calculate new summary based on optimistic data
+      const updatedTransactions = transactions.map((t) =>
+        t.id === transaction.id ? optimisticTransaction : t
+      );
+      setSummary(calculateSummary(updatedTransactions));
+
+      // Call the server action to update the transaction
+      const result = await updateTransactionAction(transaction.id, {
+        status: newStatus,
+      });
+
+      if (!result.success) {
+        throw new Error(result.error || "Failed to update transaction");
       }
 
-      if (!user?.id) {
-        throw new Error("No authenticated user found");
+      // Update with the actual server response
+      if (result.data) {
+        const serverTransaction = result.data as unknown as Transaction;
+        setTransactions((prevTransactions) =>
+          prevTransactions.map((t) =>
+            t.id === transaction.id ? serverTransaction : t
+          )
+        );
       }
 
-      const { error: updateError } = await supabase
-        .from("payroll_transactions")
-        .update({
-          status: newStatus,
-          updated_at: new Date().toISOString(),
-          updated_by: user.id,
-        })
-        .eq("id", transaction.id);
-
-      if (updateError) {
-        logError("update_status", updateError, transaction, {
-          newStatus,
-          updatedBy: user.id,
-        });
-        throw updateError;
-      }
-
-      await fetchTransactions();
+      // Notify parent component
       onTransactionUpdated?.();
 
       toast({
@@ -367,6 +376,9 @@ export function TransactionsDialog({
         description: `Transaction marked as ${newStatus}`,
       });
     } catch (error) {
+      // Revert optimistic update on error
+      await fetchTransactions();
+
       logError("status_update", error, transaction, {
         newStatus,
         finalError: true,

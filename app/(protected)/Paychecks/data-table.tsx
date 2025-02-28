@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import {
   ColumnDef,
   flexRender,
@@ -21,7 +22,9 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useState } from "react";
+import { Search, X } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
+import { PayrollTransaction, MonthlyPayrollSummary } from "./types";
 import {
   Select,
   SelectContent,
@@ -29,26 +32,32 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
 
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
-  data?: TData[];
-  isLoading?: boolean;
+  data: TData[];
+  isLoading: boolean;
   skeletonRowCount?: number;
+  lastUpdatedUserId?: string | null;
+  onViewTransactions?: (userId: string) => void;
+  onRefresh?: () => Promise<void>;
 }
 
-export function DataTable<TData, TValue>({
+export function DataTable<TData extends MonthlyPayrollSummary, TValue>({
   columns,
-  data = [],
+  data,
   isLoading = false,
   skeletonRowCount = 5,
+  lastUpdatedUserId = null,
+  onViewTransactions,
+  onRefresh,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [globalFilter, setGlobalFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const table = useReactTable({
     data,
@@ -59,12 +68,53 @@ export function DataTable<TData, TValue>({
     getFilteredRowModel: getFilteredRowModel(),
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
+    onGlobalFilterChange: setGlobalFilter,
     state: {
       sorting,
       columnFilters,
       globalFilter,
     },
+    meta: {
+      onViewTransactions,
+    },
+    filterFns: {
+      customFilter: (row, columnId, filterValue) => {
+        // Apply type filter
+        if (
+          typeFilter !== "all" &&
+          row.original.transaction_type !== typeFilter
+        ) {
+          return false;
+        }
+
+        // Apply status filter
+        if (statusFilter !== "all" && row.original.status !== statusFilter) {
+          return false;
+        }
+
+        return true;
+      },
+    },
   });
+
+  // Apply custom filters when they change
+  useEffect(() => {
+    // Force table to re-filter when custom filters change
+    table.setGlobalFilter(globalFilter);
+  }, [typeFilter, statusFilter, globalFilter, table]);
+
+  const handleRefresh = async () => {
+    if (onRefresh) {
+      setIsRefreshing(true);
+      await onRefresh();
+      setIsRefreshing(false);
+    }
+  };
+
+  // Helper function to determine if a row should be highlighted
+  const isHighlighted = (userId: string) => {
+    return lastUpdatedUserId === userId;
+  };
 
   // Generate skeleton rows
   const renderSkeletonRows = () => {
@@ -82,55 +132,76 @@ export function DataTable<TData, TValue>({
   };
 
   return (
-    <div>
+    <div className="space-y-4">
       {/* Filters Section */}
-      <div className="flex flex-col space-y-4 py-4">
-        <div className="flex flex-col sm:flex-row gap-4">
+      <div className="flex flex-col md:flex-row gap-4">
+        <div className="relative max-w-sm">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Search transactions..."
             value={globalFilter}
-            onChange={(event) => setGlobalFilter(event.target.value)}
-            className="max-w-sm"
+            onChange={(e) => setGlobalFilter(e.target.value)}
+            className="pl-8 pr-8 max-w-sm"
             disabled={isLoading}
           />
-          <div className="flex gap-2">
-            <Select
-              value={typeFilter}
-              onValueChange={setTypeFilter}
-              disabled={isLoading}
+          {globalFilter && (
+            <button
+              onClick={() => setGlobalFilter("")}
+              className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
+              aria-label="Clear search"
             >
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Transaction Type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Types</SelectItem>
-                <SelectItem value="payment">Payment</SelectItem>
-                <SelectItem value="advance">Advance</SelectItem>
-                <SelectItem value="penalty">Penalty</SelectItem>
-                <SelectItem value="bonus">Bonus</SelectItem>
-              </SelectContent>
-            </Select>
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <Select
+            value={typeFilter}
+            onValueChange={setTypeFilter}
+            disabled={isLoading}
+          >
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="Filter by type" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Types</SelectItem>
+              <SelectItem value="payment">Payment</SelectItem>
+              <SelectItem value="advance">Advance</SelectItem>
+              <SelectItem value="penalty">Penalty</SelectItem>
+              <SelectItem value="bonus">Bonus</SelectItem>
+            </SelectContent>
+          </Select>
 
-            <Select
-              value={statusFilter}
-              onValueChange={setStatusFilter}
-              disabled={isLoading}
+          <Select
+            value={statusFilter}
+            onValueChange={setStatusFilter}
+            disabled={isLoading}
+          >
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="Filter by status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Status</SelectItem>
+              <SelectItem value="pending">Pending</SelectItem>
+              <SelectItem value="paid">Paid</SelectItem>
+              <SelectItem value="unpaid">Unpaid</SelectItem>
+              <SelectItem value="charged">Charged</SelectItem>
+              <SelectItem value="deducted">Deducted</SelectItem>
+            </SelectContent>
+          </Select>
+
+          {onRefresh && (
+            <Button
+              variant="outline"
+              onClick={handleRefresh}
+              disabled={isRefreshing || isLoading}
             >
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="pending">Pending</SelectItem>
-                <SelectItem value="completed">Completed</SelectItem>
-                <SelectItem value="cancelled">Cancelled</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+              {isRefreshing ? "Refreshing..." : "Refresh"}
+            </Button>
+          )}
         </div>
       </div>
 
-      {/* Table */}
       <div className="rounded-md border">
         <Table>
           <TableHeader>
@@ -157,6 +228,13 @@ export function DataTable<TData, TValue>({
                 <TableRow
                   key={row.id}
                   data-state={row.getIsSelected() && "selected"}
+                  className={
+                    isHighlighted(
+                      (row.original as MonthlyPayrollSummary).user_id
+                    )
+                      ? "bg-blue-50 dark:bg-blue-900/20 transition-colors duration-500"
+                      : ""
+                  }
                 >
                   {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id}>
@@ -174,7 +252,7 @@ export function DataTable<TData, TValue>({
                   colSpan={columns.length}
                   className="h-24 text-center"
                 >
-                  No results.
+                  No payroll data found.
                 </TableCell>
               </TableRow>
             )}
@@ -187,7 +265,7 @@ export function DataTable<TData, TValue>({
         <span className="text-sm text-muted-foreground">
           {isLoading
             ? "Loading..."
-            : `${table.getFilteredRowModel().rows.length} transactions`}
+            : `Showing ${table.getFilteredRowModel().rows.length} of ${data.length} transactions`}
         </span>
         <div className="flex items-center space-x-2">
           <Button
