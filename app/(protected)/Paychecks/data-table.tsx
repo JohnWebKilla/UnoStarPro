@@ -40,8 +40,8 @@ interface DataTableProps<TData, TValue> {
   skeletonRowCount?: number;
   lastUpdatedUserId?: string | null;
   onViewTransactions?: (userId: string) => void;
-  onRefresh?: () => Promise<void>;
   emptyMessage?: string;
+  actionButtons?: React.ReactNode;
 }
 
 export function DataTable<TData extends MonthlyPayrollSummary, TValue>({
@@ -51,15 +51,14 @@ export function DataTable<TData extends MonthlyPayrollSummary, TValue>({
   skeletonRowCount = 5,
   lastUpdatedUserId = null,
   onViewTransactions,
-  onRefresh,
   emptyMessage,
+  actionButtons,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [globalFilter, setGlobalFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const table = useReactTable({
     data,
@@ -105,14 +104,6 @@ export function DataTable<TData extends MonthlyPayrollSummary, TValue>({
     table.setGlobalFilter(globalFilter);
   }, [typeFilter, statusFilter, globalFilter, table]);
 
-  const handleRefresh = async () => {
-    if (onRefresh) {
-      setIsRefreshing(true);
-      await onRefresh();
-      setIsRefreshing(false);
-    }
-  };
-
   // Helper function to determine if a row should be highlighted
   const isHighlighted = (userId: string) => {
     return lastUpdatedUserId === userId;
@@ -136,72 +127,69 @@ export function DataTable<TData extends MonthlyPayrollSummary, TValue>({
   return (
     <div className="space-y-4">
       {/* Filters Section */}
-      <div className="flex flex-col md:flex-row gap-4">
-        <div className="relative max-w-sm">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search transactions..."
-            value={globalFilter}
-            onChange={(e) => setGlobalFilter(e.target.value)}
-            className="pl-8 pr-8 max-w-sm"
-            disabled={isLoading}
-          />
-          {globalFilter && (
-            <button
-              onClick={() => setGlobalFilter("")}
-              className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
-              aria-label="Clear search"
+      <div className="flex flex-col md:flex-row justify-between gap-4">
+        <div className="flex flex-col md:flex-row gap-4">
+          <div className="relative max-w-sm">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search transactions..."
+              value={globalFilter}
+              onChange={(e) => setGlobalFilter(e.target.value)}
+              className="pl-8 pr-8 max-w-sm"
+              disabled={isLoading}
+            />
+            {globalFilter && (
+              <button
+                onClick={() => setGlobalFilter("")}
+                className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
+                aria-label="Clear search"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <Select
+              value={typeFilter}
+              onValueChange={setTypeFilter}
+              disabled={isLoading}
             >
-              <X className="h-4 w-4" />
-            </button>
-          )}
-        </div>
-        <div className="flex gap-2">
-          <Select
-            value={typeFilter}
-            onValueChange={setTypeFilter}
-            disabled={isLoading}
-          >
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Filter by type" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Types</SelectItem>
-              <SelectItem value="payment">Payment</SelectItem>
-              <SelectItem value="advance">Advance</SelectItem>
-              <SelectItem value="penalty">Penalty</SelectItem>
-              <SelectItem value="bonus">Bonus</SelectItem>
-            </SelectContent>
-          </Select>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Filter by type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Types</SelectItem>
+                <SelectItem value="payment">Payment</SelectItem>
+                <SelectItem value="advance">Advance</SelectItem>
+                <SelectItem value="penalty">Penalty</SelectItem>
+                <SelectItem value="bonus">Bonus</SelectItem>
+              </SelectContent>
+            </Select>
 
-          <Select
-            value={statusFilter}
-            onValueChange={setStatusFilter}
-            disabled={isLoading}
-          >
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Filter by status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Status</SelectItem>
-              <SelectItem value="pending">Pending</SelectItem>
-              <SelectItem value="paid">Paid</SelectItem>
-              <SelectItem value="unpaid">Unpaid</SelectItem>
-              <SelectItem value="charged">Charged</SelectItem>
-              <SelectItem value="deducted">Deducted</SelectItem>
-            </SelectContent>
-          </Select>
-
-          {onRefresh && (
-            <Button
-              variant="outline"
-              onClick={handleRefresh}
-              disabled={isRefreshing || isLoading}
+            <Select
+              value={statusFilter}
+              onValueChange={setStatusFilter}
+              disabled={isLoading}
             >
-              {isRefreshing ? "Refreshing..." : "Refresh"}
-            </Button>
-          )}
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Filter by status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Status</SelectItem>
+                <SelectItem value="pending">Pending</SelectItem>
+                <SelectItem value="paid">Paid</SelectItem>
+                <SelectItem value="unpaid">Unpaid</SelectItem>
+                <SelectItem value="charged">Charged</SelectItem>
+                <SelectItem value="deducted">Deducted</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
+
+        {/* Action Buttons */}
+        {actionButtons && (
+          <div className="flex gap-2 items-center">{actionButtons}</div>
+        )}
       </div>
 
       <div className="rounded-md border">

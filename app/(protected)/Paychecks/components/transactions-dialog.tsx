@@ -206,8 +206,11 @@ export function TransactionsDialog({
       summary.advanceAmount -
       summary.penaltyAmount;
 
-    // Ensure paid amount doesn't go below zero
-    summary.paidAmount = Math.max(0, summary.paidAmount);
+    // Ensure paid amount doesn't exceed total amount
+    summary.paidAmount = Math.min(
+      Math.max(0, summary.paidAmount),
+      summary.totalAmount
+    );
     summary.pendingAmount = Math.max(0, summary.pendingAmount);
 
     return summary;

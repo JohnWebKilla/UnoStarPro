@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { format, addMonths, subMonths } from "date-fns";
+import { format, addMonths, subMonths, setMonth, setYear } from "date-fns";
 import {
   Calendar as CalendarIcon,
   ChevronLeft,
@@ -14,7 +14,13 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { Calendar } from "@/components/ui/calendar";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface MonthPickerProps {
   selected: Date;
@@ -22,12 +28,33 @@ interface MonthPickerProps {
   className?: string;
 }
 
+const MONTHS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
 export function MonthPicker({
   selected,
   onMonthChange,
   className,
 }: MonthPickerProps) {
   const [open, setOpen] = React.useState(false);
+  const [localDate, setLocalDate] = React.useState(selected);
+
+  // Reset local date when selected date changes
+  React.useEffect(() => {
+    setLocalDate(selected);
+  }, [selected]);
 
   const handlePreviousMonth = () => {
     onMonthChange(subMonths(selected, 1));
@@ -37,12 +64,26 @@ export function MonthPicker({
     onMonthChange(addMonths(selected, 1));
   };
 
-  const handleSelect = (date: Date | undefined) => {
-    if (date) {
-      onMonthChange(date);
-      setOpen(false);
-    }
+  const handleMonthSelect = (monthIndex: string) => {
+    const newDate = setMonth(localDate, parseInt(monthIndex));
+    setLocalDate(newDate);
   };
+
+  const handleYearSelect = (year: string) => {
+    const newDate = setYear(localDate, parseInt(year));
+    setLocalDate(newDate);
+  };
+
+  const handleApply = () => {
+    onMonthChange(localDate);
+    setOpen(false);
+  };
+
+  // Generate years (from 2020 to current year + 5)
+  const currentYear = new Date().getFullYear();
+  const years = Array.from({ length: currentYear - 2020 + 6 }, (_, i) =>
+    (2020 + i).toString()
+  );
 
   return (
     <div className={cn("flex items-center gap-1", className)}>
@@ -68,18 +109,50 @@ export function MonthPicker({
             {format(selected, "MMMM yyyy")}
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-auto p-0" align="start">
-          <Calendar
-            mode="single"
-            selected={selected}
-            onSelect={handleSelect}
-            initialFocus
-            month={selected}
-            onMonthChange={handleSelect}
-            captionLayout="dropdown-buttons"
-            fromMonth={new Date(2020, 0)}
-            toMonth={new Date(2030, 11)}
-          />
+        <PopoverContent className="w-auto p-4" align="start">
+          <div className="grid gap-4">
+            <div className="grid grid-cols-2 gap-2">
+              <div className="flex flex-col space-y-1">
+                <label className="text-sm font-medium">Month</label>
+                <Select
+                  value={localDate.getMonth().toString()}
+                  onValueChange={handleMonthSelect}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select month" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {MONTHS.map((month, index) => (
+                      <SelectItem key={month} value={index.toString()}>
+                        {month}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col space-y-1">
+                <label className="text-sm font-medium">Year</label>
+                <Select
+                  value={localDate.getFullYear().toString()}
+                  onValueChange={handleYearSelect}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select year" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {years.map((year) => (
+                      <SelectItem key={year} value={year}>
+                        {year}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <Button onClick={handleApply} className="w-full">
+              Apply
+            </Button>
+          </div>
         </PopoverContent>
       </Popover>
       <Button

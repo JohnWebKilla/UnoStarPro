@@ -116,9 +116,11 @@ export const columns: ColumnDef<MonthlyPayrollSummary>[] = [
     header: "Paid Amount",
     cell: ({ row }) => {
       const data = row.original;
+      // Ensure paid amount doesn't exceed total amount
+      const paidAmount = Math.min(data.paid_amount, data.total_amount);
       return (
         <div className="space-y-1">
-          <div className="font-medium">${data.paid_amount.toFixed(2)}</div>
+          <div className="font-medium">${paidAmount.toFixed(2)}</div>
           <div className="text-xs text-muted-foreground">
             of ${data.total_amount.toFixed(2)}
           </div>

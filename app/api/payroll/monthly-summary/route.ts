@@ -45,10 +45,17 @@ export async function GET(request: NextRequest) {
 
     // Parse the month parameter
     const selectedMonth = parseISO(monthParam);
+    console.log(
+      `Parsed month parameter: ${monthParam} -> ${selectedMonth.toISOString()}`
+    );
+
     const monthStart = startOfMonth(selectedMonth);
     const monthEnd = endOfMonth(selectedMonth);
     const monthString = monthStart.toISOString().slice(0, 7); // YYYY-MM format
 
+    console.log(
+      `Month range: ${monthStart.toISOString()} to ${monthEnd.toISOString()}`
+    );
     console.log(
       `Processing payroll for month: ${monthString} (${format(monthStart, "MMMM yyyy")})`
     );
@@ -178,8 +185,11 @@ export async function GET(request: NextRequest) {
           .filter((t) => t.transaction_type === "bonus")
           .reduce((sum, t) => sum + t.amount, 0);
 
-        // Calculate paid and pending amounts
-        const paidAmount = userTransactions
+        // Calculate total amount
+        const totalAmount = basePayment + bonuses - advances - penalties;
+
+        // Calculate paid amount - ensure it doesn't exceed the total amount
+        const rawPaidAmount = userTransactions
           .filter((t) => t.status === "paid")
           .reduce((sum, t) => {
             if (
@@ -196,6 +206,9 @@ export async function GET(request: NextRequest) {
             return sum;
           }, 0);
 
+        // Ensure paid amount doesn't exceed total amount
+        const paidAmount = Math.min(Math.max(0, rawPaidAmount), totalAmount);
+
         const pendingAmount = userTransactions
           .filter((t) => t.status === "pending")
           .reduce((sum, t) => {
@@ -208,9 +221,6 @@ export async function GET(request: NextRequest) {
             return sum;
           }, 0);
 
-        // Calculate total amount
-        const totalAmount = basePayment + bonuses - advances - penalties;
-
         return {
           user_id: userId,
           month: monthString,
@@ -222,7 +232,7 @@ export async function GET(request: NextRequest) {
           penalties: penalties,
           bonuses: bonuses,
           total_amount: totalAmount,
-          paid_amount: Math.max(0, paidAmount),
+          paid_amount: paidAmount,
           pending_amount: Math.max(0, pendingAmount),
           transaction_ids: userTransactions.map((t) => t.id),
         };

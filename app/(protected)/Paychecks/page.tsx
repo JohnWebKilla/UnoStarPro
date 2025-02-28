@@ -4,7 +4,13 @@ import { useState, useEffect, useCallback } from "react";
 import { DataTable } from "./data-table";
 import { columns } from "./columns";
 import { Button } from "@/components/ui/button";
-import { Plus, RefreshCw, Loader2 } from "lucide-react";
+import {
+  Plus,
+  RefreshCw,
+  Loader2,
+  CalendarIcon,
+  Calculator,
+} from "lucide-react";
 import { PayrollDialog } from "./components/payroll-dialog";
 import { useToast } from "@/components/ui/use-toast";
 import { createClient } from "@/utils/supabase/client";
@@ -34,6 +40,13 @@ import {
 } from "@/utils/client-cache";
 import { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 import { GeneratePayrollDialog } from "./components/generate-payroll-dialog";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 
 // Add this type for payment status
 type OverallStatus = "paid" | "partially_paid" | "pending" | "unpaid";
@@ -288,7 +301,10 @@ function PaychecksContent() {
 
   // Handle month change
   const handleMonthChange = (newMonth: Date) => {
-    setSelectedMonth(newMonth);
+    // Ensure we're always using the first day of the month
+    const firstDayOfMonth = startOfMonth(newMonth);
+    console.log(`Month changed to: ${format(firstDayOfMonth, "yyyy-MM-dd")}`);
+    setSelectedMonth(firstDayOfMonth);
   };
 
   // Handle view transactions
@@ -345,74 +361,145 @@ function PaychecksContent() {
     }
   };
 
-  // Render data source indicator
-  const renderDataSourceIndicator = () => {
-    return (
-      <div className="text-xs text-muted-foreground mt-1">
-        Data source: {dataSource === "cache" ? "Cache" : "Database"}
-        {lastFetchTime && (
-          <span className="ml-2">
-            • Last updated: {lastFetchTime.toLocaleTimeString()}
-          </span>
-        )}
-      </div>
+  // Calculate summary statistics
+  const calculateSummary = () => {
+    if (summaries.length === 0) return { total: 0, paid: 0, pending: 0 };
+
+    return summaries.reduce(
+      (acc, summary) => {
+        acc.total += summary.total_amount;
+        acc.paid += summary.paid_amount;
+        acc.pending += summary.pending_amount;
+        return acc;
+      },
+      { total: 0, paid: 0, pending: 0 }
     );
   };
 
+  const summary = calculateSummary();
+
   return (
-    <div className="px-2 py-10">
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Paychecks</h1>
-          <p className="text-muted-foreground">
-            Manage employee payroll transactions
-          </p>
-          {renderDataSourceIndicator()}
-        </div>
-        <div className="flex gap-2">
-          <MonthPicker
-            selected={selectedMonth}
-            onMonthChange={handleMonthChange}
-          />
-          <Button
-            variant="outline"
-            onClick={invalidateCache}
-            disabled={isInvalidating}
-          >
-            {isInvalidating ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Refreshing...
-              </>
-            ) : (
-              <>
-                <RefreshCw className="mr-2 h-4 w-4" />
-                Refresh
-              </>
-            )}
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => setIsAdvancedPayrollDialogOpen(true)}
-            disabled={isLoading}
-          >
-            Generate Payroll
-          </Button>
-          <Button onClick={() => setIsPayrollDialogOpen(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            New Transaction
-          </Button>
-        </div>
+    <div className=" py-4 px-4">
+      {/* Header Section */}
+      <Card className="mb-6">
+        <CardHeader className="pb-3">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+              <CardTitle className="text-2xl">Paychecks</CardTitle>
+              <CardDescription>
+                Manage employee payroll transactions
+              </CardDescription>
+              <div className="text-xs text-muted-foreground mt-1">
+                Data source: {dataSource === "cache" ? "Cache" : "Database"}
+                {lastFetchTime && (
+                  <span className="ml-2">
+                    • Last updated: {lastFetchTime.toLocaleTimeString()}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2 items-center">
+              <MonthPicker
+                selected={selectedMonth}
+                onMonthChange={handleMonthChange}
+              />
+              <Button
+                variant="outline"
+                onClick={invalidateCache}
+                disabled={isInvalidating || isLoading}
+                className="min-w-[100px]"
+              >
+                {isInvalidating ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Refreshing...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    Refresh
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+      </Card>
+
+      {/* Summary Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Total Payroll
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              ${summary.total.toFixed(2)}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              For {format(selectedMonth, "MMMM yyyy")}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Paid Amount
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600">
+              ${summary.paid.toFixed(2)}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              {((summary.paid / summary.total) * 100 || 0).toFixed(1)}% of total
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Pending Amount
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-amber-600">
+              ${summary.pending.toFixed(2)}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              {((summary.pending / summary.total) * 100 || 0).toFixed(1)}% of
+              total
+            </p>
+          </CardContent>
+        </Card>
       </div>
 
+      {/* Data Table with Action Buttons */}
       <DataTable
         columns={columns}
         data={summaries}
         isLoading={isLoading || isInvalidating}
         onViewTransactions={handleViewTransactions}
-        onRefresh={invalidateCache}
         lastUpdatedUserId={lastUpdatedUserId}
         emptyMessage={`No payroll data found for ${format(selectedMonth, "MMMM yyyy")}`}
+        actionButtons={
+          <>
+            <Button
+              variant="outline"
+              onClick={() => setIsAdvancedPayrollDialogOpen(true)}
+              disabled={isLoading}
+            >
+              <Calculator className="h-4 w-4 mr-2" />
+              Generate Payroll
+            </Button>
+            <Button onClick={() => setIsPayrollDialogOpen(true)}>
+              <Plus className="h-4 w-4 mr-2" />
+              New Transaction
+            </Button>
+          </>
+        }
       />
 
       <PayrollDialog
@@ -498,7 +585,6 @@ const mockShiftData = [
   // Add more mock data...
 ];
 
-// Add these functions to your components to use mock data
 // In PerformanceMetrics component:
 const fetchMetrics = async () => {
   // For testing, return mock data
