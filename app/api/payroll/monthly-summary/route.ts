@@ -150,15 +150,45 @@ export async function GET(request: NextRequest) {
       // Fetch user details for these users
       const { data: userData, error: userError } = await supabase
         .from("users")
-        .select("id, first_name, last_name, email")
+        .select("id, first_name, last_name, email, department, role")
         .in("id", userIds);
 
       if (userError) {
         console.error("Error fetching user data:", userError);
       }
 
+      // Fetch user schedules
+      const { data: scheduleData, error: scheduleError } = await supabase
+        .from("schedules")
+        .select("user_id, working_shift, off_days")
+        .in("user_id", userIds);
+
+      if (scheduleError) {
+        console.error("Error fetching user schedules:", scheduleError);
+      }
+
+      // Create lookup maps for department, role, and schedule
+      const departmentMap = new Map();
+      const roleMap = new Map();
+      if (userData) {
+        userData.forEach((user) => {
+          departmentMap.set(user.id, user.department);
+          roleMap.set(user.id, user.role);
+        });
+      }
+
+      const scheduleMap = new Map();
+      if (scheduleData) {
+        scheduleData.forEach((schedule) => {
+          scheduleMap.set(schedule.user_id, {
+            working_shift: schedule.working_shift,
+            off_days: schedule.off_days,
+          });
+        });
+      }
+
       // Create summary data from transactions and user data
-      const summaryData = userIds.map((userId) => {
+      let enhancedSummaryData = userIds.map((userId) => {
         const userTransactions = transactionsData.filter(
           (t) => t.user_id === userId
         );
@@ -227,6 +257,9 @@ export async function GET(request: NextRequest) {
           first_name: user.first_name,
           last_name: user.last_name,
           email: user.email,
+          department: departmentMap.get(userId),
+          role: roleMap.get(userId),
+          schedule: scheduleMap.get(userId),
           base_payment: basePayment,
           advances: advances,
           penalties: penalties,
@@ -239,12 +272,12 @@ export async function GET(request: NextRequest) {
       });
 
       console.log(
-        `Created ${summaryData.length} summary records from transactions`
+        `Created ${enhancedSummaryData.length} enhanced summary records from transactions`
       );
 
       // Store in cache for future requests
       try {
-        await setCache(cacheKey, summaryData, CACHE_EXPIRATION);
+        await setCache(cacheKey, enhancedSummaryData, CACHE_EXPIRATION);
         console.log(`Data cached successfully for ${cacheKey}`);
       } catch (cacheError) {
         console.error("Failed to store data in cache:", cacheError);
@@ -254,7 +287,7 @@ export async function GET(request: NextRequest) {
       console.log(`Total request processing time: ${totalTime}ms`);
 
       return NextResponse.json({
-        data: summaryData,
+        data: enhancedSummaryData,
         source: "database",
         timing: {
           total: totalTime,

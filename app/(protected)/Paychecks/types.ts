@@ -6,6 +6,12 @@ export type PaymentStatus =
   | "charged"
   | "deducted";
 
+export interface Schedule {
+  working_shift: string;
+  shift_name?: string;
+  off_days?: string[];
+}
+
 export interface PayrollTransaction {
   id: number;
   user_id: string;
@@ -53,6 +59,9 @@ export interface MonthlyPayrollSummary {
   first_name: string;
   last_name: string;
   email: string;
+  department?: string;
+  role?: string;
+  schedule?: Schedule;
   base_payment: number;
   advances: number;
   penalties: number;

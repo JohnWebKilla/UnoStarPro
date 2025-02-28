@@ -11,18 +11,13 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { MoreHorizontal, Eye } from "lucide-react";
-
-// Helper function to determine overall status
-function getOverallStatus(
-  summary: MonthlyPayrollSummary
-): "paid" | "partially_paid" | "pending" | "unpaid" {
-  if (summary.total_amount <= 0) return "paid";
-  if (summary.paid_amount >= summary.total_amount) return "paid";
-  if (summary.paid_amount > 0) return "partially_paid";
-  if (summary.pending_amount > 0) return "pending";
-  return "unpaid";
-}
+import { MoreHorizontal, Eye, CalendarClock, Building } from "lucide-react";
+import { getOverallStatus, getStatusBadgeClass } from "./types";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 export const columns: ColumnDef<MonthlyPayrollSummary>[] = [
   {
@@ -37,6 +32,38 @@ export const columns: ColumnDef<MonthlyPayrollSummary>[] = [
           </div>
           <div className="text-sm text-muted-foreground">{data.email}</div>
         </div>
+      );
+    },
+  },
+  {
+    accessorKey: "department",
+    header: "Department",
+    cell: ({ row }) => {
+      const department = row.original.department;
+      return department ? (
+        <div className="flex items-center">
+          <Building className="h-4 w-4 mr-2 text-muted-foreground" />
+          <span>{department}</span>
+        </div>
+      ) : (
+        <span className="text-muted-foreground">-</span>
+      );
+    },
+  },
+  {
+    accessorKey: "schedule",
+    header: "Shift",
+    cell: ({ row }) => {
+      const schedule = row.original.schedule;
+      return schedule ? (
+        <div className="flex items-center">
+          <CalendarClock className="h-4 w-4 mr-2 text-muted-foreground" />
+          <span>
+            {schedule.shift_name || `Shift ${schedule.working_shift}`}
+          </span>
+        </div>
+      ) : (
+        <span className="text-muted-foreground">-</span>
       );
     },
   },

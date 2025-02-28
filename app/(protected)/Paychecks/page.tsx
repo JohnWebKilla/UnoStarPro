@@ -192,6 +192,59 @@ function PaychecksContent() {
           console.log(`No payroll data found for ${selectedMonthStr}`);
         }
 
+        // Fetch additional user information (department and schedule)
+        if (result.data.length > 0) {
+          const userIds = result.data.map((summary) => summary.user_id);
+
+          // Fetch user departments
+          const { data: userData, error: userError } = await supabase
+            .from("users")
+            .select("id, department, role")
+            .in("id", userIds);
+
+          if (userError) {
+            console.error("Error fetching user departments:", userError);
+          }
+
+          // Fetch user schedules
+          const { data: scheduleData, error: scheduleError } = await supabase
+            .from("schedules")
+            .select("user_id, working_shift, off_days")
+            .in("user_id", userIds);
+
+          if (scheduleError) {
+            console.error("Error fetching user schedules:", scheduleError);
+          }
+
+          // Create lookup maps
+          const departmentMap = new Map();
+          const roleMap = new Map();
+          if (userData) {
+            userData.forEach((user) => {
+              departmentMap.set(user.id, user.department);
+              roleMap.set(user.id, user.role);
+            });
+          }
+
+          const scheduleMap = new Map();
+          if (scheduleData) {
+            scheduleData.forEach((schedule) => {
+              scheduleMap.set(schedule.user_id, {
+                working_shift: schedule.working_shift,
+                off_days: schedule.off_days,
+              });
+            });
+          }
+
+          // Enhance the payroll data with department and schedule information
+          result.data = result.data.map((summary) => ({
+            ...summary,
+            department: departmentMap.get(summary.user_id) || undefined,
+            role: roleMap.get(summary.user_id) || undefined,
+            schedule: scheduleMap.get(summary.user_id) || undefined,
+          }));
+        }
+
         // Store in cache for 5 minutes (300 seconds)
         await setClientCache(cacheKey, result.data, 300);
         setDataSource(result.source);
@@ -421,6 +474,18 @@ function PaychecksContent() {
                   </>
                 )}
               </Button>
+              <Button
+                variant="outline"
+                onClick={() => setIsAdvancedPayrollDialogOpen(true)}
+                disabled={isLoading}
+              >
+                <Calculator className="h-4 w-4 mr-2" />
+                Generate Payroll
+              </Button>
+              <Button onClick={() => setIsPayrollDialogOpen(true)}>
+                <Plus className="h-4 w-4 mr-2" />
+                New Transaction
+              </Button>
             </div>
           </div>
         </CardHeader>
@@ -476,7 +541,7 @@ function PaychecksContent() {
         </Card>
       </div>
 
-      {/* Data Table with Action Buttons */}
+      {/* Data Table */}
       <DataTable
         columns={columns}
         data={summaries}
@@ -484,22 +549,6 @@ function PaychecksContent() {
         onViewTransactions={handleViewTransactions}
         lastUpdatedUserId={lastUpdatedUserId}
         emptyMessage={`No payroll data found for ${format(selectedMonth, "MMMM yyyy")}`}
-        actionButtons={
-          <>
-            <Button
-              variant="outline"
-              onClick={() => setIsAdvancedPayrollDialogOpen(true)}
-              disabled={isLoading}
-            >
-              <Calculator className="h-4 w-4 mr-2" />
-              Generate Payroll
-            </Button>
-            <Button onClick={() => setIsPayrollDialogOpen(true)}>
-              <Plus className="h-4 w-4 mr-2" />
-              New Transaction
-            </Button>
-          </>
-        }
       />
 
       <PayrollDialog

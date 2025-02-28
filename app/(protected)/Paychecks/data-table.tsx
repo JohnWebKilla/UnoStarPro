@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   ColumnDef,
   flexRender,
@@ -11,6 +11,7 @@ import {
   SortingState,
   getFilteredRowModel,
   ColumnFiltersState,
+  Row,
 } from "@tanstack/react-table";
 import {
   Table,
@@ -22,9 +23,13 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Search, X } from "lucide-react";
+import { Search, X, Filter } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { PayrollTransaction, MonthlyPayrollSummary } from "./types";
+import {
+  PayrollTransaction,
+  MonthlyPayrollSummary,
+  getOverallStatus,
+} from "./types";
 import {
   Select,
   SelectContent,
@@ -32,6 +37,23 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
@@ -41,7 +63,6 @@ interface DataTableProps<TData, TValue> {
   lastUpdatedUserId?: string | null;
   onViewTransactions?: (userId: string) => void;
   emptyMessage?: string;
-  actionButtons?: React.ReactNode;
 }
 
 export function DataTable<TData extends MonthlyPayrollSummary, TValue>({
@@ -52,57 +73,141 @@ export function DataTable<TData extends MonthlyPayrollSummary, TValue>({
   lastUpdatedUserId = null,
   onViewTransactions,
   emptyMessage,
-  actionButtons,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [globalFilter, setGlobalFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [departmentFilter, setDepartmentFilter] = useState<string>("all");
+  const [shiftFilter, setShiftFilter] = useState<string>("all");
+  const [showFilters, setShowFilters] = useState(false);
+
+  // Extract unique departments and shifts from data
+  const departments = Array.from(
+    new Set(
+      data
+        .map((item) => (item as MonthlyPayrollSummary).department || "")
+        .filter((dept) => dept !== "")
+    )
+  );
+
+  const shifts = Array.from(
+    new Set(
+      data
+        .map((item) => {
+          const schedule = (item as MonthlyPayrollSummary).schedule;
+          return schedule ? schedule.working_shift : "";
+        })
+        .filter((shift) => shift !== "")
+    )
+  );
+
+  // Filter the data before passing it to the table
+  const filteredData = useMemo(() => {
+    return data.filter((summary) => {
+      // Apply type filter
+      if (typeFilter !== "all") {
+        if (
+          (typeFilter === "payment" && summary.base_payment <= 0) ||
+          (typeFilter === "advance" && summary.advances <= 0) ||
+          (typeFilter === "penalty" && summary.penalties <= 0) ||
+          (typeFilter === "bonus" && summary.bonuses <= 0)
+        ) {
+          return false;
+        }
+      }
+
+      // Apply status filter
+      if (statusFilter !== "all") {
+        const status = getOverallStatus(summary);
+        if (status !== statusFilter) {
+          return false;
+        }
+      }
+
+      // Apply department filter
+      if (
+        departmentFilter !== "all" &&
+        summary.department !== departmentFilter
+      ) {
+        return false;
+      }
+
+      // Apply shift filter
+      if (shiftFilter !== "all") {
+        if (
+          !summary.schedule ||
+          summary.schedule.working_shift !== shiftFilter
+        ) {
+          return false;
+        }
+      }
+
+      // Apply global search filter
+      if (globalFilter && globalFilter.length > 0) {
+        const searchTerm = globalFilter.toLowerCase();
+        const fullName =
+          `${summary.first_name} ${summary.last_name}`.toLowerCase();
+        const email = summary.email.toLowerCase();
+        const department = summary.department?.toLowerCase() || "";
+
+        // Convert amounts to strings for searching
+        const amountStr = [
+          summary.base_payment,
+          summary.advances,
+          summary.penalties,
+          summary.bonuses,
+          summary.total_amount,
+          summary.paid_amount,
+        ]
+          .map((amount) => amount.toString())
+          .join(" ");
+
+        return (
+          fullName.includes(searchTerm) ||
+          email.includes(searchTerm) ||
+          amountStr.includes(searchTerm) ||
+          department.includes(searchTerm)
+        );
+      }
+
+      return true;
+    });
+  }, [
+    data,
+    typeFilter,
+    statusFilter,
+    departmentFilter,
+    shiftFilter,
+    globalFilter,
+  ]);
 
   const table = useReactTable({
-    data,
+    data: filteredData,
     columns,
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
     onSortingChange: setSorting,
-    onColumnFiltersChange: setColumnFilters,
-    onGlobalFilterChange: setGlobalFilter,
     state: {
       sorting,
-      columnFilters,
-      globalFilter,
     },
     meta: {
       onViewTransactions,
     },
-    filterFns: {
-      customFilter: (row, columnId, filterValue) => {
-        // Apply type filter
-        if (
-          typeFilter !== "all" &&
-          row.original.transaction_type !== typeFilter
-        ) {
-          return false;
-        }
-
-        // Apply status filter
-        if (statusFilter !== "all" && row.original.status !== statusFilter) {
-          return false;
-        }
-
-        return true;
-      },
-    },
   });
 
-  // Apply custom filters when they change
-  useEffect(() => {
-    // Force table to re-filter when custom filters change
-    table.setGlobalFilter(globalFilter);
-  }, [typeFilter, statusFilter, globalFilter, table]);
+  // Count active filters for the filter button badge
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (typeFilter !== "all") count++;
+    if (statusFilter !== "all") count++;
+    if (departmentFilter !== "all") count++;
+    if (shiftFilter !== "all") count++;
+    if (globalFilter && globalFilter.length > 0) count++;
+    return count;
+  }, [typeFilter, statusFilter, departmentFilter, shiftFilter, globalFilter]);
 
   // Helper function to determine if a row should be highlighted
   const isHighlighted = (userId: string) => {
@@ -124,72 +229,136 @@ export function DataTable<TData extends MonthlyPayrollSummary, TValue>({
       ));
   };
 
+  // Reset all filters
+  const resetFilters = () => {
+    setGlobalFilter("");
+    setTypeFilter("all");
+    setStatusFilter("all");
+    setDepartmentFilter("all");
+    setShiftFilter("all");
+  };
+
   return (
     <div className="space-y-4">
       {/* Filters Section */}
-      <div className="flex flex-col md:flex-row justify-between gap-4">
-        <div className="flex flex-col md:flex-row gap-4">
-          <div className="relative max-w-sm">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search transactions..."
-              value={globalFilter}
-              onChange={(e) => setGlobalFilter(e.target.value)}
-              className="pl-8 pr-8 max-w-sm"
-              disabled={isLoading}
-            />
-            {globalFilter && (
-              <button
-                onClick={() => setGlobalFilter("")}
-                className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
-                aria-label="Clear search"
+      <div className="border rounded-md p-4">
+        <div className="flex flex-col space-y-4">
+          {/* Search and Filter Controls */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+            {/* Search */}
+            <div className="relative">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search by name, email, amount..."
+                value={globalFilter}
+                onChange={(e) => setGlobalFilter(e.target.value)}
+                className="pl-8 pr-8"
+                disabled={isLoading}
+              />
+              {globalFilter && (
+                <button
+                  onClick={() => setGlobalFilter("")}
+                  className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
+                  aria-label="Clear search"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+
+            {/* Type Filter */}
+            <div>
+              <Select value={typeFilter} onValueChange={setTypeFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Transaction Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  <SelectItem value="payment">Payment</SelectItem>
+                  <SelectItem value="advance">Advance</SelectItem>
+                  <SelectItem value="penalty">Penalty</SelectItem>
+                  <SelectItem value="bonus">Bonus</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Status Filter */}
+            <div>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Statuses</SelectItem>
+                  <SelectItem value="paid">Paid</SelectItem>
+                  <SelectItem value="partially_paid">Partially Paid</SelectItem>
+                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="unpaid">Unpaid</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Department Filter */}
+            <div>
+              <Select
+                value={departmentFilter}
+                onValueChange={setDepartmentFilter}
               >
-                <X className="h-4 w-4" />
-              </button>
+                <SelectTrigger>
+                  <SelectValue placeholder="Department" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Departments</SelectItem>
+                  {departments.map((dept) => (
+                    <SelectItem key={dept} value={dept}>
+                      {dept}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Shift Filter or Reset Button */}
+            {activeFilterCount > 0 ? (
+              <Button
+                variant="outline"
+                className="flex items-center justify-center"
+                onClick={() => {
+                  setTypeFilter("all");
+                  setStatusFilter("all");
+                  setDepartmentFilter("all");
+                  setShiftFilter("all");
+                  setGlobalFilter("");
+                }}
+              >
+                <X className="h-4 w-4 mr-2" />
+                Reset Filters
+                <Badge
+                  variant="secondary"
+                  className="ml-2 rounded-full px-1 py-0 text-xs"
+                >
+                  {activeFilterCount}
+                </Badge>
+              </Button>
+            ) : (
+              <div>
+                <Select value={shiftFilter} onValueChange={setShiftFilter}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Shift" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Shifts</SelectItem>
+                    {shifts.map((shift) => (
+                      <SelectItem key={shift} value={shift}>
+                        {shift}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             )}
           </div>
-          <div className="flex gap-2">
-            <Select
-              value={typeFilter}
-              onValueChange={setTypeFilter}
-              disabled={isLoading}
-            >
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Filter by type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Types</SelectItem>
-                <SelectItem value="payment">Payment</SelectItem>
-                <SelectItem value="advance">Advance</SelectItem>
-                <SelectItem value="penalty">Penalty</SelectItem>
-                <SelectItem value="bonus">Bonus</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Select
-              value={statusFilter}
-              onValueChange={setStatusFilter}
-              disabled={isLoading}
-            >
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Filter by status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="pending">Pending</SelectItem>
-                <SelectItem value="paid">Paid</SelectItem>
-                <SelectItem value="unpaid">Unpaid</SelectItem>
-                <SelectItem value="charged">Charged</SelectItem>
-                <SelectItem value="deducted">Deducted</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
         </div>
-
-        {/* Action Buttons */}
-        {actionButtons && (
-          <div className="flex gap-2 items-center">{actionButtons}</div>
-        )}
       </div>
 
       <div className="rounded-md border">
