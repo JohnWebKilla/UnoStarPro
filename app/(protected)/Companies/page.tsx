@@ -371,6 +371,16 @@ export default function CompaniesPage() {
             />
             {isSyncing ? "Syncing..." : "Sync All"}
           </Button>
+          <Button
+            variant="outline"
+            onClick={fetchCompanies}
+            disabled={isInitialLoading}
+          >
+            <RefreshCw
+              className={cn("mr-2 h-4 w-4", isInitialLoading && "animate-spin")}
+            />
+            {isInitialLoading ? "Refreshing..." : "Refresh"}
+          </Button>
         </div>
       </div>
       <div className="px-4 flex-1">

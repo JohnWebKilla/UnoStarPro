@@ -547,3 +547,134 @@ export async function addSubscriptionItem({
     throw error;
   }
 }
+
+export async function getCompanyPaymentMethods(companyId: number) {
+  if (!stripe) {
+    throw new Error("Stripe is not configured");
+  }
+
+  const supabase = await createClient();
+  const { data: company, error } = await supabase
+    .from("companies")
+    .select("stripe_customer_id")
+    .eq("id", companyId)
+    .single();
+
+  if (error || !company?.stripe_customer_id) {
+    throw new Error("Company not found or not connected to Stripe");
+  }
+
+  const paymentMethods = await stripe.paymentMethods.list({
+    customer: company.stripe_customer_id,
+    type: "card",
+  });
+
+  return paymentMethods.data;
+}
+
+export async function addPaymentMethod(
+  companyId: number,
+  paymentMethodId: string
+) {
+  if (!stripe) {
+    throw new Error("Stripe is not configured");
+  }
+
+  const supabase = await createClient();
+  const { data: company, error } = await supabase
+    .from("companies")
+    .select("stripe_customer_id")
+    .eq("id", companyId)
+    .single();
+
+  if (error || !company?.stripe_customer_id) {
+    throw new Error("Company not found or not connected to Stripe");
+  }
+
+  // Attach the payment method to the customer
+  await stripe.paymentMethods.attach(paymentMethodId, {
+    customer: company.stripe_customer_id,
+  });
+
+  // Set as default payment method if it's the first one
+  const paymentMethods = await stripe.paymentMethods.list({
+    customer: company.stripe_customer_id,
+    type: "card",
+  });
+
+  if (paymentMethods.data.length === 1) {
+    await stripe.customers.update(company.stripe_customer_id, {
+      invoice_settings: {
+        default_payment_method: paymentMethodId,
+      },
+    });
+  }
+
+  return paymentMethods.data;
+}
+
+export async function removePaymentMethod(
+  companyId: number,
+  paymentMethodId: string
+) {
+  if (!stripe) {
+    throw new Error("Stripe is not configured");
+  }
+
+  const supabase = await createClient();
+  const { data: company, error } = await supabase
+    .from("companies")
+    .select("stripe_customer_id")
+    .eq("id", companyId)
+    .single();
+
+  if (error || !company?.stripe_customer_id) {
+    throw new Error("Company not found or not connected to Stripe");
+  }
+
+  // Detach the payment method
+  await stripe.paymentMethods.detach(paymentMethodId);
+
+  // Return updated list of payment methods
+  const paymentMethods = await stripe.paymentMethods.list({
+    customer: company.stripe_customer_id,
+    type: "card",
+  });
+
+  return paymentMethods.data;
+}
+
+export async function setDefaultPaymentMethod(
+  companyId: number,
+  paymentMethodId: string
+) {
+  if (!stripe) {
+    throw new Error("Stripe is not configured");
+  }
+
+  const supabase = await createClient();
+  const { data: company, error } = await supabase
+    .from("companies")
+    .select("stripe_customer_id")
+    .eq("id", companyId)
+    .single();
+
+  if (error || !company?.stripe_customer_id) {
+    throw new Error("Company not found or not connected to Stripe");
+  }
+
+  // Set as default payment method
+  await stripe.customers.update(company.stripe_customer_id, {
+    invoice_settings: {
+      default_payment_method: paymentMethodId,
+    },
+  });
+
+  // Return updated list of payment methods
+  const paymentMethods = await stripe.paymentMethods.list({
+    customer: company.stripe_customer_id,
+    type: "card",
+  });
+
+  return paymentMethods.data;
+}

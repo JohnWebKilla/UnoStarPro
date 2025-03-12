@@ -6,16 +6,17 @@ export interface Company {
   contact_email: string;
   contact_phone: string;
   status: "active" | "inactive";
-  stripe_customer_id: string | null;
+  stripe_customer_id?: string;
   stripe_subscription_id: string | null;
   stripe_payment_method_id: string | null;
   subscription_amount: number;
-  last_synced_at: string | null;
+  last_synced_at?: string;
   created_at: string;
   updated_at: string;
   timezone: string;
   notifications_enabled: boolean;
   auto_invoice: boolean;
+  default_payment_method?: string;
 }
 
 export interface PaymentMethod {

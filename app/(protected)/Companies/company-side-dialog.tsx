@@ -36,7 +36,7 @@ import { format } from "date-fns";
 import { CompanyUsers } from "./components/company-users";
 import { CompanyDrivers } from "./components/company-drivers";
 import { CompanySettings } from "./components/company-settings";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useToast } from "@/components/ui/use-toast";
 import { cn } from "@/lib/utils";
 import {
@@ -70,6 +70,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { StripeTabs } from "./components/stripe-tabs";
 
 interface CompanySideDialogProps {
   company?: Company;
@@ -102,7 +103,6 @@ export function CompanySideDialog({
   onDelete,
 }: CompanySideDialogProps) {
   const [isUpdating, setIsUpdating] = useState(false);
-  const [company, setCompany] = useState<Company | undefined>(initialCompany);
   const [stripeData, setStripeData] = useState<any>(null);
   const [isLoadingStripe, setIsLoadingStripe] = useState(false);
   const [availablePlans, setAvailablePlans] = useState<any[]>([]);
@@ -126,9 +126,15 @@ export function CompanySideDialog({
     "asc" | "desc"
   >("asc");
 
-  // Update local company state when initialCompany changes
-  if (initialCompany?.id !== company?.id) {
-    setCompany(initialCompany);
+  // Use useMemo to create a stable reference to the company
+  const company = useMemo(() => {
+    if (!initialCompany) return null;
+    return initialCompany;
+  }, [initialCompany]);
+
+  // Early return if no company is provided
+  if (!company) {
+    return null;
   }
 
   useEffect(() => {
@@ -360,7 +366,42 @@ export function CompanySideDialog({
     }
   };
 
-  if (!company) return null;
+  const handleConnectStripe = async () => {
+    try {
+      setIsLoadingStripe(true);
+      const response = await fetch(`/api/stripe/connect`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ companyId: company.id }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to connect to Stripe");
+      }
+
+      // Refresh the company data after connecting to Stripe
+      await onUpdate(company.id, { stripe_customer_id: await response.text() });
+      toast({
+        title: "Success",
+        description: "Successfully connected to Stripe",
+      });
+    } catch (error) {
+      console.error("Error connecting to Stripe:", error);
+      toast({
+        title: "Error",
+        description: "Failed to connect to Stripe",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingStripe(false);
+    }
+  };
+
+  if (!initialCompany) {
+    return null;
+  }
 
   const formatDate = (date: string) => {
     if (!date) return "N/A";
@@ -383,9 +424,6 @@ export function CompanySideDialog({
     try {
       setIsUpdating(true);
 
-      // Immediately update local state
-      setCompany((prev) => (prev ? { ...prev, ...data } : prev));
-
       // Show loading toast
       const loadingToast = toast({
         title: "Updating company...",
@@ -403,9 +441,6 @@ export function CompanySideDialog({
         variant: "default",
       });
     } catch (error) {
-      // Revert local state on error
-      setCompany(initialCompany);
-
       console.error("Error updating company:", error);
       toast({
         title: "Error",
@@ -419,7 +454,7 @@ export function CompanySideDialog({
   };
 
   const handleDeleteCompany = async () => {
-    if (!onDelete) return;
+    if (!company || !onDelete) return;
 
     try {
       setIsUpdating(true);
@@ -452,510 +487,186 @@ export function CompanySideDialog({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent
-        className="w-[1000px] sm:max-w-[1000px] p-0 overflow-hidden flex flex-col h-full"
-        side="right"
-      >
-        {/* Fixed Header Section */}
-        <div className="border-b p-6 bg-background">
-          <SheetHeader>
-            <div className="flex items-center justify-between">
-              <div className="space-y-1">
-                <SheetTitle className="text-2xl font-semibold">
-                  {company.name}
-                </SheetTitle>
-                <p className="text-sm text-muted-foreground">
-                  ID: {company.id} • Created {formatDate(company.created_at)}
-                </p>
-              </div>
-              <div className="flex items-center gap-3">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className={cn(
-                        "w-[140px] pl-3 pr-2 justify-between font-medium",
-                        company.status === "active"
-                          ? statusStyles.active.button
-                          : statusStyles.inactive.button
-                      )}
-                    >
+      <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
+        <SheetHeader>
+          <SheetTitle className="text-2xl font-bold">
+            {company.name || "Company Details"}
+          </SheetTitle>
+        </SheetHeader>
+
+        <Tabs defaultValue="details" className="mt-6">
+          <TabsList className="grid grid-cols-5 gap-4">
+            <TabsTrigger value="details" className="flex items-center gap-2">
+              <Building2 className="h-4 w-4" />
+              Details
+            </TabsTrigger>
+            <TabsTrigger value="users" className="flex items-center gap-2">
+              <Users className="h-4 w-4" />
+              Users
+            </TabsTrigger>
+            <TabsTrigger value="billing" className="flex items-center gap-2">
+              <CreditCard className="h-4 w-4" />
+              Billing
+            </TabsTrigger>
+            <TabsTrigger value="drivers" className="flex items-center gap-2">
+              <Truck className="h-4 w-4" />
+              Drivers
+            </TabsTrigger>
+            <TabsTrigger value="settings" className="flex items-center gap-2">
+              <Settings className="h-4 w-4" />
+              Settings
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="details">
+            <div className="p-6">
+              <div className="space-y-8">
+                {/* Company Information Section */}
+                <div>
+                  <h3 className="text-lg font-medium mb-4">
+                    Company Information
+                  </h3>
+                  <div className="grid grid-cols-2 gap-6">
+                    <div className="space-y-1">
+                      <p className="text-sm text-muted-foreground">
+                        Contact Person
+                      </p>
+                      <p className="text-sm font-medium">
+                        {company.contact_first_name} {company.contact_last_name}
+                      </p>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-sm text-muted-foreground">
+                        Contact Details
+                      </p>
+                      <p className="text-sm font-medium">
+                        {company.contact_email}
+                      </p>
+                      <p className="text-sm font-medium">
+                        {company.contact_phone}
+                      </p>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-sm text-muted-foreground">Created</p>
                       <div className="flex items-center gap-2">
-                        {company.status === "active" ? (
-                          <CheckCircle
-                            className={cn("h-4 w-4", statusStyles.active.icon)}
-                          />
-                        ) : (
-                          <XCircle
-                            className={cn(
-                              "h-4 w-4",
-                              statusStyles.inactive.icon
-                            )}
-                          />
-                        )}
-                        <span className="capitalize">{company.status}</span>
+                        <CalendarClock className="h-4 w-4 text-muted-foreground" />
+                        <p className="text-sm font-medium">
+                          {formatDate(company.created_at)}
+                        </p>
                       </div>
-                      <ChevronDown className="h-4 w-4 opacity-50" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-[140px]">
-                    <DropdownMenuItem
-                      className={cn(
-                        "flex items-center gap-2",
-                        company.status === "active"
-                          ? "cursor-not-allowed opacity-50"
-                          : statusStyles.active.dropdown
-                      )}
-                      disabled={company.status === "active" || isUpdating}
-                      onClick={() => handleUpdateCompany({ status: "active" })}
-                    >
-                      <CheckCircle className="h-4 w-4" />
-                      <span>Active</span>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      className={cn(
-                        "flex items-center gap-2",
-                        company.status === "inactive"
-                          ? "cursor-not-allowed opacity-50"
-                          : statusStyles.inactive.dropdown
-                      )}
-                      disabled={company.status === "inactive" || isUpdating}
-                      onClick={() =>
-                        handleUpdateCompany({ status: "inactive" })
-                      }
-                    >
-                      <XCircle className="h-4 w-4" />
-                      <span>Inactive</span>
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                {company.stripe_customer_id && (
-                  <Badge variant="outline" className="h-6 px-3">
-                    <CreditCard className="mr-1 h-3 w-3" />
-                    Connected to Stripe
-                  </Badge>
-                )}
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-sm text-muted-foreground">
+                        Last Updated
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <CalendarClock className="h-4 w-4 text-muted-foreground" />
+                        <p className="text-sm font-medium">
+                          {formatDate(company.updated_at)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Driver Statistics Section */}
+                <div>
+                  <h3 className="text-lg font-medium mb-4">
+                    Driver Statistics
+                  </h3>
+                  <div className="grid grid-cols-3 gap-6">
+                    <div className="rounded-lg border p-4 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm text-muted-foreground">
+                          Total Drivers
+                        </p>
+                        <Truck className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                      <p className="text-2xl font-bold">24</p>
+                    </div>
+                    <div className="rounded-lg border p-4 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm text-muted-foreground">
+                          Active Drivers
+                        </p>
+                        <Badge variant="default" className="bg-emerald-500">
+                          18
+                        </Badge>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <CheckCircle className="h-4 w-4 text-emerald-500" />
+                        <p className="text-sm">Currently on duty</p>
+                      </div>
+                    </div>
+                    <div className="rounded-lg border p-4 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm text-muted-foreground">
+                          Inactive Drivers
+                        </p>
+                        <Badge variant="secondary">6</Badge>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <XCircle className="h-4 w-4 text-muted-foreground" />
+                        <p className="text-sm">Off duty</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
-          </SheetHeader>
-        </div>
+          </TabsContent>
 
-        {/* Tabs Navigation */}
-        <Tabs
-          defaultValue="details"
-          className="flex-1 flex flex-col overflow-hidden"
-        >
-          {/* Tabs Header */}
-          <div className="border-b bg-background">
-            <TabsList className="flex h-12 items-center gap-4 w-full justify-start px-6">
-              <TabsTrigger
-                value="details"
-                className="gap-2 data-[state=active]:bg-background"
-              >
-                <Building2 className="h-4 w-4" />
-                Details
-              </TabsTrigger>
-              <TabsTrigger
-                value="users"
-                className="gap-2 data-[state=active]:bg-background"
-              >
-                <Users className="h-4 w-4" />
-                Users
-              </TabsTrigger>
-              <TabsTrigger
-                value="drivers"
-                className="gap-2 data-[state=active]:bg-background"
-              >
-                <Truck className="h-4 w-4" />
-                Drivers
-              </TabsTrigger>
-              <TabsTrigger
-                value="payments"
-                className="gap-2 data-[state=active]:bg-background"
-              >
-                <CreditCard className="h-4 w-4" />
-                Payments
-              </TabsTrigger>
-              <TabsTrigger
-                value="subscriptions"
-                className="gap-2 data-[state=active]:bg-background"
-              >
-                <Receipt className="h-4 w-4" />
-                Subscriptions
-              </TabsTrigger>
-              <TabsTrigger
-                value="invoices"
-                className="gap-2 data-[state=active]:bg-background"
-              >
-                <Receipt className="h-4 w-4" />
-                Invoices
-              </TabsTrigger>
-              <TabsTrigger
-                value="settings"
-                className="gap-2 data-[state=active]:bg-background"
-              >
-                <Settings className="h-4 w-4" />
-                Settings
-              </TabsTrigger>
-            </TabsList>
-          </div>
+          <TabsContent value="users">
+            <div className="p-6">
+              <CompanyUsers company={company} />
+            </div>
+          </TabsContent>
 
-          {/* Scrollable Content Area */}
-          <div className="flex-1 overflow-hidden">
-            <ScrollArea className="h-full">
-              <TabsContent value="details" className="mt-0">
-                <div className="p-6">
-                  <div className="space-y-8">
-                    {/* Company Information Section */}
-                    <div>
-                      <h3 className="text-lg font-medium mb-4">
-                        Company Information
-                      </h3>
-                      <div className="grid grid-cols-2 gap-6">
-                        <div className="space-y-1">
-                          <p className="text-sm text-muted-foreground">
-                            Contact Person
-                          </p>
-                          <p className="text-sm font-medium">
-                            {company.contact_first_name}{" "}
-                            {company.contact_last_name}
-                          </p>
-                        </div>
-                        <div className="space-y-1">
-                          <p className="text-sm text-muted-foreground">
-                            Contact Details
-                          </p>
-                          <p className="text-sm font-medium">
-                            {company.contact_email}
-                          </p>
-                          <p className="text-sm font-medium">
-                            {company.contact_phone}
-                          </p>
-                        </div>
-                        <div className="space-y-1">
-                          <p className="text-sm text-muted-foreground">
-                            Created
-                          </p>
-                          <div className="flex items-center gap-2">
-                            <CalendarClock className="h-4 w-4 text-muted-foreground" />
-                            <p className="text-sm font-medium">
-                              {formatDate(company.created_at)}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="space-y-1">
-                          <p className="text-sm text-muted-foreground">
-                            Last Updated
-                          </p>
-                          <div className="flex items-center gap-2">
-                            <CalendarClock className="h-4 w-4 text-muted-foreground" />
-                            <p className="text-sm font-medium">
-                              {formatDate(company.updated_at)}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Driver Statistics Section */}
-                    <div>
-                      <h3 className="text-lg font-medium mb-4">
-                        Driver Statistics
-                      </h3>
-                      <div className="grid grid-cols-3 gap-6">
-                        <div className="rounded-lg border p-4 space-y-2">
-                          <div className="flex items-center justify-between">
-                            <p className="text-sm text-muted-foreground">
-                              Total Drivers
-                            </p>
-                            <Truck className="h-4 w-4 text-muted-foreground" />
-                          </div>
-                          <p className="text-2xl font-bold">24</p>
-                        </div>
-                        <div className="rounded-lg border p-4 space-y-2">
-                          <div className="flex items-center justify-between">
-                            <p className="text-sm text-muted-foreground">
-                              Active Drivers
-                            </p>
-                            <Badge variant="default" className="bg-emerald-500">
-                              18
-                            </Badge>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <CheckCircle className="h-4 w-4 text-emerald-500" />
-                            <p className="text-sm">Currently on duty</p>
-                          </div>
-                        </div>
-                        <div className="rounded-lg border p-4 space-y-2">
-                          <div className="flex items-center justify-between">
-                            <p className="text-sm text-muted-foreground">
-                              Inactive Drivers
-                            </p>
-                            <Badge variant="secondary">6</Badge>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <XCircle className="h-4 w-4 text-muted-foreground" />
-                            <p className="text-sm">Off duty</p>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </TabsContent>
-
-              <TabsContent value="users" className="mt-0">
-                <div className="p-6">
-                  <CompanyUsers company={company} />
-                </div>
-              </TabsContent>
-
-              <TabsContent value="drivers" className="mt-0">
-                <div className="p-6">
-                  <CompanyDrivers company={company} />
-                </div>
-              </TabsContent>
-
-              <TabsContent value="payments" className="mt-0">
-                <div className="p-6">
-                  <div className="space-y-6">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-lg font-medium">Payment Methods</h3>
-                      <Button size="sm">
-                        <CreditCard className="h-4 w-4 mr-2" />
-                        Add Payment Method
-                      </Button>
-                    </div>
-                    {company.stripe_payment_method_id ? (
-                      <div className="rounded-lg border p-4">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-4">
-                            <CreditCard className="h-6 w-6" />
-                            <div>
-                              <p className="font-medium">•••• 4242</p>
-                              <p className="text-sm text-muted-foreground">
-                                Expires 12/25
-                              </p>
-                            </div>
-                          </div>
-                          <Badge>Default</Badge>
-                        </div>
-                      </div>
+          <TabsContent value="billing">
+            <div className="space-y-6">
+              {company.stripe_customer_id ? (
+                <StripeTabs company={company} />
+              ) : (
+                <div className="flex flex-col items-center justify-center p-8 space-y-4">
+                  <CreditCard className="h-12 w-12 text-gray-400" />
+                  <h3 className="text-lg font-semibold">No Billing Setup</h3>
+                  <p className="text-sm text-gray-500 text-center">
+                    This company hasn't been connected to Stripe yet. Connect to
+                    manage payments, subscriptions, and invoices.
+                  </p>
+                  <Button
+                    onClick={handleConnectStripe}
+                    disabled={isLoadingStripe}
+                  >
+                    {isLoadingStripe ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Connecting...
+                      </>
                     ) : (
-                      <div className="rounded-lg border border-dashed p-8 text-center">
-                        <div className="mx-auto w-12 h-12 rounded-full bg-muted flex items-center justify-center mb-4">
-                          <CreditCard className="h-6 w-6 text-muted-foreground" />
-                        </div>
-                        <h3 className="font-medium mb-1">No Payment Methods</h3>
-                        <p className="text-sm text-muted-foreground mb-4">
-                          Add a payment method to process payments
-                        </p>
-                        <Button size="sm">
-                          <CreditCard className="h-4 w-4 mr-2" />
-                          Add Payment Method
-                        </Button>
-                      </div>
+                      "Connect to Stripe"
                     )}
-                  </div>
+                  </Button>
                 </div>
-              </TabsContent>
+              )}
+            </div>
+          </TabsContent>
 
-              <TabsContent value="subscriptions" className="mt-0">
-                <div className="p-6">
-                  <div className="space-y-8">
-                    {/* Current Subscription Section */}
-                    <div>
-                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-lg font-medium">
-                          Current Subscription
-                        </h3>
-                        <Button size="sm" disabled={isLoadingStripe}>
-                          <Receipt className="h-4 w-4 mr-2" />
-                          Change Plan
-                        </Button>
-                      </div>
-                      {isLoadingStripe ? (
-                        <div className="flex items-center justify-center p-8">
-                          <Loader2 className="h-8 w-8 animate-spin" />
-                        </div>
-                      ) : (
-                        <div className="rounded-lg border">
-                          <div className="p-6 space-y-4">
-                            <div className="rounded-lg border bg-card text-card-foreground">
-                              <div className="p-6 space-y-4">
-                                <h3 className="text-lg font-medium">
-                                  Subscription Plan
-                                </h3>
-                                <div className="space-y-2">
-                                  <div className="text-2xl font-bold">
-                                    {formatCurrency(
-                                      stripeData?.totalAmount || 0
-                                    )}{" "}
-                                    / month
-                                  </div>
-                                  <div className="text-sm text-muted-foreground">
-                                    {stripeData?.subscriptionItems?.length || 0}{" "}
-                                    active subscription items
-                                  </div>
-                                  <div className="text-sm text-muted-foreground flex items-center gap-2">
-                                    <span className="flex items-center">
-                                      Next billing on{" "}
-                                      {formatDate(
-                                        stripeData?.nextBillingDate || ""
-                                      )}{" "}
-                                      •{" "}
-                                      {formatCurrency(
-                                        stripeData?.nextInvoiceAmount || 0
-                                      )}
-                                    </span>
-                                    <Badge variant="outline">
-                                      {stripeData?.subscription?.status ||
-                                        "Inactive"}
-                                    </Badge>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
+          <TabsContent value="drivers">
+            <div className="p-6">
+              <CompanyDrivers company={company} />
+            </div>
+          </TabsContent>
 
-                    {/* Subscription Items Table */}
-                    {stripeData?.subscriptionItems?.length > 0 && (
-                      <div className="mt-6">
-                        <div className="flex items-center justify-between mb-4">
-                          <h4 className="font-medium">Subscription Items</h4>
-                          <Button
-                            size="sm"
-                            onClick={() => setAddItemDialogOpen(true)}
-                          >
-                            <Plus className="h-4 w-4 mr-2" />
-                            Add Item
-                          </Button>
-                        </div>
-                        <div className="rounded-lg border">
-                          <Table>
-                            <TableHeader>
-                              <TableRow>
-                                <TableHead>Name</TableHead>
-                                <TableHead>Quantity</TableHead>
-                                <TableHead>Price</TableHead>
-                                <TableHead className="w-[100px]"></TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {stripeData.subscriptionItems.map((item: any) => (
-                                <TableRow key={item.id}>
-                                  <TableCell>
-                                    {item.price.product.name}
-                                  </TableCell>
-                                  <TableCell>
-                                    {item.quantity || "Unlimited"}
-                                  </TableCell>
-                                  <TableCell>
-                                    {formatCurrency(item.price.unit_amount)}
-                                  </TableCell>
-                                  <TableCell>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => handleEditItem(item)}
-                                    >
-                                      <Settings className="h-4 w-4" />
-                                    </Button>
-                                  </TableCell>
-                                </TableRow>
-                              ))}
-                            </TableBody>
-                          </Table>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </TabsContent>
-
-              <TabsContent value="invoices" className="mt-0">
-                <div className="p-6">
-                  <div className="space-y-8">
-                    <h3 className="text-lg font-medium mb-4">Invoices</h3>
-                    {paginatedInvoices.length > 0 ? (
-                      <div className="rounded-lg border">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead
-                                onClick={() => handleInvoiceSort("date")}
-                              >
-                                Date
-                              </TableHead>
-                              <TableHead
-                                onClick={() => handleInvoiceSort("amount")}
-                              >
-                                Amount
-                              </TableHead>
-                              <TableHead
-                                onClick={() => handleInvoiceSort("status")}
-                              >
-                                Status
-                              </TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {paginatedInvoices.map((invoice: any) => (
-                              <TableRow key={invoice.id}>
-                                <TableCell>
-                                  {formatDate(invoice.created)}
-                                </TableCell>
-                                <TableCell>
-                                  {formatCurrency(invoice.amount_due)}
-                                </TableCell>
-                                <TableCell>{invoice.status}</TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                        <div className="flex justify-between items-center mt-4">
-                          <Button
-                            size="sm"
-                            disabled={invoicePage === 1}
-                            onClick={() => setInvoicePage(invoicePage - 1)}
-                          >
-                            Previous
-                          </Button>
-                          <span>
-                            Page {invoicePage} of {totalInvoicePages}
-                          </span>
-                          <Button
-                            size="sm"
-                            disabled={invoicePage === totalInvoicePages}
-                            onClick={() => setInvoicePage(invoicePage + 1)}
-                          >
-                            Next
-                          </Button>
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="text-sm text-muted-foreground">
-                        No invoices found.
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </TabsContent>
-
-              <TabsContent value="settings" className="mt-0">
-                <div className="p-6">
-                  <CompanySettings
-                    company={company}
-                    onUpdate={handleUpdateCompany}
-                    onDelete={handleDeleteCompany}
-                  />
-                </div>
-              </TabsContent>
-            </ScrollArea>
-          </div>
+          <TabsContent value="settings">
+            <div className="p-6">
+              <CompanySettings
+                company={company}
+                onUpdate={handleUpdateCompany}
+                onDelete={handleDeleteCompany}
+              />
+            </div>
+          </TabsContent>
         </Tabs>
       </SheetContent>
     </Sheet>
