@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@supabase/supabase-js";
+import { invalidatePaymentMethodsCache } from "@/lib/redis";
 
 // Add debug logging for environment variables
 console.log("Environment Check:", {
@@ -225,6 +226,28 @@ export async function POST(req: Request) {
             error,
             stack: error instanceof Error ? error.stack : undefined,
           });
+        }
+      }
+
+      // Handle payment method events
+      if (
+        event.type === "payment_method.attached" ||
+        event.type === "payment_method.detached" ||
+        event.type === "payment_method.updated" ||
+        event.type === "customer.updated" // This covers default payment method changes
+      ) {
+        const customerId = event.data.object.customer || event.data.object.id;
+
+        // Get company ID from customer ID
+        const { data: company } = await supabaseAdmin
+          .from("companies")
+          .select("id")
+          .eq("stripe_customer_id", customerId)
+          .single();
+
+        if (company) {
+          // Invalidate the cache for this company
+          await invalidatePaymentMethodsCache(company.id);
         }
       }
 
@@ -513,7 +536,14 @@ async function handleSubscriptionUpdate(
       .update({
         stripe_subscription_id:
           subscription.status === "active" ? subscription.id : null,
-        subscription_amount: subscription.items.data[0]?.price.unit_amount || 0,
+        subscription_amount: subscription.items.data.reduce(
+          (total: number, item: Stripe.SubscriptionItem) => {
+            return (
+              total + (item.price?.unit_amount || 0) * (item.quantity || 1)
+            );
+          },
+          0
+        ),
         last_synced_at: new Date().toISOString(),
       })
       .eq("id", company.id);

@@ -1,4 +1,5 @@
 import Redis from "ioredis";
+import { Redis as UpstashRedis } from "@upstash/redis";
 
 // Define Redis options interface
 interface RedisConfigOptions {
@@ -300,3 +301,31 @@ export const flushCache = async (): Promise<void> => {
     // Don't throw, just log the error
   }
 };
+
+const PAYMENT_METHODS_KEY = (companyId: number) =>
+  `payment_methods:${companyId}`;
+const CACHE_TTL = 60 * 60 * 24 * 7; // 7 days in seconds
+
+export async function cachePaymentMethods(
+  companyId: number,
+  paymentMethods: any[]
+) {
+  const client = await getRedisClient();
+  await client.set(
+    PAYMENT_METHODS_KEY(companyId),
+    JSON.stringify(paymentMethods),
+    "EX",
+    CACHE_TTL
+  );
+}
+
+export async function getCachedPaymentMethods(companyId: number) {
+  const client = await getRedisClient();
+  const cached = await client.get(PAYMENT_METHODS_KEY(companyId));
+  return cached ? JSON.parse(cached) : null;
+}
+
+export async function invalidatePaymentMethodsCache(companyId: number) {
+  const client = await getRedisClient();
+  await client.del(PAYMENT_METHODS_KEY(companyId));
+}

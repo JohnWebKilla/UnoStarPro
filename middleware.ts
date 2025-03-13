@@ -1,4 +1,4 @@
-import { createMiddlewareClient } from "@supabase/auth-helpers-nextjs";
+import { createServerClient } from "@supabase/ssr";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
@@ -17,13 +17,42 @@ export const config = {
 
 export async function middleware(request: NextRequest) {
   try {
-    const res = NextResponse.next();
-    const supabase = createMiddlewareClient({ req: request, res });
+    let response = NextResponse.next({
+      request: {
+        headers: request.headers,
+      },
+    });
+
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return request.cookies.getAll();
+          },
+          setAll(cookiesToSet) {
+            cookiesToSet.forEach(({ name, value, options }) => {
+              response.cookies.set({
+                name,
+                value,
+                ...options,
+                sameSite: options.sameSite as
+                  | "lax"
+                  | "strict"
+                  | "none"
+                  | undefined,
+              });
+            });
+          },
+        },
+      }
+    );
 
     // Refresh session if needed
     await supabase.auth.getSession();
 
-    return res;
+    return response;
   } catch (error) {
     // Log error but don't throw - allow request to continue
     console.error("Middleware error:", error);
