@@ -290,21 +290,15 @@ export function CompanyDrivers({ company }: CompanyDriversProps) {
     setLoading(true);
     // Simulate API call
     setTimeout(() => {
-      const newStatus =
-        driver.status === "active" ? "inactive" : ("active" as const);
+      const newStatus: DriverStatus =
+        driver.status === "active" ? "inactive" : "active";
       const updatedDriver: CompanyDriver = {
         ...driver,
         status: newStatus,
         updated_at: new Date().toISOString(),
+        terminated_date:
+          newStatus === "inactive" ? new Date().toISOString() : undefined,
       };
-
-      // If deactivating, set terminated date
-      if (newStatus === "inactive") {
-        updatedDriver.terminated_date = new Date().toISOString();
-      } else {
-        // If activating, clear terminated date
-        updatedDriver.terminated_date = undefined;
-      }
 
       setDrivers(drivers.map((d) => (d.id === driver.id ? updatedDriver : d)));
 
