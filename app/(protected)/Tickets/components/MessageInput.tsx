@@ -5,6 +5,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { EmojiPickerPortal } from "./EmojiPickerPortal";
 import { Message } from "./types";
+import Image from "next/image";
 import {
   Paperclip,
   Send,
@@ -196,11 +197,13 @@ export function MessageInput({
               className="flex items-center gap-2 bg-gray-100 dark:bg-gray-800 rounded-lg p-2"
             >
               {file.type.startsWith("image/") ? (
-                <div className="relative group">
-                  <img
+                <div className="relative group h-16 w-16">
+                  <Image
                     src={URL.createObjectURL(file)}
                     alt={file.name}
-                    className="h-16 w-16 object-cover rounded-lg"
+                    fill
+                    className="object-cover rounded-lg"
+                    sizes="64px"
                   />
                   <div className="absolute inset-0 bg-black bg-opacity-40 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center">
                     <ImageIcon className="h-6 w-6 text-white" />

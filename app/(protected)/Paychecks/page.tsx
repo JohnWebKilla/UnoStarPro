@@ -121,7 +121,6 @@ function PaychecksContent() {
           skipCache,
         });
 
-        // Get the current user
         const {
           data: { user },
         } = await supabase.auth.getUser();
@@ -130,16 +129,13 @@ function PaychecksContent() {
           throw new Error("User not authenticated");
         }
 
-        // Create a cache key based on the month and user
         const cacheKey = `payroll:summary:${format(monthStart, "yyyy-MM")}:${user.id}`;
 
-        // If skipCache is true, invalidate the cache first
         if (skipCache) {
           await deleteClientCache(cacheKey);
           console.log("Cache invalidated before fetching fresh data");
         }
 
-        // Try to get data from cache first
         const { data: cachedData, source } =
           await getClientCache<MonthlyPayrollSummary[]>(cacheKey);
 
@@ -155,7 +151,6 @@ function PaychecksContent() {
           return;
         }
 
-        // If no cache or skipCache is true, fetch from API
         const response = await fetch(
           `/api/payroll/monthly-summary?month=${format(selectedMonth, "yyyy-MM-dd")}&skipCache=${skipCache}`,
           {
@@ -251,10 +246,10 @@ function PaychecksContent() {
         setSummaries(result.data);
         setLastFetchTime(new Date());
       } catch (error) {
-        console.error("Error fetching summaries:", error);
+        console.error("Error fetching monthly summary:", error);
         toast({
           title: "Error",
-          description: "Failed to load payroll summaries",
+          description: "Failed to fetch payroll data. Please try again.",
           variant: "destructive",
         });
       } finally {
@@ -296,10 +291,13 @@ function PaychecksContent() {
     fetchMonthlySummary();
   }, [fetchMonthlySummary]);
 
-  // Set up realtime subscription for payroll transactions
+  const handleClearFilters = useCallback(() => {
+    fetchMonthlySummary(true);
+  }, [fetchMonthlySummary]);
+
   useEffect(() => {
     const channel = supabase
-      .channel("payroll-changes")
+      .channel("payroll_changes")
       .on(
         "postgres_changes",
         {
@@ -307,42 +305,9 @@ function PaychecksContent() {
           schema: "public",
           table: "payroll_transactions",
         },
-        async (payload: RealtimePostgresChangesPayload<PayrollTransaction>) => {
-          console.log("Payroll transaction change received:", payload);
-
-          const relevantDate =
-            payload.eventType === "DELETE"
-              ? (payload.old as PayrollTransaction | undefined)
-                  ?.transaction_date
-              : (payload.new as PayrollTransaction | undefined)
-                  ?.transaction_date;
-
-          if (!relevantDate) return;
-
-          const changeDate = new Date(relevantDate);
-          const currentMonthStart = startOfMonth(selectedMonth);
-          const currentMonthEnd = endOfMonth(selectedMonth);
-
-          // Only process changes relevant to the current month view
-          if (
-            changeDate >= currentMonthStart &&
-            changeDate <= currentMonthEnd
-          ) {
-            // Invalidate cache
-            const {
-              data: { user },
-            } = await supabase.auth.getUser();
-            if (user) {
-              const cacheKey = `payroll:summary:${format(currentMonthStart, "yyyy-MM")}:${user.id}`;
-              await deleteClientCache(cacheKey);
-              console.log("Cache invalidated due to realtime update");
-            }
-
-            // Refresh data after a short delay to allow for multiple changes
-            setTimeout(() => {
-              fetchMonthlySummary(true);
-            }, 500);
-          }
+        (payload: RealtimePostgresChangesPayload<any>) => {
+          console.log("Payroll transaction changed:", payload);
+          handleClearFilters();
         }
       )
       .subscribe();
@@ -350,7 +315,7 @@ function PaychecksContent() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [selectedMonth, supabase, fetchMonthlySummary]);
+  }, [supabase, handleClearFilters]);
 
   // Handle month change
   const handleMonthChange = (newMonth: Date) => {

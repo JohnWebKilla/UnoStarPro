@@ -387,7 +387,7 @@ export function CompanySideDialog({
   const totalPages = Math.ceil(sortedAndFilteredItems.length / itemsPerPage);
 
   const sortAndFilterInvoices = (invoices: any[]) => {
-    let sortedInvoices = [...invoices];
+    const sortedInvoices = [...invoices];
 
     // Apply sorting
     sortedInvoices.sort((a, b) => {

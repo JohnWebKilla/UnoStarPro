@@ -82,6 +82,11 @@ export function MessageBubble({
 
       <div className="flex items-end gap-2 max-w-[80%] relative group">
         {!isOwn && isLastInGroup && (
+          <div className="flex-shrink-0">
+            <Avatar
+              name={senderInfo?.name || "Unknown"}
+              image={senderInfo?.image}
+              size="sm"
           <Avatar
             name={senderInfo?.name || "Unknown"}
             image={senderInfo?.image}

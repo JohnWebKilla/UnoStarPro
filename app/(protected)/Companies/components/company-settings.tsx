@@ -125,7 +125,7 @@ export function CompanySettings({
         <div>
           <h3 className="text-xl font-semibold">Company Settings</h3>
           <p className="text-sm text-muted-foreground">
-            Manage your company information and preferences.
+            Manage your company&apos;s information and preferences.
           </p>
         </div>
       </div>
@@ -139,7 +139,7 @@ export function CompanySettings({
                 Company Information
               </CardTitle>
               <CardDescription>
-                Update your company's basic information
+                Update your company&apos;s basic information
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">

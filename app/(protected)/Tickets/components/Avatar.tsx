@@ -2,6 +2,7 @@
 
 import { cn } from "@/lib/utils";
 import { User } from "lucide-react";
+import Image from "next/image";
 
 interface AvatarProps {
   name: string;
@@ -17,6 +18,12 @@ export function Avatar({ name, image, size = "md", online }: AvatarProps) {
     .join("")
     .toUpperCase();
 
+  const sizes = {
+    sm: 32,
+    md: 40,
+    lg: 48,
+  };
+
   const sizeClasses = {
     sm: "h-8 w-8 text-xs",
     md: "h-10 w-10 text-sm",
@@ -26,11 +33,15 @@ export function Avatar({ name, image, size = "md", online }: AvatarProps) {
   return (
     <div className="relative">
       {image ? (
-        <img
-          src={image}
-          alt={name}
-          className={cn("rounded-full object-cover", sizeClasses[size])}
-        />
+        <div className={cn("relative", sizeClasses[size])}>
+          <Image
+            src={image}
+            alt={name}
+            fill
+            className="rounded-full object-cover"
+            sizes={`${sizes[size]}px`}
+          />
+        </div>
       ) : (
         <div
           className={cn(

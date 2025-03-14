@@ -36,13 +36,51 @@ import { PdfCompare } from "./PdfCompare";
 import { Badge } from "@/components/ui/badge";
 import { format, formatDistanceToNow } from "date-fns";
 
+interface SystemIssue {
+  id: string;
+  description: string;
+  systemType: string;
+  driver: string;
+  company: string;
+  status: string;
+  solution?: string;
+  resolvedAt?: Date;
+  beforePdf?: string;
+  afterPdf?: string;
+  files: Array<{
+    name: string;
+    url: string;
+    type: string;
+  }>;
+}
+
+interface Ticket {
+  id: string;
+  title: string;
+  description: string;
+  status: string;
+  priority: string;
+  assignee: string;
+  createdAt: Date;
+  updatedAt: Date;
+  beforePdf?: string;
+  afterPdf?: string;
+  files: Array<{
+    name: string;
+    url: string;
+    type: string;
+  }>;
+}
+
+type RowData = SystemIssue | Ticket;
+
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
   data: TData[];
   type?: "tickets" | "issues";
 }
 
-export function DataTable<TData, TValue>({
+export function DataTable<TData extends RowData, TValue>({
   columns,
   data,
   type = "tickets",
@@ -50,7 +88,7 @@ export function DataTable<TData, TValue>({
   const [sorting, setSorting] = useState<SortingState>([]);
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
   const [isPdfCompareOpen, setIsPdfCompareOpen] = useState(false);
-  const [selectedRow, setSelectedRow] = useState<any>(null);
+  const [selectedRow, setSelectedRow] = useState<TData | null>(null);
 
   const table = useReactTable({
     data,
@@ -165,7 +203,10 @@ export function DataTable<TData, TValue>({
                                       Description:
                                     </h5>
                                     <p className="text-sm text-muted-foreground">
-                                      {(row.original as any).description}
+                                      {
+                                        (row.original as SystemIssue)
+                                          .description
+                                      }
                                     </p>
                                   </div>
                                   <div className="bg-muted rounded-lg p-2">
@@ -176,7 +217,7 @@ export function DataTable<TData, TValue>({
                                       variant="secondary"
                                       className="capitalize"
                                     >
-                                      {(row.original as any).systemType}
+                                      {(row.original as SystemIssue).systemType}
                                     </Badge>
                                   </div>
                                 </div>
@@ -190,10 +231,10 @@ export function DataTable<TData, TValue>({
                                   <div className="flex items-center justify-between">
                                     <div className="text-sm">
                                       <p className="font-medium">
-                                        {(row.original as any).driver}
+                                        {(row.original as SystemIssue).driver}
                                       </p>
                                       <p className="text-muted-foreground">
-                                        {(row.original as any).company}
+                                        {(row.original as SystemIssue).company}
                                       </p>
                                     </div>
                                     <div className="flex items-center gap-1">
@@ -220,7 +261,8 @@ export function DataTable<TData, TValue>({
                             </div>
 
                             {/* Add Solution Section for resolved issues */}
-                            {(row.original as any).status === "resolved" && (
+                            {(row.original as SystemIssue).status ===
+                              "resolved" && (
                               <div className="bg-background p-3 rounded-lg border shadow-sm">
                                 <h4 className="font-semibold mb-2 text-sm">
                                   Solution
@@ -228,13 +270,24 @@ export function DataTable<TData, TValue>({
                                 <div className="space-y-2">
                                   <div className="bg-muted rounded-lg p-2">
                                     <p className="text-sm text-muted-foreground">
-                                      {(row.original as any).solution}
+                                      {(row.original as SystemIssue).solution}
                                     </p>
                                     <p className="text-xs text-muted-foreground mt-1">
                                       Resolved{" "}
-                                      {formatDistanceToNow(
-                                        (row.original as any).resolvedAt,
-                                        { addSuffix: true }
+                                      {(row.original as SystemIssue)
+                                        .resolvedAt && (
+                                        <p className="text-xs text-muted-foreground mt-1">
+                                          {formatDistanceToNow(
+                                            new Date(
+                                              (row.original as SystemIssue)
+                                                .resolvedAt as
+                                                | string
+                                                | number
+                                                | Date
+                                            ),
+                                            { addSuffix: true }
+                                          )}
+                                        </p>
                                       )}
                                     </p>
                                   </div>
@@ -247,30 +300,20 @@ export function DataTable<TData, TValue>({
                                 Attachments
                               </h4>
                               <div className="grid grid-cols-2 gap-3">
-                                {(row.original as any).files.map(
-                                  (file: any, index: number) => (
+                                {(row.original as SystemIssue).files.map(
+                                  (file, index) => (
                                     <div
                                       key={index}
-                                      className="bg-muted p-2 rounded-lg flex items-center justify-between"
+                                      className="flex items-center gap-2 p-2 bg-muted rounded-lg"
                                     >
-                                      <div className="flex items-center gap-2">
-                                        <FileText className="h-4 w-4 text-blue-600" />
-                                        <div>
-                                          <p className="text-sm font-medium">
-                                            {file.name}
-                                          </p>
-                                          <p className="text-xs text-muted-foreground">
-                                            {file.type || "Document"}
-                                          </p>
-                                        </div>
-                                      </div>
+                                      <FileText className="h-4 w-4 text-muted-foreground" />
+                                      <span className="text-sm truncate flex-1">
+                                        {file.name}
+                                      </span>
                                       <Button
                                         variant="ghost"
                                         size="sm"
                                         className="h-7 w-7 p-0"
-                                        onClick={() =>
-                                          window.open(file.url, "_blank")
-                                        }
                                       >
                                         <Download className="h-3.5 w-3.5" />
                                       </Button>

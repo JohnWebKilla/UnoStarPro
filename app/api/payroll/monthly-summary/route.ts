@@ -188,7 +188,7 @@ export async function GET(request: NextRequest) {
       }
 
       // Create summary data from transactions and user data
-      let enhancedSummaryData = userIds.map((userId) => {
+      const enhancedSummaryData = userIds.map((userId) => {
         const userTransactions = transactionsData.filter(
           (t) => t.user_id === userId
         );

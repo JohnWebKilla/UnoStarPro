@@ -234,28 +234,35 @@ export const columns: ColumnDef<User>[] = [
       const user = row.original;
       const meta = table.options.meta as TableMeta;
 
-      const getCompanyText = () => {
-        if (user.has_all_access) return "All Companies";
-        if (user.companies && user.companies.length > 0) {
-          if (user.companies.length === 1) {
-            return user.companies[0].name;
+      const CompanyCell = () => {
+        const [isOpen, setIsOpen] = useState(false);
+
+        const getCompanyText = () => {
+          if (user.has_all_access) return "All Companies";
+          if (user.companies && user.companies.length > 0) {
+            if (user.companies.length === 1) {
+              return user.companies[0].name;
+            }
+            return `${user.companies.length} Companies`;
           }
-          return `${user.companies.length} Companies`;
-        }
-        return "No Company Assigned";
+          return "No Company Assigned";
+        };
+
+        return (
+          <Button
+            variant="link"
+            className="p-0 h-auto font-normal"
+            onClick={() => meta.onManageCompanies(user)}
+          >
+            <span className="flex items-center gap-2">
+              <Building className="h-4 w-4" />
+              {getCompanyText()}
+            </span>
+          </Button>
+        );
       };
 
-      return (
-        <Button
-          variant="link"
-          className="text-blue-500 hover:text-blue-700 flex items-center gap-2 group"
-          onClick={() => meta.onManageCompanies(user)}
-        >
-          <span>{getCompanyText()}</span>
-          <Building className="h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity" />
-          <span className="sr-only">Manage company access</span>
-        </Button>
-      );
+      return <CompanyCell />;
     },
   },
   {
