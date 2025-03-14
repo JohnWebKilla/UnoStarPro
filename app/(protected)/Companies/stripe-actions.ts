@@ -380,6 +380,7 @@ export async function getStripeSubscriptionDetails(companyId: number) {
 
     // Get subscription details separately
     let subscription = null;
+    let upcomingInvoice = null;
     const subscriptions = await stripe.subscriptions.list({
       customer: company.stripe_customer_id,
       limit: 1,
@@ -389,6 +390,15 @@ export async function getStripeSubscriptionDetails(companyId: number) {
 
     if (subscriptions.data.length > 0) {
       subscription = subscriptions.data[0];
+      // Fetch upcoming invoice for the subscription
+      try {
+        upcomingInvoice = await stripe.invoices.retrieveUpcoming({
+          customer: company.stripe_customer_id,
+          subscription: subscription.id,
+        });
+      } catch (error) {
+        console.error("Error fetching upcoming invoice:", error);
+      }
       // Fetch product details separately for each price
       const items = await Promise.all(
         subscription.items.data.map(async (item) => {
@@ -461,6 +471,14 @@ export async function getStripeSubscriptionDetails(companyId: number) {
               },
               quantity: item.quantity,
             })),
+          }
+        : null,
+      upcoming_invoice: upcomingInvoice
+        ? {
+            amount_due: upcomingInvoice.amount_due,
+            created: upcomingInvoice.created,
+            period_end: upcomingInvoice.period_end,
+            period_start: upcomingInvoice.period_start,
           }
         : null,
       invoices: invoices.data.map((invoice) => ({
