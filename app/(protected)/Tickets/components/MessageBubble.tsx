@@ -11,6 +11,7 @@ import { Avatar } from "./Avatar";
 import { useOnlineStatus } from "../hooks/useOnlineStatus";
 import { MessageReactions } from "./MessageReactions";
 import { useState } from "react";
+import Image from "next/image";
 
 interface MessageBubbleProps {
   message: Message;
@@ -280,12 +281,15 @@ export function MessageBubble({
                 {message.files?.map((file, index) => (
                   <div key={index} className="mt-2">
                     {file.type === "image" ? (
-                      <img
-                        src={file.url}
-                        alt={file.name}
-                        className="max-w-full rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
-                        onClick={() => window.open(file.url, "_blank")}
-                      />
+                      <div className="relative w-full h-[200px]">
+                        <Image
+                          src={file.url}
+                          alt={file.name}
+                          fill
+                          className="object-contain rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
+                          onClick={() => window.open(file.url, "_blank")}
+                        />
+                      </div>
                     ) : (
                       <a
                         href={file.url}
