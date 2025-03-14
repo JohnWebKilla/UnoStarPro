@@ -8,6 +8,7 @@ import {
   updateCompanyAction,
   deleteCompanyAction,
 } from "./server-actions";
+import { invalidateStripeCache } from "@/lib/redis-client";
 
 export async function getCompanies(skipCache: boolean = false): Promise<{
   data: Company[];
@@ -94,5 +95,19 @@ export async function deleteCompany(id: number): Promise<void> {
       throw error;
     }
     throw new Error("Failed to delete company");
+  }
+}
+
+export async function clearCompanyCache(companyId: number) {
+  try {
+    await invalidateStripeCache(companyId);
+    return { success: true, message: "Cache cleared successfully" };
+  } catch (error) {
+    console.error("Error clearing company cache:", error);
+    return {
+      success: false,
+      message: "Failed to clear cache",
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 }

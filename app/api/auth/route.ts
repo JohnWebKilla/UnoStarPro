@@ -1,7 +1,7 @@
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 
-export async function POST(request: NextRequest): Promise<Response> {
+export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     const supabase = await createClient();
     const body = await request.json();
@@ -22,14 +22,17 @@ export async function POST(request: NextRequest): Promise<Response> {
 
     if (error) throw error;
 
-    return Response.json(user);
+    return NextResponse.json(user);
   } catch (error) {
     console.error("Error in auth operation:", error);
-    return Response.json({ error: "Authentication failed" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Authentication failed" },
+      { status: 500 }
+    );
   }
 }
 
-export async function GET(request: NextRequest): Promise<Response> {
+export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
     const supabase = await createClient();
     const {
@@ -39,9 +42,12 @@ export async function GET(request: NextRequest): Promise<Response> {
 
     if (error) throw error;
 
-    return Response.json({ session });
+    return NextResponse.json({ session });
   } catch (error) {
     console.error("Error getting session:", error);
-    return Response.json({ error: "Failed to get session" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Failed to get session" },
+      { status: 500 }
+    );
   }
 }

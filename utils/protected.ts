@@ -1,4 +1,4 @@
-export type Role = "admin" | "driver" | "customer";
+import { Role } from "@/types/role";
 
 // Define all possible routes as constants to avoid typos
 export const ROUTES = {
@@ -31,16 +31,17 @@ type RouteConfig = {
   }[];
 };
 
+// Define protected routes and their configurations
 export const protectedRoutes: Record<string, RouteConfig> = {
-  office: {
-    path: "/",
+  admin: {
+    path: ROUTES.DASHBOARD,
     dashboard: ROUTES.DASHBOARD,
-    allowedRoles: ["admin"],
+    allowedRoles: ["admin", "superadmin"],
     allowedRoutes: [
       {
         path: ROUTES.DASHBOARD,
-        roles: ["admin"],
-        description: "Admin dashboard",
+        roles: ["admin", "superadmin"],
+        description: "Admin Dashboard",
       },
       {
         path: ROUTES.USERS,
@@ -74,15 +75,27 @@ export const protectedRoutes: Record<string, RouteConfig> = {
       },
     ],
   },
-  drivers: {
-    path: "/",
+  user: {
+    path: ROUTES.DASHBOARD,
+    dashboard: ROUTES.DASHBOARD,
+    allowedRoles: ["user"],
+    allowedRoutes: [
+      {
+        path: ROUTES.DASHBOARD,
+        roles: ["user"],
+        description: "User Dashboard",
+      },
+    ],
+  },
+  driver: {
+    path: ROUTES.DASHBOARD,
     dashboard: ROUTES.DASHBOARD,
     allowedRoles: ["driver"],
     allowedRoutes: [
       {
         path: ROUTES.DASHBOARD,
         roles: ["driver"],
-        description: "Driver dashboard",
+        description: "Driver Dashboard",
       },
       {
         path: ROUTES.TICKETS,
@@ -96,15 +109,15 @@ export const protectedRoutes: Record<string, RouteConfig> = {
       },
     ],
   },
-  customers: {
-    path: "/",
+  customer: {
+    path: ROUTES.DASHBOARD,
     dashboard: ROUTES.DASHBOARD,
     allowedRoles: ["customer"],
     allowedRoutes: [
       {
         path: ROUTES.DASHBOARD,
         roles: ["customer"],
-        description: "Customer dashboard",
+        description: "Customer Dashboard",
       },
       {
         path: ROUTES.PROFILE,

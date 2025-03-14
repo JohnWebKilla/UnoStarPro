@@ -23,6 +23,7 @@ import {
   Loader2,
   Plus,
   Search,
+  Trash2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -54,6 +55,7 @@ import {
   getAvailablePlans,
   addSubscriptionItem,
 } from "./stripe-actions";
+import { clearCompanyCache } from "./actions";
 import {
   Dialog,
   DialogContent,
@@ -71,6 +73,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { StripeTabs } from "./components/stripe-tabs";
+import { toast } from "sonner";
+import { subscriptionDetailsCache, CACHE_TTL } from "./cache";
 
 interface CompanySideDialogProps {
   company?: Company;
@@ -125,39 +129,103 @@ export function CompanySideDialog({
   const [invoiceSortDirection, setInvoiceSortDirection] = useState<
     "asc" | "desc"
   >("asc");
+  const [activeTab, setActiveTab] = useState<string>("details");
+  const [company, setCompany] = useState<Company | null>(null);
 
   // Use useMemo to create a stable reference to the company
-  const company = useMemo(() => {
+  const companyMemo = useMemo(() => {
     if (!initialCompany) return null;
     return initialCompany;
   }, [initialCompany]);
 
   // Early return if no company is provided
-  if (!company) {
+  if (!companyMemo) {
     return null;
   }
 
+  // Set the active tab to "details" when the dialog opens and start background data loading
   useEffect(() => {
-    if (open && company?.stripe_customer_id) {
-      loadStripeData();
-      loadAvailablePlans();
-    }
-  }, [open, company?.id]);
+    if (open && companyMemo) {
+      // Update local state when dialog opens
+      setActiveTab("overview");
+      setCompany(companyMemo);
 
-  const loadStripeData = async () => {
+      // Start fetching Stripe data in the background immediately when dialog opens
+      if (companyMemo?.stripe_customer_id) {
+        // Check for cached data first
+        const cachedData = subscriptionDetailsCache.get(companyMemo.id);
+        const now = Date.now();
+
+        if (cachedData && now - cachedData.timestamp < CACHE_TTL) {
+          // Use cached data if it's less than 5 minutes old
+          setStripeData(cachedData.data);
+          setIsLoadingStripe(false);
+          console.log("Using cached Stripe data");
+        } else {
+          // Set loading state but don't block the UI
+          setIsLoadingStripe(true);
+
+          // Start loading data in the background
+          console.log("Loading fresh Stripe data in background");
+
+          // Use setTimeout to defer the loading to the next tick
+          setTimeout(() => {
+            loadStripeData(false)
+              .then(() => {
+                setIsLoadingStripe(false);
+              })
+              .catch((error) => {
+                console.error("Error loading Stripe data:", error);
+                setIsLoadingStripe(false);
+              });
+          }, 0);
+        }
+
+        // Only load plans if we don't have them yet
+        if (!availablePlans.length) {
+          loadAvailablePlans();
+        }
+      }
+    }
+  }, [open]); // Only depend on open state to prevent refetching
+
+  const loadStripeData = async (showLoadingUI = true) => {
+    if (!companyMemo) return;
+
     try {
-      setIsLoadingStripe(true);
-      const data = await getStripeSubscriptionDetails(company!.id);
+      // Only show loading UI if explicitly requested (when clicking billing tab)
+      if (showLoadingUI) {
+        setIsLoadingStripe(true);
+      }
+
+      console.log("Fetching Stripe data from API");
+      const data = await getStripeSubscriptionDetails(companyMemo.id);
+      console.log("Stripe data fetched successfully");
       setStripeData(data);
+
+      // Update the shared cache
+      subscriptionDetailsCache.set(companyMemo.id, {
+        data: data,
+        timestamp: Date.now(),
+      });
+
+      // Only manage loading state if showLoadingUI is true
+      if (showLoadingUI) {
+        // Ensure loading state is visible for a minimum time
+        setTimeout(() => {
+          setIsLoadingStripe(false);
+        }, 1000); // 1 second minimum loading time for better UX
+      }
     } catch (error) {
       console.error("Error loading Stripe data:", error);
-      toast({
-        title: "Error",
-        description: "Failed to load subscription details",
-        variant: "destructive",
-      });
-    } finally {
-      setIsLoadingStripe(false);
+      if (showLoadingUI) {
+        toast({
+          title: "Error",
+          description: "Failed to load subscription details",
+          variant: "destructive",
+        });
+        setIsLoadingStripe(false);
+      }
     }
   };
 
@@ -374,7 +442,7 @@ export function CompanySideDialog({
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ companyId: company.id }),
+        body: JSON.stringify({ companyId: companyMemo.id }),
       });
 
       if (!response.ok) {
@@ -382,7 +450,9 @@ export function CompanySideDialog({
       }
 
       // Refresh the company data after connecting to Stripe
-      await onUpdate(company.id, { stripe_customer_id: await response.text() });
+      await onUpdate(companyMemo.id, {
+        stripe_customer_id: await response.text(),
+      });
       toast({
         title: "Success",
         description: "Successfully connected to Stripe",
@@ -431,7 +501,7 @@ export function CompanySideDialog({
       });
 
       // Perform the update
-      await onUpdate(company.id, data);
+      await onUpdate(companyMemo.id, data);
 
       // Dismiss loading toast and show success
       loadingToast.dismiss();
@@ -454,7 +524,7 @@ export function CompanySideDialog({
   };
 
   const handleDeleteCompany = async () => {
-    if (!company || !onDelete) return;
+    if (!companyMemo || !onDelete) return;
 
     try {
       setIsUpdating(true);
@@ -463,7 +533,7 @@ export function CompanySideDialog({
         description: "Please wait while we process your request.",
       });
 
-      await onDelete(company.id);
+      await onDelete(companyMemo.id);
       onOpenChange(false);
 
       loadingToast.dismiss();
@@ -485,189 +555,321 @@ export function CompanySideDialog({
     }
   };
 
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab);
+
+    // If switching to billing tab and we have a Stripe customer ID
+    if (tab === "billing" && companyMemo?.stripe_customer_id) {
+      // Show a brief loading indicator regardless of data status for consistent UX
+      setIsLoadingStripe(true);
+
+      if (!stripeData) {
+        // If we don't have data yet, load it
+        loadStripeData(true);
+      } else {
+        // We already have data, just show a brief loading indicator
+        setTimeout(() => {
+          setIsLoadingStripe(false);
+        }, 300); // Brief loading indicator
+      }
+    }
+  };
+
+  const handleClearCompanyCache = async () => {
+    if (!companyMemo?.id) return;
+
+    try {
+      setIsUpdating(true);
+      const result = await clearCompanyCache(companyMemo.id);
+      if (result.success) {
+        toast({
+          title: "Success",
+          description: "Cache cleared successfully",
+        });
+        // Reload the data
+        loadStripeData(true);
+      } else {
+        throw new Error(result.message);
+      }
+    } catch (error) {
+      console.error("Error clearing cache:", error);
+      toast({
+        title: "Error",
+        description: "Failed to clear cache",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
-        <SheetHeader>
-          <SheetTitle className="text-2xl font-bold">
-            {company.name || "Company Details"}
-          </SheetTitle>
-        </SheetHeader>
+      <style jsx global>{`
+        .radix-dialog-overlay {
+          z-index: 9999 !important;
+        }
+        .radix-dialog-content {
+          z-index: 10000 !important;
+        }
+      `}</style>
+      <SheetContent
+        className="w-full sm:max-w-xl md:max-w-2xl lg:max-w-3xl xl:max-w-6xl p-0 overflow-hidden"
+        side="right"
+      >
+        <div className="flex flex-col h-full">
+          <SheetHeader className="px-6 py-4 border-b">
+            <SheetTitle className="flex items-center gap-2">
+              <Building2 className="h-5 w-5" />
+              {companyMemo.name}
+              <Badge
+                variant="outline"
+                className={cn(
+                  "ml-2 capitalize",
+                  companyMemo.status === "active"
+                    ? "border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-950 dark:text-green-300"
+                    : "border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300"
+                )}
+              >
+                {companyMemo.status}
+              </Badge>
+            </SheetTitle>
+          </SheetHeader>
 
-        <Tabs defaultValue="details" className="mt-6">
-          <TabsList className="grid grid-cols-5 gap-4">
-            <TabsTrigger value="details" className="flex items-center gap-2">
-              <Building2 className="h-4 w-4" />
-              Details
-            </TabsTrigger>
-            <TabsTrigger value="users" className="flex items-center gap-2">
-              <Users className="h-4 w-4" />
-              Users
-            </TabsTrigger>
-            <TabsTrigger value="billing" className="flex items-center gap-2">
-              <CreditCard className="h-4 w-4" />
-              Billing
-            </TabsTrigger>
-            <TabsTrigger value="drivers" className="flex items-center gap-2">
-              <Truck className="h-4 w-4" />
-              Drivers
-            </TabsTrigger>
-            <TabsTrigger value="settings" className="flex items-center gap-2">
-              <Settings className="h-4 w-4" />
-              Settings
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="details">
-            <div className="p-6">
-              <div className="space-y-8">
-                {/* Company Information Section */}
-                <div>
-                  <h3 className="text-lg font-medium mb-4">
-                    Company Information
-                  </h3>
-                  <div className="grid grid-cols-2 gap-6">
-                    <div className="space-y-1">
-                      <p className="text-sm text-muted-foreground">
-                        Contact Person
-                      </p>
-                      <p className="text-sm font-medium">
-                        {company.contact_first_name} {company.contact_last_name}
-                      </p>
-                    </div>
-                    <div className="space-y-1">
-                      <p className="text-sm text-muted-foreground">
-                        Contact Details
-                      </p>
-                      <p className="text-sm font-medium">
-                        {company.contact_email}
-                      </p>
-                      <p className="text-sm font-medium">
-                        {company.contact_phone}
-                      </p>
-                    </div>
-                    <div className="space-y-1">
-                      <p className="text-sm text-muted-foreground">Created</p>
-                      <div className="flex items-center gap-2">
-                        <CalendarClock className="h-4 w-4 text-muted-foreground" />
-                        <p className="text-sm font-medium">
-                          {formatDate(company.created_at)}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <p className="text-sm text-muted-foreground">
-                        Last Updated
-                      </p>
-                      <div className="flex items-center gap-2">
-                        <CalendarClock className="h-4 w-4 text-muted-foreground" />
-                        <p className="text-sm font-medium">
-                          {formatDate(company.updated_at)}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Driver Statistics Section */}
-                <div>
-                  <h3 className="text-lg font-medium mb-4">
-                    Driver Statistics
-                  </h3>
-                  <div className="grid grid-cols-3 gap-6">
-                    <div className="rounded-lg border p-4 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm text-muted-foreground">
-                          Total Drivers
-                        </p>
-                        <Truck className="h-4 w-4 text-muted-foreground" />
-                      </div>
-                      <p className="text-2xl font-bold">24</p>
-                    </div>
-                    <div className="rounded-lg border p-4 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm text-muted-foreground">
-                          Active Drivers
-                        </p>
-                        <Badge variant="default" className="bg-emerald-500">
-                          18
-                        </Badge>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <CheckCircle className="h-4 w-4 text-emerald-500" />
-                        <p className="text-sm">Currently on duty</p>
-                      </div>
-                    </div>
-                    <div className="rounded-lg border p-4 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm text-muted-foreground">
-                          Inactive Drivers
-                        </p>
-                        <Badge variant="secondary">6</Badge>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <XCircle className="h-4 w-4 text-muted-foreground" />
-                        <p className="text-sm">Off duty</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="users">
-            <div className="p-6">
-              <CompanyUsers company={company} />
-            </div>
-          </TabsContent>
-
-          <TabsContent value="billing">
-            <div className="space-y-6">
-              {company.stripe_customer_id ? (
-                <StripeTabs company={company} />
-              ) : (
-                <div className="flex flex-col items-center justify-center p-8 space-y-4">
-                  <CreditCard className="h-12 w-12 text-gray-400" />
-                  <h3 className="text-lg font-semibold">No Billing Setup</h3>
-                  <p className="text-sm text-gray-500 text-center">
-                    This company hasn't been connected to Stripe yet. Connect to
-                    manage payments, subscriptions, and invoices.
-                  </p>
-                  <Button
-                    onClick={handleConnectStripe}
-                    disabled={isLoadingStripe}
+          <div className="flex-1 overflow-hidden">
+            <Tabs
+              value={activeTab}
+              onValueChange={handleTabChange}
+              className="h-full flex flex-col"
+            >
+              <div className="border-b px-6 py-3 bg-muted/10">
+                <TabsList className="bg-background border rounded-lg p-0 shadow-sm">
+                  <TabsTrigger
+                    value="overview"
+                    className="rounded-md data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-sm px-4 py-2 text-sm font-medium transition-all"
                   >
-                    {isLoadingStripe ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Connecting...
-                      </>
-                    ) : (
-                      "Connect to Stripe"
-                    )}
-                  </Button>
-                </div>
-              )}
-            </div>
-          </TabsContent>
+                    <Building2 className="h-4 w-4 mr-2" />
+                    Overview
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="users"
+                    className="rounded-md data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-sm px-4 py-2 text-sm font-medium transition-all"
+                  >
+                    <Users className="h-4 w-4 mr-2" />
+                    Users
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="drivers"
+                    className="rounded-md data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-sm px-4 py-2 text-sm font-medium transition-all"
+                  >
+                    <Truck className="h-4 w-4 mr-2" />
+                    Drivers
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="billing"
+                    className="rounded-md data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-sm px-4 py-2 text-sm font-medium transition-all"
+                  >
+                    <CreditCard className="h-4 w-4 mr-2" />
+                    Billing
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="settings"
+                    className="rounded-md data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-sm px-4 py-2 text-sm font-medium transition-all"
+                  >
+                    <Settings className="h-4 w-4 mr-2" />
+                    Settings
+                  </TabsTrigger>
+                </TabsList>
+              </div>
 
-          <TabsContent value="drivers">
-            <div className="p-6">
-              <CompanyDrivers company={company} />
-            </div>
-          </TabsContent>
+              <ScrollArea className="flex-1">
+                <TabsContent
+                  value="overview"
+                  className="p-4 h-full"
+                  tabIndex={-1}
+                >
+                  <div className="space-y-6">
+                    <div className="grid grid-cols-2 gap-6 p-6 border rounded-xl shadow-sm bg-card">
+                      <div className="space-y-1">
+                        <h3 className="text-sm font-medium text-muted-foreground">
+                          Company Name
+                        </h3>
+                        <p className="text-base">{companyMemo.name}</p>
+                      </div>
+                      <div className="space-y-1">
+                        <h3 className="text-sm font-medium text-muted-foreground">
+                          Status
+                        </h3>
+                        <p className="text-base capitalize">
+                          {companyMemo.status}
+                        </p>
+                      </div>
+                      <div className="space-y-1">
+                        <h3 className="text-sm font-medium text-muted-foreground">
+                          Created
+                        </h3>
+                        <p className="text-base">
+                          {formatDate(companyMemo.created_at)}
+                        </p>
+                      </div>
+                      <div className="space-y-1">
+                        <h3 className="text-sm font-medium text-muted-foreground">
+                          Last Updated
+                        </h3>
+                        <p className="text-base">
+                          {formatDate(companyMemo.updated_at)}
+                        </p>
+                      </div>
+                    </div>
 
-          <TabsContent value="settings">
-            <div className="p-6">
-              <CompanySettings
-                company={company}
-                onUpdate={handleUpdateCompany}
-                onDelete={handleDeleteCompany}
-              />
-            </div>
-          </TabsContent>
-        </Tabs>
+                    <div className="space-y-4 p-6 border rounded-xl shadow-sm bg-card">
+                      <h3 className="text-lg font-medium">
+                        Contact Information
+                      </h3>
+                      <div className="grid grid-cols-2 gap-6">
+                        <div className="space-y-1">
+                          <h4 className="text-sm font-medium text-muted-foreground">
+                            Email
+                          </h4>
+                          <p className="text-base">
+                            {companyMemo.contact_email || "—"}
+                          </p>
+                        </div>
+                        <div className="space-y-1">
+                          <h4 className="text-sm font-medium text-muted-foreground">
+                            Phone
+                          </h4>
+                          <p className="text-base">
+                            {companyMemo.contact_phone || "—"}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4 p-6 border rounded-xl shadow-sm bg-card">
+                      <h3 className="text-lg font-medium">Address</h3>
+                      <div className="grid grid-cols-2 gap-6">
+                        <div className="space-y-1">
+                          <h4 className="text-sm font-medium text-muted-foreground">
+                            Street
+                          </h4>
+                          <p className="text-base">
+                            {companyMemo.street || "—"}
+                          </p>
+                        </div>
+                        <div className="space-y-1">
+                          <h4 className="text-sm font-medium text-muted-foreground">
+                            City
+                          </h4>
+                          <p className="text-base">{companyMemo.city || "—"}</p>
+                        </div>
+                        <div className="space-y-1">
+                          <h4 className="text-sm font-medium text-muted-foreground">
+                            State
+                          </h4>
+                          <p className="text-base">
+                            {companyMemo.state || "—"}
+                          </p>
+                        </div>
+                        <div className="space-y-1">
+                          <h4 className="text-sm font-medium text-muted-foreground">
+                            Zip
+                          </h4>
+                          <p className="text-base">{companyMemo.zip || "—"}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="users" className="p-6 h-full" tabIndex={-1}>
+                  <CompanyUsers company={companyMemo} />
+                </TabsContent>
+
+                <TabsContent
+                  value="drivers"
+                  className="p-6 h-full"
+                  tabIndex={-1}
+                >
+                  <CompanyDrivers company={companyMemo} />
+                </TabsContent>
+
+                <TabsContent
+                  value="billing"
+                  className="px-4 py-2 h-full"
+                  tabIndex={-1}
+                >
+                  {isLoadingStripe ? (
+                    <div className="flex flex-col items-center justify-center space-y-6 p-10 min-h-[400px] border rounded-xl shadow-sm bg-background">
+                      <div className="flex items-center justify-center w-20 h-20 rounded-full bg-primary/10">
+                        <Loader2 className="h-10 w-10 text-primary animate-spin" />
+                      </div>
+                      <div className="text-center space-y-3">
+                        <h3 className="text-xl font-medium">
+                          Loading Billing Information
+                        </h3>
+                        <p className="text-sm text-muted-foreground max-w-md">
+                          Please wait while we retrieve your billing data. This
+                          may take a few moments...
+                        </p>
+                      </div>
+                      <div className="w-full max-w-md h-3 bg-muted rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-primary animate-pulse rounded-full"
+                          style={{ width: "75%" }}
+                        ></div>
+                      </div>
+                    </div>
+                  ) : companyMemo.stripe_customer_id ? (
+                    <>
+                      <StripeTabs
+                        company={companyMemo}
+                        preloadedData={stripeData}
+                        isLoading={isLoadingStripe}
+                        defaultTab="subscription"
+                      />
+                    </>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center p-10 space-y-4 min-h-[400px] border rounded-xl shadow-sm">
+                      <div className="w-20 h-20 rounded-full bg-muted/50 flex items-center justify-center">
+                        <CreditCard className="h-10 w-10 text-muted-foreground" />
+                      </div>
+                      <div className="text-center space-y-2">
+                        <h3 className="text-xl font-medium">
+                          No Billing Setup
+                        </h3>
+                        <p className="text-sm text-muted-foreground max-w-md">
+                          This company hasn't been connected to Stripe yet.
+                          Connect to enable billing features.
+                        </p>
+                      </div>
+                      <Button
+                        onClick={handleConnectStripe}
+                        className="mt-4"
+                        size="lg"
+                      >
+                        <CreditCard className="mr-2 h-4 w-4" />
+                        Connect to Stripe
+                      </Button>
+                    </div>
+                  )}
+                </TabsContent>
+
+                <TabsContent
+                  value="settings"
+                  className="p-6 h-full"
+                  tabIndex={-1}
+                >
+                  <CompanySettings
+                    company={companyMemo}
+                    onUpdate={handleUpdateCompany}
+                    onDelete={handleDeleteCompany}
+                  />
+                </TabsContent>
+              </ScrollArea>
+            </Tabs>
+          </div>
+        </div>
       </SheetContent>
     </Sheet>
   );

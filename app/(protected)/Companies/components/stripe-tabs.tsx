@@ -3,7 +3,7 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card } from "@/components/ui/card";
 import { Company } from "../types";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import {
   getStripeSubscriptionDetails,
   getCompanyPaymentMethods,
@@ -15,6 +15,7 @@ import {
   resumeSubscription,
   getAvailablePlans,
 } from "../stripe-actions";
+import { clearCompanyCache } from "../actions";
 import { AddPaymentMethod } from "../components/add-payment-method";
 import { Button } from "@/components/ui/button";
 import {
@@ -55,6 +56,8 @@ import {
   FileText,
   ShieldCheck,
   X,
+  Eye,
+  CalendarClock,
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -68,25 +71,53 @@ import {
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui/use-toast";
 import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
+import { subscriptionDetailsCache, CACHE_TTL } from "../cache";
+import { Skeleton } from "@/components/ui/skeleton";
 
 // Client-side cache
 const paymentMethodsCache = new Map<
   number,
   { data: any[]; timestamp: number }
 >();
-const subscriptionDetailsCache = new Map<
-  number,
-  { data: any; timestamp: number }
->();
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutes in milliseconds
+// Use the shared cache instead of a local one
+// const subscriptionDetailsCache = new Map<
+//   number,
+//   { data: any; timestamp: number }
+// >();
+// const CACHE_TTL = 5 * 60 * 1000; // 5 minutes in milliseconds
+
+// Helper function to format currency
+const formatCurrency = (amount: number) => {
+  const formatter = new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+  });
+  return formatter.format(amount / 100);
+};
 
 interface StripeTabsProps {
   company: Company;
+  preloadedData?: any;
+  isLoading?: boolean;
+  defaultTab?: string;
 }
 
 interface SubscriptionItem {
   priceId: string;
   quantity: number;
+}
+
+// Define our own interface for the invoice
+interface Invoice {
+  id: string;
+  number: string | null;
+  amount_due: number;
+  status: string | null;
+  created: number;
+  hosted_invoice_url: string | null;
+  invoice_pdf: string | null;
 }
 
 interface CreateSubscriptionDialogProps {
@@ -107,17 +138,52 @@ function CreateSubscriptionDialog({
   >([{ priceId: "", quantity: 1 }]);
   const [availablePlans, setAvailablePlans] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const plansRef = useRef<any[]>([]);
   const { toast } = useToast();
 
+  // Preload plans when component mounts, not just when dialog opens
   useEffect(() => {
-    const fetchPlans = async () => {
+    const preloadPlans = async () => {
+      try {
+        // Only fetch if we don't already have plans
+        if (plansRef.current.length === 0) {
+          const response = await fetch("/api/stripe/plans");
+          const data = await response.json();
+
+          if (data.plans) {
+            plansRef.current = data.plans;
+          }
+        }
+      } catch (error) {
+        console.error("Error preloading plans:", error);
+      }
+    };
+
+    preloadPlans();
+  }, []);
+
+  // Initialize subscription items when dialog opens
+  useEffect(() => {
+    const initializeDialog = async () => {
+      if (!isOpen) return;
+
       try {
         setIsLoading(true);
+
+        // If we already preloaded plans, use them
+        if (plansRef.current.length > 0) {
+          setAvailablePlans(plansRef.current);
+          setIsLoading(false);
+          return;
+        }
+
+        // Otherwise fetch plans
         const response = await fetch("/api/stripe/plans");
         const data = await response.json();
 
         if (data.plans) {
           setAvailablePlans(data.plans);
+          plansRef.current = data.plans;
         } else {
           toast({
             title: "Error",
@@ -137,10 +203,8 @@ function CreateSubscriptionDialog({
       }
     };
 
-    if (isOpen) {
-      fetchPlans();
-    }
-  }, [isOpen]);
+    initializeDialog();
+  }, [isOpen, toast]);
 
   const handleAddItem = () => {
     setSubscriptionItems([...subscriptionItems, { priceId: "", quantity: 1 }]);
@@ -177,11 +241,10 @@ function CreateSubscriptionDialog({
   };
 
   const calculateSubtotal = () => {
-    return subscriptionItems.reduce(
-      (sum: number, item: SubscriptionItem) =>
-        sum + item.quantity * (item.priceId ? 1 : 0),
-      0
-    );
+    return subscriptionItems.reduce((sum, item) => {
+      const plan = availablePlans.find((p) => p.id === item.priceId);
+      return sum + (plan ? (plan.unit_amount * item.quantity) / 100 : 0);
+    }, 0);
   };
 
   return (
@@ -190,144 +253,129 @@ function CreateSubscriptionDialog({
         <DialogHeader>
           <DialogTitle>Create Subscription</DialogTitle>
           <DialogDescription>
-            Choose one or more plans to subscribe to
+            Select the plans you want to subscribe to
           </DialogDescription>
         </DialogHeader>
-        <div className="flex-1 min-h-0 flex flex-col">
-          <ScrollArea className="flex-1">
-            <div className="space-y-4 py-4">
-              {subscriptionItems.map((item, index) => (
-                <div
-                  key={index}
-                  className="flex gap-4 items-start p-4 border rounded-lg"
+        {isLoading ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <span className="ml-2">Loading subscription plans...</span>
+          </div>
+        ) : (
+          <div className="flex-1 min-h-0 flex flex-col">
+            <ScrollArea className="flex-1">
+              <div className="space-y-4 py-4">
+                {subscriptionItems.map((item, index) => (
+                  <div
+                    key={index}
+                    className="grid grid-cols-12 gap-4 items-center"
+                  >
+                    <div className="col-span-5">
+                      <Select
+                        value={item.priceId}
+                        onValueChange={(value) =>
+                          handleItemChange(index, "priceId", value)
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select Plan" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {availablePlans.map((plan) => (
+                            <SelectItem key={plan.id} value={plan.id}>
+                              {plan.product.name} -{" "}
+                              {formatCurrency(plan.unit_amount)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="col-span-5">
+                      <div className="flex items-center space-x-2">
+                        <Label htmlFor={`quantity-${index}`}>Quantity</Label>
+                        <Input
+                          id={`quantity-${index}`}
+                          type="number"
+                          min="1"
+                          value={item.quantity}
+                          onChange={(e) =>
+                            handleItemChange(
+                              index,
+                              "quantity",
+                              parseInt(e.target.value) || 1
+                            )
+                          }
+                          className="w-20"
+                        />
+                      </div>
+                    </div>
+                    <div className="col-span-2 flex justify-end">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleRemoveItem(index)}
+                        disabled={subscriptionItems.length === 1}
+                      >
+                        <Trash className="h-4 w-4" />
+                        <span className="sr-only">Remove</span>
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={handleAddItem}
                 >
-                  <div className="flex-1 space-y-2">
-                    <label className="text-sm font-medium">Select Plan</label>
-                    <Select
-                      value={item.priceId}
-                      onValueChange={(value) =>
-                        handleItemChange(index, "priceId", value)
-                      }
-                      disabled={isLoading}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a plan" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {availablePlans.map((plan) => (
-                          <SelectItem
-                            key={plan.id}
-                            value={plan.id}
-                            disabled={subscriptionItems.some(
-                              (item, i) =>
-                                i !== index && item.priceId === plan.id
-                            )}
-                          >
-                            {plan.product.name} -{" "}
-                            {(plan.unit_amount / 100).toFixed(2)}{" "}
-                            {plan.currency}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="w-32">
-                    <label className="text-sm font-medium">Quantity</label>
-                    <Input
-                      type="number"
-                      min="1"
-                      value={item.quantity}
-                      onChange={(e) =>
-                        handleItemChange(
-                          index,
-                          "quantity",
-                          parseInt(e.target.value) || 1
-                        )
-                      }
-                      disabled={isLoading || isProcessing}
-                      className="mt-2"
-                    />
-                  </div>
-                  {subscriptionItems.length > 1 && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => handleRemoveItem(index)}
-                      className="mt-8"
-                    >
-                      <Trash className="h-4 w-4" />
-                    </Button>
+                  <Plus className="mr-2 h-4 w-4" /> Add Another Plan
+                </Button>
+              </div>
+            </ScrollArea>
+
+            <div className="border-t pt-4 space-y-2">
+              <div className="flex justify-between">
+                <span>Subtotal</span>
+                <span>{formatCurrency(calculateSubtotal() * 100)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Total excluding tax</span>
+                <span>{formatCurrency(calculateSubtotal() * 100)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Tax</span>
+                <span>{formatCurrency(0)}</span>
+              </div>
+              <div className="flex justify-between font-bold">
+                <span>Total</span>
+                <span>{formatCurrency(calculateSubtotal() * 100)}</span>
+              </div>
+
+              <div className="flex justify-end space-x-2 mt-4">
+                <Button
+                  variant="outline"
+                  onClick={() => onOpenChange(false)}
+                  disabled={isProcessing}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleSubscribe}
+                  disabled={
+                    !subscriptionItems.some((item) => item.priceId) ||
+                    isProcessing
+                  }
+                >
+                  {isProcessing ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <CreditCard className="mr-2 h-4 w-4" />
                   )}
-                </div>
-              ))}
-              <Button
-                variant="outline"
-                onClick={handleAddItem}
-                disabled={isLoading || isProcessing}
-                className="w-full"
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                Add Another Plan
-              </Button>
-            </div>
-          </ScrollArea>
-
-          <div className="border-t mt-6 pt-4">
-            <div className="space-y-2">
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Subtotal</span>
-                <span>${calculateSubtotal().toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">
-                  Total excluding tax
-                </span>
-                <span>${calculateSubtotal().toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Tax</span>
-                <span>$0.00</span>
-              </div>
-              <div className="flex justify-between text-sm pt-2 border-t">
-                <span className="font-medium">Total</span>
-                <span className="font-medium">
-                  ${calculateSubtotal().toFixed(2)}
-                </span>
-              </div>
-              <div className="flex justify-between text-sm pt-2 border-t">
-                <span className="font-medium">Amount due</span>
-                <span className="font-medium">
-                  ${calculateSubtotal().toFixed(2)}
-                </span>
+                  Subscribe
+                </Button>
               </div>
             </div>
           </div>
-
-          <div className="flex justify-end space-x-2 mt-4">
-            <Button
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-              disabled={isProcessing}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleSubscribe}
-              disabled={
-                !subscriptionItems.some((item) => item.priceId) ||
-                isProcessing ||
-                isLoading
-              }
-            >
-              {isProcessing ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Plus className="mr-2 h-4 w-4" />
-              )}
-              Subscribe
-            </Button>
-          </div>
-        </div>
+        )}
       </DialogContent>
     </Dialog>
   );
@@ -353,23 +401,71 @@ function UpdateSubscriptionDialog({
   >([]);
   const [availablePlans, setAvailablePlans] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const plansRef = useRef<any[]>([]);
   const { toast } = useToast();
 
+  // Preload plans when component mounts, not just when dialog opens
   useEffect(() => {
-    const fetchPlans = async () => {
+    const preloadPlans = async () => {
+      try {
+        // Only fetch if we don't already have plans
+        if (plansRef.current.length === 0) {
+          const response = await fetch("/api/stripe/plans");
+          const data = await response.json();
+
+          if (data.plans) {
+            plansRef.current = data.plans;
+          }
+        }
+      } catch (error) {
+        console.error("Error preloading plans:", error);
+      }
+    };
+
+    preloadPlans();
+  }, []);
+
+  // Initialize subscription items when dialog opens
+  useEffect(() => {
+    const initializeDialog = async () => {
+      if (!isOpen) return;
+
       try {
         setIsLoading(true);
+
+        // If we already preloaded plans, use them
+        if (plansRef.current.length > 0) {
+          setAvailablePlans(plansRef.current);
+
+          // Initialize subscription items from current subscription
+          if (subscription?.items) {
+            const currentItems = subscription.items.map((item: any) => ({
+              priceId: item.price.id,
+              quantity: item.quantity,
+            }));
+            setSubscriptionItems(currentItems);
+          }
+
+          setIsLoading(false);
+          return;
+        }
+
+        // Otherwise fetch plans
         const response = await fetch("/api/stripe/plans");
         const data = await response.json();
 
         if (data.plans) {
           setAvailablePlans(data.plans);
+          plansRef.current = data.plans;
+
           // Initialize subscription items from current subscription
-          const currentItems = subscription.items.map((item: any) => ({
-            priceId: item.price.id,
-            quantity: item.quantity,
-          }));
-          setSubscriptionItems(currentItems);
+          if (subscription?.items) {
+            const currentItems = subscription.items.map((item: any) => ({
+              priceId: item.price.id,
+              quantity: item.quantity,
+            }));
+            setSubscriptionItems(currentItems);
+          }
         } else {
           toast({
             title: "Error",
@@ -389,10 +485,8 @@ function UpdateSubscriptionDialog({
       }
     };
 
-    if (isOpen) {
-      fetchPlans();
-    }
-  }, [isOpen, subscription]);
+    initializeDialog();
+  }, [isOpen, subscription, toast]);
 
   const handleAddItem = () => {
     setSubscriptionItems([...subscriptionItems, { priceId: "", quantity: 1 }]);
@@ -444,237 +538,517 @@ function UpdateSubscriptionDialog({
             Modify your subscription items below
           </DialogDescription>
         </DialogHeader>
-        <div className="flex-1 min-h-0 flex flex-col">
-          <ScrollArea className="flex-1">
-            <div className="space-y-4 py-4">
-              {subscriptionItems.map((item, index) => (
-                <div
-                  key={index}
-                  className="flex gap-4 items-start p-4 border rounded-lg"
-                >
-                  <div className="flex-1 space-y-2">
-                    <label className="text-sm font-medium">Select Plan</label>
-                    <Select
-                      value={item.priceId}
-                      onValueChange={(value) =>
-                        handleItemChange(index, "priceId", value)
-                      }
-                      disabled={isLoading}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a plan" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {availablePlans.map((plan) => (
-                          <SelectItem
-                            key={plan.id}
-                            value={plan.id}
-                            disabled={subscriptionItems.some(
-                              (item, i) =>
-                                i !== index && item.priceId === plan.id
-                            )}
-                          >
-                            {plan.product.name} -{" "}
-                            {(plan.unit_amount / 100).toFixed(2)}{" "}
-                            {plan.currency}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="w-32">
-                    <label className="text-sm font-medium">Quantity</label>
-                    <Input
-                      type="number"
-                      min="1"
-                      value={item.quantity}
-                      onChange={(e) =>
-                        handleItemChange(
-                          index,
-                          "quantity",
-                          parseInt(e.target.value) || 1
-                        )
-                      }
-                      disabled={isLoading || isProcessing}
-                      className="mt-2"
-                    />
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => handleRemoveItem(index)}
-                    className="mt-8"
-                    disabled={subscriptionItems.length === 1}
+        {isLoading ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <span className="ml-2">Loading subscription details...</span>
+          </div>
+        ) : (
+          <div className="flex-1 min-h-0 flex flex-col">
+            <ScrollArea className="flex-1">
+              <div className="space-y-4 py-4">
+                {subscriptionItems.map((item, index) => (
+                  <div
+                    key={index}
+                    className="grid grid-cols-12 gap-4 items-center"
                   >
-                    <Trash className="h-4 w-4" />
-                  </Button>
-                </div>
-              ))}
-              <Button
-                variant="outline"
-                onClick={handleAddItem}
-                disabled={isLoading || isProcessing}
-                className="w-full"
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                Add Another Plan
-              </Button>
-            </div>
-          </ScrollArea>
+                    <div className="col-span-5">
+                      <Select
+                        value={item.priceId}
+                        onValueChange={(value) =>
+                          handleItemChange(index, "priceId", value)
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select Plan" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {availablePlans.map((plan) => (
+                            <SelectItem key={plan.id} value={plan.id}>
+                              {plan.product.name} -{" "}
+                              {formatCurrency(plan.unit_amount)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="col-span-5">
+                      <div className="flex items-center space-x-2">
+                        <Label htmlFor={`quantity-${index}`}>Quantity</Label>
+                        <Input
+                          id={`quantity-${index}`}
+                          type="number"
+                          min="1"
+                          value={item.quantity}
+                          onChange={(e) =>
+                            handleItemChange(
+                              index,
+                              "quantity",
+                              parseInt(e.target.value) || 1
+                            )
+                          }
+                          className="w-20"
+                        />
+                      </div>
+                    </div>
+                    <div className="col-span-2 flex justify-end">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleRemoveItem(index)}
+                      >
+                        <Trash className="h-4 w-4" />
+                        <span className="sr-only">Remove</span>
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={handleAddItem}
+                >
+                  <Plus className="mr-2 h-4 w-4" /> Add Another Plan
+                </Button>
+              </div>
+            </ScrollArea>
 
-          <div className="border-t mt-6 pt-4">
-            <div className="space-y-2">
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Subtotal</span>
-                <span>${calculateSubtotal().toFixed(2)}</span>
+            <div className="border-t pt-4 space-y-2">
+              <div className="flex justify-between">
+                <span>Subtotal</span>
+                <span>{formatCurrency(calculateSubtotal() * 100)}</span>
               </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">
-                  Total excluding tax
-                </span>
-                <span>${calculateSubtotal().toFixed(2)}</span>
+              <div className="flex justify-between">
+                <span>Total excluding tax</span>
+                <span>{formatCurrency(calculateSubtotal() * 100)}</span>
               </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Tax</span>
-                <span>$0.00</span>
+              <div className="flex justify-between">
+                <span>Tax</span>
+                <span>{formatCurrency(0)}</span>
               </div>
-              <div className="flex justify-between text-sm pt-2 border-t">
-                <span className="font-medium">Total</span>
-                <span className="font-medium">
-                  ${calculateSubtotal().toFixed(2)}
-                </span>
+              <div className="flex justify-between font-bold">
+                <span>Total</span>
+                <span>{formatCurrency(calculateSubtotal() * 100)}</span>
               </div>
-              <div className="flex justify-between text-sm pt-2 border-t">
-                <span className="font-medium">Amount due</span>
-                <span className="font-medium">
-                  ${calculateSubtotal().toFixed(2)}
-                </span>
+              <div className="flex justify-between font-bold">
+                <span>Amount due</span>
+                <span>{formatCurrency(calculateSubtotal() * 100)}</span>
+              </div>
+
+              <div className="flex justify-end space-x-2 mt-4">
+                <Button
+                  variant="outline"
+                  onClick={() => onOpenChange(false)}
+                  disabled={isProcessing}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleUpdate}
+                  disabled={
+                    !subscriptionItems.some((item) => item.priceId) ||
+                    isProcessing ||
+                    isLoading
+                  }
+                >
+                  {isProcessing ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Pencil className="mr-2 h-4 w-4" />
+                  )}
+                  Update
+                </Button>
               </div>
             </div>
           </div>
-
-          <div className="flex justify-end space-x-2 mt-4">
-            <Button
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-              disabled={isProcessing}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleUpdate}
-              disabled={
-                !subscriptionItems.some((item) => item.priceId) ||
-                isProcessing ||
-                isLoading
-              }
-            >
-              {isProcessing ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Pencil className="mr-2 h-4 w-4" />
-              )}
-              Update
-            </Button>
-          </div>
-        </div>
+        )}
       </DialogContent>
     </Dialog>
   );
 }
 
-export function StripeTabs({ company }: StripeTabsProps) {
+// Skeleton UI for subscription tab
+function SubscriptionSkeleton() {
+  return (
+    <Card className="w-full p-6 border rounded-xl shadow-sm transition-all duration-300">
+      <div className="space-y-8">
+        <div className="flex items-center justify-between">
+          <div className="space-y-2">
+            <Skeleton className="h-7 w-48 bg-primary/10 animate-pulse" />
+            <Skeleton className="h-4 w-32 bg-primary/5 animate-pulse" />
+          </div>
+          <Skeleton className="h-9 w-32 rounded-md bg-primary/10 animate-pulse" />
+        </div>
+
+        <div className="space-y-4">
+          <div className="flex items-center space-x-2">
+            <Skeleton className="h-5 w-5 rounded-full bg-primary/10 animate-pulse" />
+            <Skeleton className="h-5 w-40 bg-primary/10 animate-pulse" />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Skeleton className="h-4 w-24 bg-primary/5 animate-pulse" />
+              <Skeleton className="h-6 w-32 bg-primary/10 animate-pulse" />
+            </div>
+            <div className="space-y-2">
+              <Skeleton className="h-4 w-24 bg-primary/5 animate-pulse" />
+              <Skeleton className="h-6 w-32 bg-primary/10 animate-pulse" />
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Skeleton className="h-5 w-40 bg-primary/10 animate-pulse" />
+          <div className="border rounded-md p-4">
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <Skeleton className="h-5 w-32 bg-primary/10 animate-pulse" />
+                <Skeleton className="h-5 w-24 bg-primary/10 animate-pulse" />
+              </div>
+              <div className="flex justify-between items-center">
+                <Skeleton className="h-5 w-36 bg-primary/10 animate-pulse" />
+                <Skeleton className="h-5 w-20 bg-primary/10 animate-pulse" />
+              </div>
+              <div className="flex justify-between items-center">
+                <Skeleton className="h-5 w-28 bg-primary/10 animate-pulse" />
+                <Skeleton className="h-5 w-28 bg-primary/10 animate-pulse" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+// Skeleton UI for payment methods tab
+function PaymentMethodsSkeleton() {
+  return (
+    <Card className="w-full p-6 border rounded-xl shadow-sm transition-all duration-300">
+      <div className="space-y-8">
+        <div className="flex items-center justify-between">
+          <div className="space-y-2">
+            <Skeleton className="h-7 w-48 bg-primary/10 animate-pulse" />
+            <Skeleton className="h-4 w-64 bg-primary/5 animate-pulse" />
+          </div>
+          <Skeleton className="h-9 w-40 rounded-md bg-primary/10 animate-pulse" />
+        </div>
+
+        <div className="space-y-6">
+          {Array.from({ length: 2 }).map((_, i) => (
+            <div key={i} className="border rounded-lg p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-6 rounded bg-primary/10 animate-pulse" />
+                  <Skeleton className="h-5 w-32 bg-primary/10 animate-pulse" />
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Skeleton className="h-8 w-8 rounded-full bg-primary/10 animate-pulse" />
+                  <Skeleton className="h-8 w-8 rounded-full bg-primary/10 animate-pulse" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <Skeleton className="h-4 w-20 bg-primary/5 animate-pulse" />
+                  <Skeleton className="h-5 w-28 bg-primary/10 animate-pulse" />
+                </div>
+                <div className="space-y-1">
+                  <Skeleton className="h-4 w-20 bg-primary/5 animate-pulse" />
+                  <Skeleton className="h-5 w-24 bg-primary/10 animate-pulse" />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+// Skeleton UI for invoices tab
+function InvoicesSkeleton() {
+  return (
+    <Card className="w-full p-6 border rounded-xl shadow-sm transition-all duration-300">
+      <div className="space-y-8">
+        <div className="flex items-center justify-between">
+          <div className="space-y-2">
+            <Skeleton className="h-7 w-48 bg-primary/10 animate-pulse" />
+            <Skeleton className="h-4 w-64 bg-primary/5 animate-pulse" />
+          </div>
+          <Skeleton className="h-9 w-40 rounded-md bg-primary/10 animate-pulse" />
+        </div>
+
+        <div className="grid grid-cols-3 gap-4 mb-6">
+          <div className="border rounded-lg p-4">
+            <Skeleton className="h-4 w-24 bg-primary/5 animate-pulse mb-2" />
+            <Skeleton className="h-8 w-32 bg-primary/10 animate-pulse" />
+          </div>
+          <div className="border rounded-lg p-4">
+            <Skeleton className="h-4 w-24 bg-primary/5 animate-pulse mb-2" />
+            <Skeleton className="h-8 w-32 bg-primary/10 animate-pulse" />
+          </div>
+          <div className="border rounded-lg p-4">
+            <Skeleton className="h-4 w-24 bg-primary/5 animate-pulse mb-2" />
+            <Skeleton className="h-8 w-32 bg-primary/10 animate-pulse" />
+          </div>
+        </div>
+
+        <div className="border rounded-lg overflow-hidden">
+          <div className="bg-muted p-3">
+            <div className="grid grid-cols-4 gap-4">
+              <Skeleton className="h-5 w-full bg-primary/10 animate-pulse" />
+              <Skeleton className="h-5 w-full bg-primary/10 animate-pulse" />
+              <Skeleton className="h-5 w-full bg-primary/10 animate-pulse" />
+              <Skeleton className="h-5 w-full bg-primary/10 animate-pulse" />
+            </div>
+          </div>
+
+          <div className="divide-y">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="p-3">
+                <div className="grid grid-cols-4 gap-4">
+                  <Skeleton className="h-5 w-full bg-primary/5 animate-pulse" />
+                  <Skeleton className="h-5 w-full bg-primary/5 animate-pulse" />
+                  <Skeleton className="h-5 w-full bg-primary/5 animate-pulse" />
+                  <div className="flex justify-end space-x-2">
+                    <Skeleton className="h-8 w-8 rounded-full bg-primary/10 animate-pulse" />
+                    <Skeleton className="h-8 w-8 rounded-full bg-primary/10 animate-pulse" />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+export function StripeTabs({
+  company,
+  preloadedData,
+  isLoading: externalLoading,
+  defaultTab = "subscription",
+}: StripeTabsProps) {
+  // Group all useState hooks together at the top
+  const [activeTab, setActiveTab] = useState<string>(defaultTab);
   const [subscriptionDetails, setSubscriptionDetails] = useState<any>(null);
   const [paymentMethods, setPaymentMethods] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(externalLoading || false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [contentVisible, setContentVisible] = useState(false);
+  const [isCreatingSubscription, setIsCreatingSubscription] = useState(false);
+  const [createSubscriptionDialogOpen, setCreateSubscriptionDialogOpen] =
+    useState(false);
+  const [isCancellingSubscription, setIsCancellingSubscription] =
+    useState(false);
+  const [cancelSubscriptionDialogOpen, setCancelSubscriptionDialogOpen] =
+    useState(false);
+  const [isPausingSubscription, setIsPausingSubscription] = useState(false);
+  const [pauseSubscriptionDialogOpen, setPauseSubscriptionDialogOpen] =
+    useState(false);
+  const [isResumingSubscription, setIsResumingSubscription] = useState(false);
+  const [resumeSubscriptionDialogOpen, setResumeSubscriptionDialogOpen] =
+    useState(false);
+  const [isAddingPaymentMethod, setIsAddingPaymentMethod] = useState(false);
+  const [addPaymentMethodDialogOpen, setAddPaymentMethodDialogOpen] =
+    useState(false);
+  const [loadingTabs, setLoadingTabs] = useState({
+    subscription: false,
+    "payment-methods": false,
+    invoices: false,
+  });
   const [isPaymentMethodsOpen, setIsPaymentMethodsOpen] = useState(false);
   const [isCreateSubscriptionOpen, setIsCreateSubscriptionOpen] =
     useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [activeTab, setActiveTab] = useState("payments");
-  const [loadingTabs, setLoadingTabs] = useState<Record<string, boolean>>({
-    payments: false,
-    subscriptions: false,
+  const [isUpdateSubscriptionOpen, setIsUpdateSubscriptionOpen] =
+    useState(false);
+  const [isCreateInvoiceOpen, setIsCreateInvoiceOpen] = useState(false);
+
+  // All useRef hooks
+  const dataFetchedRef = useRef({
+    subscription: false,
+    "payment-methods": false,
     invoices: false,
+    any: false,
   });
+
+  // Get toast from context
   const { toast } = useToast();
 
   // Update default payment method detection
   const defaultPaymentMethodId =
     subscriptionDetails?.customer?.invoice_settings?.default_payment_method;
 
-  const fetchData = async (tabToLoad?: string) => {
-    if (!company.stripe_customer_id) {
-      setIsLoading(false);
-      return;
+  // All useEffect hooks
+  // Add animation effect when content loads
+  useEffect(() => {
+    if (!isLoading && subscriptionDetails) {
+      // Delay to ensure smooth transition
+      const timer = setTimeout(() => {
+        setContentVisible(true);
+      }, 300);
+      return () => clearTimeout(timer);
+    } else {
+      setContentVisible(false);
     }
+  }, [isLoading, subscriptionDetails]);
 
-    try {
-      const now = Date.now();
-      const cachedPaymentMethods = paymentMethodsCache.get(company.id);
-      const cachedSubscriptionDetails = subscriptionDetailsCache.get(
-        company.id
-      );
+  // Update preloadedData effect to mark data as fetched
+  useEffect(() => {
+    if (preloadedData) {
+      setSubscriptionDetails(preloadedData);
+      setPaymentMethods(preloadedData.paymentMethods || []);
 
-      // Set loading state for specific tab
-      if (tabToLoad) {
-        setLoadingTabs((prev) => ({ ...prev, [tabToLoad]: true }));
-      }
+      // Mark data as fetched if we have preloaded data
+      dataFetchedRef.current = {
+        subscription: true,
+        "payment-methods": true,
+        invoices: true,
+        any: true,
+      };
+    }
+  }, [preloadedData]);
 
-      // Use cached data if available and not expired
-      if (
-        cachedPaymentMethods &&
-        now - cachedPaymentMethods.timestamp < CACHE_TTL
-      ) {
-        setPaymentMethods(cachedPaymentMethods.data);
-      }
-      if (
-        cachedSubscriptionDetails &&
-        now - cachedSubscriptionDetails.timestamp < CACHE_TTL
-      ) {
-        setSubscriptionDetails(cachedSubscriptionDetails.data);
+  // Update isLoading when externalLoading changes
+  useEffect(() => {
+    if (externalLoading !== undefined) {
+      setIsLoading(externalLoading);
+    }
+  }, [externalLoading]);
+
+  // Define fetchData first with useCallback
+  const fetchData = useCallback(
+    async (tabToLoad?: string) => {
+      if (!company.stripe_customer_id) {
+        setIsLoading(false);
         return;
       }
 
-      // Only fetch if we don't have valid cached data
-      const details = await getStripeSubscriptionDetails(company.id);
+      try {
+        const now = Date.now();
+        const cachedPaymentMethods = paymentMethodsCache.get(company.id);
+        const cachedSubscriptionDetails = subscriptionDetailsCache.get(
+          company.id
+        );
 
-      paymentMethodsCache.set(company.id, {
-        data: details.paymentMethods,
-        timestamp: now,
-      });
-      subscriptionDetailsCache.set(company.id, {
-        data: details,
-        timestamp: now,
-      });
+        // Set loading state for specific tab
+        if (tabToLoad) {
+          setLoadingTabs((prev) => ({ ...prev, [tabToLoad]: true }));
+        }
 
-      setSubscriptionDetails(details);
-      setPaymentMethods(details.paymentMethods);
-    } catch (error) {
-      console.error("Error fetching data:", error);
-      toast({
-        title: "Error",
-        description: "Failed to load data",
-        variant: "destructive",
-      });
-    } finally {
-      setIsLoading(false);
-      if (tabToLoad) {
-        setLoadingTabs((prev) => ({ ...prev, [tabToLoad]: false }));
+        // Use cached data if available and not expired
+        if (
+          cachedPaymentMethods &&
+          now - cachedPaymentMethods.timestamp < CACHE_TTL
+        ) {
+          setPaymentMethods(cachedPaymentMethods.data);
+        }
+        if (
+          cachedSubscriptionDetails &&
+          now - cachedSubscriptionDetails.timestamp < CACHE_TTL
+        ) {
+          setSubscriptionDetails(cachedSubscriptionDetails.data);
+
+          // Mark data as fetched when using cached data
+          dataFetchedRef.current = {
+            subscription: true,
+            "payment-methods": true,
+            invoices: true,
+            any: true,
+          };
+
+          return;
+        }
+
+        // Only fetch if we don't have valid cached data
+        const details = await getStripeSubscriptionDetails(company.id);
+
+        paymentMethodsCache.set(company.id, {
+          data: details.paymentMethods,
+          timestamp: now,
+        });
+        subscriptionDetailsCache.set(company.id, {
+          data: details,
+          timestamp: now,
+        });
+
+        setSubscriptionDetails(details);
+        setPaymentMethods(details.paymentMethods);
+
+        // Mark data as fetched after successful fetch
+        dataFetchedRef.current = {
+          subscription: true,
+          "payment-methods": true,
+          invoices: true,
+          any: true,
+        };
+      } catch (error) {
+        console.error("Error fetching data:", error);
+        toast({
+          title: "Error",
+          description: "Failed to load data",
+          variant: "destructive",
+        });
+      } finally {
+        setIsLoading(false);
+        if (tabToLoad) {
+          setLoadingTabs((prev) => ({ ...prev, [tabToLoad]: false }));
+        }
       }
-    }
-  };
+    },
+    [company.id, company.stripe_customer_id, toast]
+  );
 
-  // Load data when tab changes
-  const handleTabChange = (tab: string) => {
-    setActiveTab(tab);
-    if (!subscriptionDetails || !paymentMethods.length) {
-      fetchData(tab);
-    }
-  };
+  // Then define handleTabChange with fetchData in its dependencies
+  const handleTabChange = useCallback(
+    (tab: string) => {
+      setActiveTab(tab);
+
+      // Always set loading state for the selected tab for better UX
+      setLoadingTabs((prev) => ({ ...prev, [tab]: true }));
+
+      // Set a minimum loading time to ensure the loading state is visible
+      setTimeout(() => {
+        setLoadingTabs((prev) => ({ ...prev, [tab]: false }));
+      }, 300); // Brief loading indicator for better UX
+
+      // If we already have data for this tab, don't fetch again
+      if (dataFetchedRef.current.any) {
+        console.log(`Using already fetched data for ${tab} tab`);
+        return;
+      }
+
+      // Check if we have cached data before fetching
+      const cachedData = subscriptionDetailsCache.get(company.id);
+      const now = Date.now();
+      const isCacheValid = cachedData && now - cachedData.timestamp < CACHE_TTL;
+
+      // Only fetch data if we don't have valid cached data
+      if (!isCacheValid && (!subscriptionDetails || !paymentMethods.length)) {
+        // Load all data if we don't have any yet
+        console.log(`Fetching data for ${tab} tab`);
+        fetchData(tab);
+      }
+    },
+    [company.id, subscriptionDetails, paymentMethods.length, fetchData]
+  );
 
   // Initial data fetch
   useEffect(() => {
+    // If we have preloaded data, don't fetch again
+    if (preloadedData) {
+      // Mark data as fetched if we have preloaded data
+      dataFetchedRef.current = {
+        subscription: true,
+        "payment-methods": true,
+        invoices: true,
+        any: true,
+      };
+      return;
+    }
+
     const now = Date.now();
     const cachedPaymentMethods = paymentMethodsCache.get(company.id);
     const cachedSubscriptionDetails = subscriptionDetailsCache.get(company.id);
@@ -685,209 +1059,159 @@ export function StripeTabs({ company }: StripeTabsProps) {
       now - cachedPaymentMethods.timestamp < CACHE_TTL
     ) {
       setPaymentMethods(cachedPaymentMethods.data);
+      dataFetchedRef.current["payment-methods"] = true;
+      dataFetchedRef.current.any = true;
     }
     if (
       cachedSubscriptionDetails &&
       now - cachedSubscriptionDetails.timestamp < CACHE_TTL
     ) {
       setSubscriptionDetails(cachedSubscriptionDetails.data);
+      setIsLoading(false);
+
+      // Mark all data as fetched when using cached subscription details
+      dataFetchedRef.current = {
+        subscription: true,
+        "payment-methods": true,
+        invoices: true,
+        any: true,
+      };
     } else {
       // Only fetch if we don't have valid cached data
-      fetchData(activeTab);
+      // Use setTimeout to defer the loading to the next tick
+      // This allows the component to render with a loading state first
+      setTimeout(() => {
+        fetchData(activeTab).finally(() => {
+          setIsLoading(false);
+        });
+      }, 0);
     }
-  }, [company.id]);
+  }, [company.id, preloadedData, activeTab, fetchData]);
 
-  const handleRemovePaymentMethod = async (paymentMethodId: string) => {
-    if (paymentMethodId === defaultPaymentMethodId) {
-      toast({
-        title: "Error",
-        description: "Cannot remove default payment method",
-        variant: "destructive",
-      });
-      return;
-    }
+  const handleRemovePaymentMethod = useCallback(
+    async (paymentMethodId: string) => {
+      if (paymentMethodId === defaultPaymentMethodId) {
+        toast({
+          title: "Error",
+          description: "Cannot remove default payment method",
+          variant: "destructive",
+        });
+        return;
+      }
 
-    try {
-      setIsProcessing(true);
+      try {
+        setIsProcessing(true);
 
-      // Optimistic update
-      const updatedMethods = paymentMethods.filter(
-        (method) => method.id !== paymentMethodId
-      );
-      setPaymentMethods(updatedMethods);
+        // Optimistic update
+        const updatedMethods = paymentMethods.filter(
+          (method) => method.id !== paymentMethodId
+        );
+        setPaymentMethods(updatedMethods);
 
-      await removePaymentMethod(company.id, paymentMethodId);
+        await removePaymentMethod(company.id, paymentMethodId);
 
-      // Update cache
-      paymentMethodsCache.set(company.id, {
-        data: updatedMethods,
-        timestamp: Date.now(),
-      });
+        // Update cache
+        paymentMethodsCache.set(company.id, {
+          data: updatedMethods,
+          timestamp: Date.now(),
+        });
 
-      toast({
-        title: "Success",
-        description: "Payment method removed successfully",
-      });
-    } catch (error) {
-      // Revert on error
-      await fetchData();
-      console.error("Error removing payment method:", error);
-      toast({
-        title: "Error",
-        description: "Failed to remove payment method",
-        variant: "destructive",
-      });
-    } finally {
-      setIsProcessing(false);
-    }
-  };
+        toast({
+          title: "Success",
+          description: "Payment method removed successfully",
+        });
+      } catch (error) {
+        // Revert on error
+        await fetchData();
+        console.error("Error removing payment method:", error);
+        toast({
+          title: "Error",
+          description: "Failed to remove payment method",
+          variant: "destructive",
+        });
+      } finally {
+        setIsProcessing(false);
+      }
+    },
+    [company.id, defaultPaymentMethodId, fetchData, paymentMethods, toast]
+  );
 
-  const handleSetDefault = async (paymentMethodId: string) => {
-    if (paymentMethodId === defaultPaymentMethodId) return;
+  const handleSetDefault = useCallback(
+    async (paymentMethodId: string) => {
+      if (paymentMethodId === defaultPaymentMethodId) return;
 
-    try {
-      setIsProcessing(true);
+      try {
+        setIsProcessing(true);
 
-      // Optimistic update
-      const updatedDetails = {
-        ...subscriptionDetails,
-        customer: {
-          ...subscriptionDetails.customer,
-          invoice_settings: {
-            ...subscriptionDetails.customer?.invoice_settings,
-            default_payment_method: paymentMethodId,
-          },
-        },
-      };
-      setSubscriptionDetails(updatedDetails);
-
-      await setDefaultPaymentMethod(company.id, paymentMethodId);
-
-      // Update cache
-      subscriptionDetailsCache.set(company.id, {
-        data: updatedDetails,
-        timestamp: Date.now(),
-      });
-
-      toast({
-        title: "Success",
-        description: "Default payment method updated successfully",
-      });
-    } catch (error) {
-      // Revert on error
-      await fetchData();
-      console.error("Error setting default payment method:", error);
-      toast({
-        title: "Error",
-        description: "Failed to set default payment method",
-        variant: "destructive",
-      });
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleUpdateSubscriptionItems = async (items: SubscriptionItem[]) => {
-    if (!subscriptionDetails?.subscription?.id) return;
-
-    try {
-      setIsProcessing(true);
-
-      // Get available plans first
-      const plansResponse = await fetch("/api/stripe/plans");
-      const plansData = await plansResponse.json();
-      const availablePlans = plansData.plans || [];
-
-      // Optimistically update the UI
-      const updatedSubscription = {
-        ...subscriptionDetails.subscription,
-        items: items.map((item) => ({
-          id: Math.random().toString(), // Temporary ID
-          price: availablePlans.find(
-            (plan: { id: string }) => plan.id === item.priceId
-          ),
-          quantity: item.quantity,
-        })),
-      };
-
-      // Update both the subscription and cache
-      const updatedDetails = {
-        ...subscriptionDetails,
-        subscription: updatedSubscription,
-      };
-
-      setSubscriptionDetails(updatedDetails);
-      subscriptionDetailsCache.set(company.id, {
-        data: updatedDetails,
-        timestamp: Date.now(),
-      });
-
-      // Call your API to update the subscription
-      await fetch(
-        `/api/stripe/subscriptions/${subscriptionDetails.subscription.id}/update`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ items }),
-        }
-      );
-
-      // Close the dialog before fetching fresh data
-      setIsUpdateSubscriptionOpen(false);
-
-      // Refresh data in the background to ensure consistency
-      fetchData().catch(console.error);
-
-      toast({
-        title: "Success",
-        description: "Subscription updated successfully",
-      });
-    } catch (error) {
-      console.error("Error updating subscription:", error);
-      // Revert optimistic update on error
-      await fetchData();
-      toast({
-        title: "Error",
-        description: "Failed to update subscription",
-        variant: "destructive",
-      });
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleCreateSubscription = async (items: SubscriptionItem[]) => {
-    if (!company.stripe_customer_id) {
-      toast({
-        title: "Error",
-        description: "Company is not properly configured with Stripe",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    try {
-      setIsProcessing(true);
-
-      // Create subscription with multiple items
-      const result = await createSubscription({
-        customerId: company.stripe_customer_id,
-        items: items.map((item) => ({
-          price: item.priceId,
-          quantity: item.quantity,
-        })),
-      });
-
-      // Close the dialog before fetching fresh data
-      setIsCreateSubscriptionOpen(false);
-
-      // Update the local state optimistically
-      if (result?.subscription) {
+        // Optimistic update
         const updatedDetails = {
           ...subscriptionDetails,
-          subscription: result.subscription,
+          customer: {
+            ...subscriptionDetails.customer,
+            invoice_settings: {
+              ...subscriptionDetails.customer?.invoice_settings,
+              default_payment_method: paymentMethodId,
+            },
+          },
+        };
+        setSubscriptionDetails(updatedDetails);
+
+        await setDefaultPaymentMethod(company.id, paymentMethodId);
+
+        // Update cache
+        subscriptionDetailsCache.set(company.id, {
+          data: updatedDetails,
+          timestamp: Date.now(),
+        });
+
+        toast({
+          title: "Success",
+          description: "Default payment method updated successfully",
+        });
+      } catch (error) {
+        // Revert on error
+        await fetchData();
+        console.error("Error setting default payment method:", error);
+        toast({
+          title: "Error",
+          description: "Failed to set default payment method",
+          variant: "destructive",
+        });
+      } finally {
+        setIsProcessing(false);
+      }
+    },
+    [company.id, defaultPaymentMethodId, fetchData, subscriptionDetails, toast]
+  );
+
+  const handleUpdateSubscriptionItems = useCallback(
+    async (items: SubscriptionItem[]) => {
+      if (!subscriptionDetails?.subscription?.id) return;
+
+      try {
+        setIsProcessing(true);
+
+        // Get available plans first
+        const plansResponse = await fetch("/api/stripe/plans");
+        const plansData = await plansResponse.json();
+        const availablePlans = plansData.plans || [];
+
+        // Optimistically update the UI
+        const updatedSubscription = {
+          ...subscriptionDetails.subscription,
+          items: items.map((item) => ({
+            id: Math.random().toString(), // Temporary ID
+            price: availablePlans.find(
+              (plan: { id: string }) => plan.id === item.priceId
+            ),
+            quantity: item.quantity,
+          })),
+        };
+
+        // Update both the subscription and cache
+        const updatedDetails = {
+          ...subscriptionDetails,
+          subscription: updatedSubscription,
         };
 
         setSubscriptionDetails(updatedDetails);
@@ -895,29 +1219,114 @@ export function StripeTabs({ company }: StripeTabsProps) {
           data: updatedDetails,
           timestamp: Date.now(),
         });
+
+        // Call your API to update the subscription
+        await fetch(
+          `/api/stripe/subscriptions/${subscriptionDetails.subscription.id}/update`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ items }),
+          }
+        );
+
+        // Close the dialog before fetching fresh data
+        setIsUpdateSubscriptionOpen(false);
+
+        // Refresh data in the background to ensure consistency
+        fetchData().catch(console.error);
+
+        toast({
+          title: "Success",
+          description: "Subscription updated successfully",
+        });
+      } catch (error) {
+        console.error("Error updating subscription:", error);
+        // Revert optimistic update on error
+        await fetchData();
+        toast({
+          title: "Error",
+          description: "Failed to update subscription",
+          variant: "destructive",
+        });
+      } finally {
+        setIsProcessing(false);
+      }
+    },
+    [company.id, fetchData, subscriptionDetails, toast]
+  );
+
+  const handleCreateSubscription = useCallback(
+    async (items: SubscriptionItem[]) => {
+      if (!company.stripe_customer_id) {
+        toast({
+          title: "Error",
+          description: "Company is not properly configured with Stripe",
+          variant: "destructive",
+        });
+        return;
       }
 
-      // Refresh data in the background to ensure consistency
-      fetchData().catch(console.error);
+      try {
+        setIsProcessing(true);
 
-      toast({
-        title: "Success",
-        description: "Subscription created successfully",
-      });
-    } catch (error: any) {
-      console.error("Error creating subscription:", error);
-      const errorMessage = error?.message || "Failed to create subscription";
-      toast({
-        title: "Error",
-        description: errorMessage,
-        variant: "destructive",
-      });
-    } finally {
-      setIsProcessing(false);
-    }
-  };
+        // Create subscription with multiple items
+        const result = await createSubscription({
+          customerId: company.stripe_customer_id,
+          items: items.map((item) => ({
+            price: item.priceId,
+            quantity: item.quantity,
+          })),
+        });
 
-  const handleCancelSubscription = async () => {
+        // Close the dialog before fetching fresh data
+        setIsCreateSubscriptionOpen(false);
+
+        // Update the local state optimistically
+        if (result?.subscription) {
+          const updatedDetails = {
+            ...subscriptionDetails,
+            subscription: result.subscription,
+          };
+
+          setSubscriptionDetails(updatedDetails);
+          subscriptionDetailsCache.set(company.id, {
+            data: updatedDetails,
+            timestamp: Date.now(),
+          });
+        }
+
+        // Refresh data in the background to ensure consistency
+        fetchData().catch(console.error);
+
+        toast({
+          title: "Success",
+          description: "Subscription created successfully",
+        });
+      } catch (error: any) {
+        console.error("Error creating subscription:", error);
+        const errorMessage = error?.message || "Failed to create subscription";
+        toast({
+          title: "Error",
+          description: errorMessage,
+          variant: "destructive",
+        });
+      } finally {
+        setIsProcessing(false);
+      }
+    },
+    [
+      company.id,
+      company.stripe_customer_id,
+      fetchData,
+      subscriptionDetails,
+      toast,
+    ]
+  );
+
+  const handleCancelSubscription = useCallback(async () => {
     if (!subscriptionDetails?.subscription?.id) return;
 
     try {
@@ -955,9 +1364,9 @@ export function StripeTabs({ company }: StripeTabsProps) {
     } finally {
       setIsProcessing(false);
     }
-  };
+  }, [fetchData, subscriptionDetails, toast]);
 
-  const handlePauseSubscription = async () => {
+  const handlePauseSubscription = useCallback(async () => {
     if (!subscriptionDetails?.subscription?.id) return;
 
     try {
@@ -993,9 +1402,9 @@ export function StripeTabs({ company }: StripeTabsProps) {
     } finally {
       setIsProcessing(false);
     }
-  };
+  }, [fetchData, subscriptionDetails, toast]);
 
-  const handleResumeSubscription = async () => {
+  const handleResumeSubscription = useCallback(async () => {
     if (!subscriptionDetails?.subscription?.id) return;
 
     try {
@@ -1031,9 +1440,9 @@ export function StripeTabs({ company }: StripeTabsProps) {
     } finally {
       setIsProcessing(false);
     }
-  };
+  }, [fetchData, subscriptionDetails, toast]);
 
-  const handleSharePaymentLink = async () => {
+  const handleSharePaymentLink = useCallback(async () => {
     if (!subscriptionDetails?.subscription?.id) return;
 
     try {
@@ -1063,9 +1472,9 @@ export function StripeTabs({ company }: StripeTabsProps) {
     } finally {
       setIsProcessing(false);
     }
-  };
+  }, [subscriptionDetails, toast]);
 
-  const handleCreateOneTimeInvoice = async () => {
+  const handleCreateOneTimeInvoice = useCallback(async () => {
     if (!subscriptionDetails?.subscription?.id) return;
 
     try {
@@ -1081,9 +1490,9 @@ export function StripeTabs({ company }: StripeTabsProps) {
     } finally {
       setIsProcessing(false);
     }
-  };
+  }, [subscriptionDetails]);
 
-  const handleExcludeFromAutoCancellation = async () => {
+  const handleExcludeFromAutoCancellation = useCallback(async () => {
     if (!subscriptionDetails?.subscription?.id) return;
 
     try {
@@ -1111,18 +1520,78 @@ export function StripeTabs({ company }: StripeTabsProps) {
     } finally {
       setIsProcessing(false);
     }
-  };
+  }, [fetchData, subscriptionDetails, toast]);
 
-  const [isUpdateSubscriptionOpen, setIsUpdateSubscriptionOpen] =
-    useState(false);
-  const [isCreateInvoiceOpen, setIsCreateInvoiceOpen] = useState(false);
-
-  const handlePaymentMethodSuccess = async () => {
+  const handlePaymentMethodSuccess = useCallback(async () => {
     setIsPaymentMethodsOpen(false);
     await fetchData();
-  };
+  }, [fetchData]);
 
-  const renderSubscriptionActions = () => {
+  const handleDownloadAllInvoices = useCallback(async () => {
+    try {
+      setIsProcessing(true);
+
+      // Create a form to submit as POST
+      const form = document.createElement("form");
+      form.method = "POST";
+      form.action = "/api/stripe/download-all-invoices";
+      form.target = "_blank";
+
+      // Add company ID as hidden input
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = "companyId";
+      input.value = company.id.toString();
+      form.appendChild(input);
+
+      // Add form to body, submit it, and remove it
+      document.body.appendChild(form);
+      form.submit();
+      document.body.removeChild(form);
+
+      toast({
+        title: "Download Started",
+        description: "Your invoices are being prepared for download.",
+      });
+    } catch (error) {
+      console.error("Error downloading invoices:", error);
+      toast({
+        title: "Error",
+        description: "Failed to download invoices",
+        variant: "destructive",
+      });
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [company.id, toast]);
+
+  const handleClearCache = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      const result = await clearCompanyCache(company.id);
+      if (result.success) {
+        toast({
+          title: "Success",
+          description: "Cache cleared successfully",
+        });
+        // Reload the data
+        await fetchData();
+      } else {
+        throw new Error(result.message);
+      }
+    } catch (error) {
+      console.error("Error clearing cache:", error);
+      toast({
+        title: "Error",
+        description: "Failed to clear cache",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [company.id, fetchData, toast]);
+
+  const renderSubscriptionActions = useCallback(() => {
     const subscription = subscriptionDetails?.subscription;
     const isCanceled = subscription?.status === "canceled";
     const hasNoSubscription = !subscription;
@@ -1130,34 +1599,35 @@ export function StripeTabs({ company }: StripeTabsProps) {
     if (hasNoSubscription || isCanceled) {
       return (
         <div className="space-y-4">
-          <h3 className="text-lg font-medium">
-            {isCanceled ? (
-              <div className="flex items-center justify-between">
-                <span>Canceled Subscription</span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setIsCreateSubscriptionOpen(true)}
-                  disabled={isProcessing}
-                >
-                  <Plus className="mr-2 h-4 w-4" />
-                  Create New Subscription
-                </Button>
-              </div>
-            ) : (
-              <>
-                <span>No Active Subscription</span>
-                <Button
-                  onClick={() => setIsCreateSubscriptionOpen(true)}
-                  disabled={isProcessing}
-                  className="mt-4"
-                >
-                  <Plus className="mr-2 h-4 w-4" />
-                  Create Subscription
-                </Button>
-              </>
-            )}
-          </h3>
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-medium flex items-center gap-2">
+              {isCanceled ? (
+                <>
+                  <Badge variant="destructive" className="mr-2">
+                    Canceled
+                  </Badge>
+                  <span>Subscription</span>
+                </>
+              ) : (
+                <>
+                  <Badge variant="outline" className="mr-2">
+                    Inactive
+                  </Badge>
+                  <span>No Active Subscription</span>
+                </>
+              )}
+            </h3>
+            <Button
+              variant={isCanceled ? "outline" : "default"}
+              size="sm"
+              onClick={() => setIsCreateSubscriptionOpen(true)}
+              disabled={isProcessing}
+              className="flex items-center gap-2"
+            >
+              <Plus className="h-4 w-4" />
+              {isCanceled ? "Create New Subscription" : "Create Subscription"}
+            </Button>
+          </div>
           <CreateSubscriptionDialog
             onSubscribe={handleCreateSubscription}
             isOpen={isCreateSubscriptionOpen}
@@ -1165,15 +1635,25 @@ export function StripeTabs({ company }: StripeTabsProps) {
             isProcessing={isProcessing}
           />
           {isCanceled && (
-            <div className="text-sm text-muted-foreground mt-2">
-              <div>
-                Canceled on{" "}
-                {new Date(subscription.canceled_at * 1000).toLocaleDateString()}
+            <div className="text-sm text-muted-foreground mt-2 p-4 bg-muted/20 rounded-lg border border-dashed">
+              <div className="flex items-center gap-2">
+                <CalendarClock className="h-4 w-4 text-muted-foreground" />
+                <span>
+                  Canceled on{" "}
+                  {new Date(
+                    subscription.canceled_at * 1000
+                  ).toLocaleDateString()}
+                </span>
               </div>
               {subscription.cancel_at && (
-                <div>
-                  Access until{" "}
-                  {new Date(subscription.cancel_at * 1000).toLocaleDateString()}
+                <div className="flex items-center gap-2 mt-1">
+                  <CalendarClock className="h-4 w-4 text-muted-foreground" />
+                  <span>
+                    Access until{" "}
+                    {new Date(
+                      subscription.cancel_at * 1000
+                    ).toLocaleDateString()}
+                  </span>
                 </div>
               )}
             </div>
@@ -1192,33 +1672,51 @@ export function StripeTabs({ company }: StripeTabsProps) {
     return (
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <div className="space-y-1">
-            <h3 className="text-lg font-medium">
-              Subscription Status: {subscription.status}
-            </h3>
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <h3 className="text-lg font-medium">Subscription</h3>
+              <Badge
+                variant={
+                  subscription.status === "active"
+                    ? "success"
+                    : subscription.status === "paused"
+                      ? "outline"
+                      : "secondary"
+                }
+                className="capitalize"
+              >
+                {subscription.status}
+              </Badge>
+            </div>
             <div className="text-sm text-muted-foreground">
-              <div>
-                Started{" "}
-                {new Date(subscription.created * 1000).toLocaleDateString()}
+              <div className="flex items-center gap-2">
+                <CalendarClock className="h-4 w-4 text-muted-foreground" />
+                <span>
+                  Started{" "}
+                  {new Date(subscription.created * 1000).toLocaleDateString()}
+                </span>
               </div>
-              <div>
-                Next invoice $
-                {(
-                  (subscriptionDetails?.upcoming_invoice?.amount_due ??
-                    subscriptionDetails?.subscription?.items?.reduce(
-                      (sum: number, item: any) =>
-                        sum +
-                        (item.price?.unit_amount ?? 0) * (item.quantity ?? 1),
-                      0
-                    )) / 100
-                ).toFixed(2)}{" "}
-                on{" "}
-                {new Date(
-                  subscription.current_period_end * 1000
-                ).toLocaleDateString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                })}
+              <div className="flex items-center gap-2 mt-1">
+                <Receipt className="h-4 w-4 text-muted-foreground" />
+                <span>
+                  Next invoice $
+                  {(
+                    (subscriptionDetails?.upcoming_invoice?.amount_due ??
+                      subscriptionDetails?.subscription?.items?.reduce(
+                        (sum: number, item: any) =>
+                          sum +
+                          (item.price?.unit_amount ?? 0) * (item.quantity ?? 1),
+                        0
+                      )) / 100
+                  ).toFixed(2)}{" "}
+                  on{" "}
+                  {new Date(
+                    subscription.current_period_end * 1000
+                  ).toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                  })}
+                </span>
               </div>
             </div>
           </div>
@@ -1229,11 +1727,12 @@ export function StripeTabs({ company }: StripeTabsProps) {
                   variant="outline"
                   onClick={handlePauseSubscription}
                   disabled={isProcessing}
+                  className="flex items-center gap-2"
                 >
                   {isProcessing ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
-                    <Repeat className="mr-2 h-4 w-4" />
+                    <Repeat className="h-4 w-4" />
                   )}
                   Pause Collection
                 </Button>
@@ -1293,11 +1792,12 @@ export function StripeTabs({ company }: StripeTabsProps) {
               <Button
                 onClick={handleResumeSubscription}
                 disabled={isProcessing}
+                className="flex items-center gap-2"
               >
                 {isProcessing ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                  <ChevronRight className="mr-2 h-4 w-4" />
+                  <ChevronRight className="h-4 w-4" />
                 )}
                 Resume Subscription
               </Button>
@@ -1306,346 +1806,588 @@ export function StripeTabs({ company }: StripeTabsProps) {
         </div>
       </div>
     );
-  };
+  }, [
+    subscriptionDetails,
+    isProcessing,
+    isCreateSubscriptionOpen,
+    handleCreateSubscription,
+    handlePauseSubscription,
+    handleSharePaymentLink,
+    handleCreateOneTimeInvoice,
+    handleExcludeFromAutoCancellation,
+    handleCancelSubscription,
+    handleResumeSubscription,
+    setIsCreateSubscriptionOpen,
+    setIsUpdateSubscriptionOpen,
+  ]);
+
+  // Prepare loading and empty state components outside of the render function
+  const loadingComponent = (
+    <Card className="w-full p-6 border rounded-xl shadow-sm transition-all duration-300">
+      <div className="flex flex-col items-center justify-center space-y-6 p-10 min-h-[400px]">
+        <div className="flex items-center justify-center w-20 h-20 rounded-full bg-primary/10">
+          <Loader2 className="h-10 w-10 text-primary animate-spin" />
+        </div>
+        <div className="text-center space-y-3">
+          <h3 className="text-xl font-medium">Loading Billing Information</h3>
+          <p className="text-sm text-muted-foreground max-w-md">
+            Please wait while we retrieve your billing data. This may take a few
+            moments...
+          </p>
+        </div>
+        <div className="w-full max-w-md h-3 bg-muted rounded-full overflow-hidden">
+          <div
+            className="h-full bg-primary animate-pulse rounded-full"
+            style={{ width: "75%" }}
+          ></div>
+        </div>
+      </div>
+    </Card>
+  );
+
+  const noDataComponent = (
+    <Card className="w-full p-6 border rounded-xl shadow-sm transition-all duration-300">
+      <div className="flex flex-col items-center justify-center space-y-4 p-10 min-h-[400px]">
+        <div className="w-20 h-20 rounded-full bg-muted/50 flex items-center justify-center">
+          <CreditCard className="h-10 w-10 text-muted-foreground" />
+        </div>
+        <div className="text-center space-y-2">
+          <h3 className="text-xl font-medium">No Billing Data Available</h3>
+          <p className="text-sm text-muted-foreground max-w-md">
+            There was an issue loading your billing information. Please try
+            refreshing the page.
+          </p>
+        </div>
+        <Button onClick={() => window.location.reload()} className="mt-4">
+          Refresh Page
+        </Button>
+      </div>
+    </Card>
+  );
+
+  // Render based on loading and data state
+  if (isLoading) {
+    // Show the appropriate skeleton based on the active tab
+    return (
+      <>
+        {activeTab === "subscription" && <SubscriptionSkeleton />}
+        {activeTab === "payment-methods" && <PaymentMethodsSkeleton />}
+        {activeTab === "invoices" && <InvoicesSkeleton />}
+      </>
+    );
+  }
+
+  if (!subscriptionDetails && !isLoading) {
+    return noDataComponent;
+  }
 
   return (
     <>
-      <Tabs
-        defaultValue={activeTab}
-        className="w-full"
-        onValueChange={handleTabChange}
-      >
-        <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="payments" className="flex items-center gap-2">
-            <CreditCard className="h-4 w-4" />
-            Payments
-          </TabsTrigger>
-          <TabsTrigger
-            value="subscriptions"
-            className="flex items-center gap-2"
-          >
-            <Repeat className="h-4 w-4" />
-            Subscriptions
-          </TabsTrigger>
-          <TabsTrigger value="invoices" className="flex items-center gap-2">
-            <Receipt className="h-4 w-4" />
-            Invoices
-          </TabsTrigger>
-        </TabsList>
+      {!dataFetchedRef.current.any && (
+        <div className="flex items-center justify-center py-4 px-6 bg-muted/30 rounded-md mb-6 border border-muted">
+          <Loader2 className="h-5 w-5 animate-spin text-primary mr-3" />
+          <span className="text-sm font-medium">
+            Loading billing data... Please wait
+          </span>
+        </div>
+      )}
 
-        <TabsContent value="payments">
-          <Card className="p-4">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-semibold">Payment Methods</h3>
-              <Button
-                onClick={() => setIsPaymentMethodsOpen(true)}
-                variant="outline"
-              >
-                Add Payment Method
-              </Button>
-            </div>
-            <ScrollArea className="h-[400px]">
-              {loadingTabs.payments ? (
-                <div className="flex justify-center items-center h-[300px]">
-                  <Loader2 className="h-8 w-8 animate-spin" />
-                </div>
-              ) : paymentMethods.length > 0 ? (
-                <div className="space-y-2">
-                  {paymentMethods.map((method) => (
-                    <div
-                      key={method.id}
-                      className="flex items-center justify-between px-4 py-3 border rounded-lg hover:bg-muted/50 transition-colors group"
-                    >
-                      <div className="flex items-center gap-4 flex-1">
-                        <div className="flex items-center gap-3">
-                          <div className="w-12 h-8 flex items-center">
-                            {method.card.brand === "visa" && (
-                              <div className="text-[#1434CB] font-bold text-sm uppercase">
-                                Visa
-                              </div>
-                            )}
-                            {method.card.brand === "mastercard" && (
-                              <div className="text-[#1434CB] font-bold text-sm uppercase">
-                                Mastercard
-                              </div>
-                            )}
-                            {method.card.brand === "amex" && (
-                              <div className="text-[#1434CB] font-bold text-sm uppercase">
-                                Amex
-                              </div>
-                            )}
-                          </div>
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium">
-                                {method.card.brand.charAt(0).toUpperCase() +
-                                  method.card.brand.slice(1)}{" "}
-                                •••• {method.card.last4}
-                              </span>
-                              {method.id === defaultPaymentMethodId && (
-                                <Badge
-                                  variant="outline"
-                                  className="text-xs bg-blue-50 text-blue-700 border-blue-200"
-                                >
-                                  Default
-                                </Badge>
-                              )}
-                            </div>
-                            <p className="text-sm text-muted-foreground">
-                              Expires{" "}
-                              {method.card.exp_month
-                                .toString()
-                                .padStart(2, "0")}
-                              /{method.card.exp_year.toString().slice(-2)}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        {method.id !== defaultPaymentMethodId && (
-                          <>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleSetDefault(method.id)}
-                              disabled={isProcessing}
-                              className="h-8 px-2 text-muted-foreground hover:text-foreground"
-                            >
-                              Make default
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() =>
-                                handleRemovePaymentMethod(method.id)
-                              }
-                              disabled={isProcessing}
-                              className="h-8 px-2 text-destructive hover:text-destructive"
-                            >
-                              Remove
-                            </Button>
-                          </>
-                        )}
-                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-6">
-                  <CreditCard className="mx-auto h-12 w-12 text-gray-400" />
-                  <h3 className="mt-2 text-sm font-semibold">
-                    No payment methods
-                  </h3>
-                  <p className="mt-1 text-sm text-gray-500">
-                    Add a payment method to process payments and subscriptions.
+      <Tabs
+        defaultValue="subscription"
+        value={activeTab}
+        onValueChange={handleTabChange}
+        className="w-full"
+      >
+        <div className="flex justify-between items-center">
+          <TabsList className="bg-background border rounded-lg p-0 shadow-sm">
+            <TabsTrigger
+              value="subscription"
+              className="rounded-md data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-sm px-5 py-2.5 text-sm font-medium transition-all"
+            >
+              <CreditCard className="h-4 w-4 mr-2" />
+              Subscription
+            </TabsTrigger>
+            <TabsTrigger
+              value="payment-methods"
+              className="rounded-md data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-sm px-5 py-2.5 text-sm font-medium transition-all"
+            >
+              <CreditCard className="h-4 w-4 mr-2" />
+              Payment Methods
+            </TabsTrigger>
+            <TabsTrigger
+              value="invoices"
+              className="rounded-md data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-sm px-5 py-2.5 text-sm font-medium transition-all"
+            >
+              <Receipt className="h-4 w-4 mr-2" />
+              Invoices
+            </TabsTrigger>
+          </TabsList>
+        </div>
+
+        <TabsContent value="payment-methods">
+          {isLoading || loadingTabs["payment-methods"] ? (
+            <PaymentMethodsSkeleton />
+          ) : (
+            <Card
+              className={cn("p-6 border rounded-xl shadow-sm transition-all", {
+                "opacity-0 scale-98 transition-all duration-300":
+                  !contentVisible,
+                "opacity-100 scale-100 transition-all duration-300":
+                  contentVisible,
+              })}
+            >
+              <div className="flex justify-between items-center mb-8">
+                <div>
+                  <h3 className="text-xl font-semibold">Payment Methods</h3>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Manage your payment methods for billing
                   </p>
                 </div>
-              )}
-            </ScrollArea>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="subscriptions">
-          <Card className="relative h-[calc(100vh-12rem)] flex flex-col overflow-hidden border-none">
-            <div className="flex items-center justify-between px-8 py-6 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-10">
-              <div className="space-y-1.5">
-                <h3 className="text-2xl font-semibold tracking-tight">
-                  Active Subscriptions
-                </h3>
-                <p className="text-sm text-muted-foreground">
-                  Manage your subscription plans and billing
-                </p>
+                <Button
+                  onClick={() => setIsPaymentMethodsOpen(true)}
+                  variant="outline"
+                  className="flex items-center gap-2"
+                >
+                  <Plus className="h-4 w-4" />
+                  Add Payment Method
+                </Button>
               </div>
-            </div>
-            <ScrollArea className="flex-1">
-              <div className="px-8 py-6 space-y-8">
-                {loadingTabs.subscriptions ? (
-                  <div className="flex flex-col items-center justify-center h-[300px] gap-4">
-                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">
-                      Loading subscription details...
-                    </p>
+              <ScrollArea className="h-[400px] pr-4">
+                {loadingTabs["payment-methods"] ? (
+                  <div className="flex justify-center items-center h-[300px]">
+                    <Loader2 className="h-8 w-8 animate-spin" />
                   </div>
-                ) : (
-                  <>
-                    {renderSubscriptionActions()}
-                    {subscriptionDetails?.subscription && (
-                      <>
-                        <div className="rounded-xl border bg-card shadow-sm">
-                          <Table>
-                            <TableHeader>
-                              <TableRow className="hover:bg-transparent">
-                                <TableHead className="w-[40%] font-semibold">
-                                  Plan
-                                </TableHead>
-                                <TableHead className="font-semibold">
-                                  Status
-                                </TableHead>
-                                <TableHead className="font-semibold">
-                                  Amount
-                                </TableHead>
-                                <TableHead className="font-semibold text-right">
-                                  Next Bill
-                                </TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {subscriptionDetails?.subscription?.items?.map(
-                                (item: any) => (
-                                  <TableRow
-                                    key={item.id}
-                                    className="hover:bg-muted/50"
-                                  >
-                                    <TableCell className="font-medium">
-                                      {item.price.nickname ||
-                                        item.price.product.name}
-                                    </TableCell>
-                                    <TableCell>
-                                      <Badge
-                                        variant="outline"
-                                        className="capitalize"
-                                      >
-                                        {
-                                          subscriptionDetails.subscription
-                                            .status
-                                        }
-                                      </Badge>
-                                    </TableCell>
-                                    <TableCell>
-                                      $
-                                      {(
-                                        (item.price.unit_amount || 0) / 100
-                                      ).toFixed(2)}
-                                    </TableCell>
-                                    <TableCell className="text-right">
-                                      {new Date(
-                                        subscriptionDetails.subscription
-                                          .current_period_end * 1000
-                                      ).toLocaleDateString()}
-                                    </TableCell>
-                                  </TableRow>
-                                )
+                ) : paymentMethods.length > 0 ? (
+                  <div className="space-y-3">
+                    {paymentMethods.map((method) => (
+                      <div
+                        key={method.id}
+                        className="flex items-center justify-between px-4 py-4 border rounded-lg hover:bg-muted/50 transition-colors group"
+                      >
+                        <div className="flex items-center gap-4 flex-1">
+                          <div className="flex items-center gap-3">
+                            <div className="w-12 h-8 flex items-center">
+                              {method.card.brand === "visa" && (
+                                <div className="text-[#1434CB] font-bold text-sm uppercase">
+                                  Visa
+                                </div>
                               )}
-                            </TableBody>
-                          </Table>
-                        </div>
-                        <div className="rounded-xl border bg-card shadow-sm p-6">
-                          <div className="space-y-4">
-                            <div className="flex justify-between text-sm">
-                              <span className="text-muted-foreground">
-                                Subtotal
-                              </span>
-                              <span className="font-medium">
-                                $
-                                {(
-                                  subscriptionDetails.subscription.items.reduce(
-                                    (sum: number, item: any) =>
-                                      sum +
-                                      (item.price.unit_amount * item.quantity ||
-                                        0),
-                                    0
-                                  ) / 100
-                                ).toFixed(2)}
-                              </span>
+                              {method.card.brand === "mastercard" && (
+                                <div className="text-[#1434CB] font-bold text-sm uppercase">
+                                  Mastercard
+                                </div>
+                              )}
+                              {method.card.brand === "amex" && (
+                                <div className="text-[#1434CB] font-bold text-sm uppercase">
+                                  Amex
+                                </div>
+                              )}
                             </div>
-                            <div className="flex justify-between text-sm">
-                              <span className="text-muted-foreground">Tax</span>
-                              <span className="font-medium">$0.00</span>
-                            </div>
-                            <div className="pt-4 border-t">
-                              <div className="flex justify-between">
-                                <span className="text-base font-semibold">
-                                  Total amount due
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium">
+                                  {method.card.brand.charAt(0).toUpperCase() +
+                                    method.card.brand.slice(1)}{" "}
+                                  •••• {method.card.last4}
                                 </span>
-                                <span className="text-base font-semibold">
-                                  $
-                                  {(
-                                    subscriptionDetails.subscription.items.reduce(
-                                      (sum: number, item: any) =>
-                                        sum +
-                                        (item.price.unit_amount *
-                                          item.quantity || 0),
-                                      0
-                                    ) / 100
-                                  ).toFixed(2)}
-                                </span>
+                                {method.id === defaultPaymentMethodId && (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-xs bg-blue-50 text-blue-700 border-blue-200"
+                                  >
+                                    Default
+                                  </Badge>
+                                )}
                               </div>
+                              <p className="text-sm text-muted-foreground">
+                                Expires{" "}
+                                {method.card.exp_month
+                                  .toString()
+                                  .padStart(2, "0")}
+                                /{method.card.exp_year.toString().slice(-2)}
+                              </p>
                             </div>
                           </div>
                         </div>
-                      </>
-                    )}
-                  </>
+                        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          {method.id !== defaultPaymentMethodId && (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleSetDefault(method.id)}
+                                disabled={isProcessing}
+                                className="h-8 px-2 text-muted-foreground hover:text-foreground"
+                              >
+                                Make default
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() =>
+                                  handleRemovePaymentMethod(method.id)
+                                }
+                                disabled={isProcessing}
+                                className="h-8 px-2 text-destructive hover:text-destructive"
+                              >
+                                Remove
+                              </Button>
+                            </>
+                          )}
+                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-12 px-4 bg-muted/10 rounded-lg border border-dashed">
+                    <div className="w-16 h-16 rounded-full bg-muted/50 flex items-center justify-center mb-4">
+                      <CreditCard className="h-8 w-8 text-muted-foreground" />
+                    </div>
+                    <h3 className="text-lg font-medium">No Payment Methods</h3>
+                    <p className="mt-2 text-sm text-muted-foreground text-center max-w-md">
+                      Add a payment method to process payments and manage your
+                      subscriptions.
+                    </p>
+                    <Button
+                      onClick={() => setIsPaymentMethodsOpen(true)}
+                      variant="outline"
+                      className="mt-6"
+                      size="lg"
+                    >
+                      <Plus className="mr-2 h-4 w-4" />
+                      Add Payment Method
+                    </Button>
+                  </div>
                 )}
+              </ScrollArea>
+            </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="subscription">
+          {isLoading || loadingTabs.subscription ? (
+            <SubscriptionSkeleton />
+          ) : subscriptionDetails?.subscription ? (
+            <Card className="p-6 border rounded-xl shadow-sm transition-all duration-300">
+              <div className="mb-6">{renderSubscriptionActions()}</div>
+              {subscriptionDetails?.subscription && (
+                <div className="space-y-6">
+                  <div className="rounded-xl border bg-card shadow-sm mb-6">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="hover:bg-transparent">
+                          <TableHead className="w-[40%] font-semibold">
+                            Plan
+                          </TableHead>
+                          <TableHead className="font-semibold">
+                            Status
+                          </TableHead>
+                          <TableHead className="font-semibold">
+                            Amount
+                          </TableHead>
+                          <TableHead className="font-semibold text-right">
+                            Next Bill
+                          </TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {subscriptionDetails?.subscription?.items?.map(
+                          (item: any) => (
+                            <TableRow
+                              key={item.id}
+                              className="hover:bg-muted/50"
+                            >
+                              <TableCell className="font-medium">
+                                {item.price.nickname || item.price.product.name}
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant="outline" className="capitalize">
+                                  {subscriptionDetails.subscription.status}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>
+                                $
+                                {((item.price.unit_amount || 0) / 100).toFixed(
+                                  2
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {new Date(
+                                  subscriptionDetails.subscription
+                                    .current_period_end * 1000
+                                ).toLocaleDateString()}
+                              </TableCell>
+                            </TableRow>
+                          )
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  <div className="rounded-xl border bg-card shadow-sm p-6">
+                    <div className="space-y-4">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Subtotal</span>
+                        <span className="font-medium">
+                          $
+                          {(
+                            subscriptionDetails.subscription.items.reduce(
+                              (sum: number, item: any) =>
+                                sum +
+                                (item.price.unit_amount * item.quantity || 0),
+                              0
+                            ) / 100
+                          ).toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Tax</span>
+                        <span className="font-medium">$0.00</span>
+                      </div>
+                      <div className="pt-4 border-t">
+                        <div className="flex justify-between">
+                          <span className="text-base font-semibold">
+                            Total amount due
+                          </span>
+                          <span className="text-base font-semibold">
+                            $
+                            {(
+                              subscriptionDetails.subscription.items.reduce(
+                                (sum: number, item: any) =>
+                                  sum +
+                                  (item.price.unit_amount * item.quantity || 0),
+                                0
+                              ) / 100
+                            ).toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </Card>
+          ) : (
+            <Card className="p-6 border rounded-xl shadow-sm">
+              <div className="flex flex-col items-center justify-center p-10 space-y-4">
+                <div className="w-20 h-20 rounded-full bg-muted/50 flex items-center justify-center">
+                  <CreditCard className="h-10 w-10 text-muted-foreground" />
+                </div>
+                <div className="text-center space-y-2">
+                  <h3 className="text-xl font-medium">
+                    No Active Subscription
+                  </h3>
+                  <p className="text-sm text-muted-foreground max-w-md">
+                    Create a subscription to start managing your billing and
+                    access premium features.
+                  </p>
+                </div>
+                <Button
+                  onClick={() => setIsCreateSubscriptionOpen(true)}
+                  className="mt-4"
+                  size="lg"
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  Create Subscription
+                </Button>
               </div>
-            </ScrollArea>
-          </Card>
+            </Card>
+          )}
         </TabsContent>
 
         <TabsContent value="invoices">
-          <Card className="p-4">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-semibold">Recent Invoices</h3>
-              <Button
-                onClick={() => fetchData("invoices")}
-                variant="outline"
-                disabled={loadingTabs.invoices}
-              >
-                {loadingTabs.invoices ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Receipt className="mr-2 h-4 w-4" />
-                )}
-                Load Invoices
-              </Button>
-            </div>
-            <ScrollArea className="h-[400px]">
-              {loadingTabs.invoices ? (
-                <div className="flex justify-center items-center h-[300px]">
-                  <Loader2 className="h-8 w-8 animate-spin" />
-                </div>
-              ) : subscriptionDetails?.invoices?.length > 0 ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Invoice Number</TableHead>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Amount</TableHead>
-                      <TableHead>Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {subscriptionDetails?.invoices?.map((invoice: any) => (
-                      <TableRow key={invoice.id}>
-                        <TableCell>{invoice.number}</TableCell>
-                        <TableCell>
-                          {new Date(
-                            invoice.created * 1000
-                          ).toLocaleDateString()}
-                        </TableCell>
-                        <TableCell>
-                          ${((invoice.amount_due || 0) / 100).toFixed(2)}
-                        </TableCell>
-                        <TableCell>{invoice.status}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              ) : (
-                <div className="text-center py-6">
-                  <Receipt className="mx-auto h-12 w-12 text-gray-400" />
-                  <h3 className="mt-2 text-sm font-semibold">
-                    No invoices found
-                  </h3>
-                  <p className="mt-1 text-sm text-gray-500">
-                    Click the Load Invoices button to fetch your invoice
-                    history.
+          {isLoading || loadingTabs.invoices ? (
+            <InvoicesSkeleton />
+          ) : (
+            <Card
+              className={cn("p-6 border rounded-xl shadow-sm transition-all", {
+                "opacity-0 scale-98 transition-all duration-300":
+                  !contentVisible,
+                "opacity-100 scale-100 transition-all duration-300":
+                  contentVisible,
+              })}
+            >
+              <div className="flex justify-between items-center mb-8">
+                <div>
+                  <h3 className="text-xl font-semibold">Invoices</h3>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    View and download invoice history
                   </p>
                 </div>
+                <div className="flex gap-2">
+                  {subscriptionDetails?.invoices?.length > 0 && (
+                    <Button
+                      variant="outline"
+                      onClick={handleDownloadAllInvoices}
+                      disabled={isProcessing}
+                      className="h-9 flex items-center gap-2"
+                    >
+                      {isProcessing ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <FileText className="h-4 w-4" />
+                      )}
+                      Download All
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              {subscriptionDetails?.invoices?.length > 0 && (
+                <div className="grid grid-cols-3 gap-4 mb-6">
+                  <Card className="p-4 border border-muted bg-muted/5 hover:bg-muted/10 transition-colors">
+                    <div className="text-sm font-medium text-muted-foreground">
+                      Total Paid
+                    </div>
+                    <div className="text-2xl font-bold mt-1">
+                      {formatCurrency(
+                        subscriptionDetails.invoices
+                          .filter((inv: Invoice) => inv.status === "paid")
+                          .reduce(
+                            (sum: number, inv: Invoice) => sum + inv.amount_due,
+                            0
+                          )
+                      )}
+                    </div>
+                  </Card>
+                  <Card className="p-4 border border-muted bg-muted/5 hover:bg-muted/10 transition-colors">
+                    <div className="text-sm font-medium text-muted-foreground">
+                      Outstanding
+                    </div>
+                    <div className="text-2xl font-bold mt-1">
+                      {formatCurrency(
+                        subscriptionDetails.invoices
+                          .filter((inv: Invoice) => inv.status === "open")
+                          .reduce(
+                            (sum: number, inv: Invoice) => sum + inv.amount_due,
+                            0
+                          )
+                      )}
+                    </div>
+                  </Card>
+                  <Card className="p-4 border border-muted bg-muted/5 hover:bg-muted/10 transition-colors">
+                    <div className="text-sm font-medium text-muted-foreground">
+                      Invoice Count
+                    </div>
+                    <div className="text-2xl font-bold mt-1">
+                      {subscriptionDetails.invoices.length}
+                    </div>
+                  </Card>
+                </div>
               )}
-            </ScrollArea>
-          </Card>
+
+              <ScrollArea className="h-[400px] border rounded-md">
+                {loadingTabs.invoices ? (
+                  <div className="flex justify-center items-center h-[300px]">
+                    <Loader2 className="h-8 w-8 animate-spin" />
+                  </div>
+                ) : subscriptionDetails?.invoices?.length > 0 ? (
+                  <Table>
+                    <TableHeader className="bg-muted/30 sticky top-0">
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead className="font-medium">
+                          Invoice Number
+                        </TableHead>
+                        <TableHead className="font-medium">Date</TableHead>
+                        <TableHead className="font-medium">Amount</TableHead>
+                        <TableHead className="font-medium">Status</TableHead>
+                        <TableHead className="font-medium text-right">
+                          Actions
+                        </TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {subscriptionDetails?.invoices?.map(
+                        (invoice: Invoice) => (
+                          <TableRow
+                            key={invoice.id}
+                            className="hover:bg-muted/30 transition-colors"
+                          >
+                            <TableCell className="font-medium">
+                              {invoice.number || "Draft"}
+                            </TableCell>
+                            <TableCell>
+                              {new Date(
+                                invoice.created * 1000
+                              ).toLocaleDateString(undefined, {
+                                year: "numeric",
+                                month: "short",
+                                day: "numeric",
+                              })}
+                            </TableCell>
+                            <TableCell>
+                              {formatCurrency(invoice.amount_due)}
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                variant={
+                                  invoice.status === "paid"
+                                    ? "success"
+                                    : invoice.status === "open"
+                                      ? "outline"
+                                      : invoice.status === "draft"
+                                        ? "secondary"
+                                        : "destructive"
+                                }
+                                className="capitalize"
+                              >
+                                {invoice.status || "unknown"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex gap-2 justify-end">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() =>
+                                    window.open(
+                                      `/api/stripe/invoice-pdf/${invoice.id}`,
+                                      "_blank"
+                                    )
+                                  }
+                                  className="h-8 px-2 text-xs"
+                                >
+                                  <FileText className="mr-1 h-3 w-3" />
+                                  Download
+                                </Button>
+                                {invoice.hosted_invoice_url && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() =>
+                                      window.open(
+                                        invoice.hosted_invoice_url as string,
+                                        "_blank"
+                                      )
+                                    }
+                                    className="h-8 px-2 text-xs"
+                                  >
+                                    <Eye className="mr-1 h-3 w-3" />
+                                    View
+                                  </Button>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )
+                      )}
+                    </TableBody>
+                  </Table>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-12 px-4 bg-muted/10 rounded-lg border border-dashed">
+                    <div className="w-16 h-16 rounded-full bg-muted/50 flex items-center justify-center mb-4">
+                      <Receipt className="h-8 w-8 text-muted-foreground" />
+                    </div>
+                    <h3 className="text-lg font-medium">No Invoices Found</h3>
+                    <p className="mt-2 text-sm text-muted-foreground text-center max-w-md">
+                      No invoice history is available for this company yet.
+                      Invoices will appear here once they are generated.
+                    </p>
+                  </div>
+                )}
+              </ScrollArea>
+            </Card>
+          )}
         </TabsContent>
       </Tabs>
 

@@ -176,11 +176,21 @@ export function DataTable<TData, TValue>({
                   key={row.id}
                   data-state={row.getIsSelected() && "selected"}
                   className={cn(
-                    "cursor-pointer hover:bg-muted/50",
-                    loadingRows[row.index] && "opacity-50 pointer-events-none"
+                    "cursor-pointer hover:bg-muted/50 relative",
+                    loadingRows[row.index] && "bg-muted/30"
                   )}
                   onClick={() => meta?.onRowClick?.(row.original as Company)}
                 >
+                  {loadingRows[row.index] && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-background/50 backdrop-blur-[1px] z-10">
+                      <div className="flex items-center space-x-2 bg-primary/10 px-3 py-1.5 rounded-full">
+                        <Skeleton className="h-4 w-4 rounded-full animate-pulse bg-primary/30" />
+                        <span className="text-xs font-medium">
+                          Loading billing data...
+                        </span>
+                      </div>
+                    </div>
+                  )}
                   {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id} className="px-6 py-3">
                       {flexRender(

@@ -1,6 +1,6 @@
 "use client";
 
-import { Role } from "@/utils/protected";
+import type { Role } from "@/types/role";
 import {
   createContext,
   useContext,

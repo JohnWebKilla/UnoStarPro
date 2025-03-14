@@ -2,9 +2,11 @@
 
 import { encodedRedirect } from "@/utils/utils";
 import { createClient } from "@/utils/supabase/server";
+import { cookies } from "next/headers";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { getDashboardForRole, type Role } from "@/utils/protected";
+import { getDashboardForRole } from "@/utils/protected";
+import type { Role } from "@/types/role";
 
 export async function signUpAction(formData: FormData) {
   const supabase = await createClient();

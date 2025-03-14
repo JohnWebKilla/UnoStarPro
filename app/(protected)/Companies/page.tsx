@@ -5,7 +5,7 @@ import { DataTable } from "./data-table";
 import { columns } from "./columns";
 import { Company } from "./types";
 import { Button } from "@/components/ui/button";
-import { PlusCircle, RefreshCw } from "lucide-react";
+import { PlusCircle, RefreshCw, Trash2, Loader2 } from "lucide-react";
 import { CompanyDialog } from "./company-dialog";
 import { StripeDialog } from "./stripe-dialog";
 import { CompanySideDialog } from "./company-side-dialog";
@@ -22,6 +22,9 @@ import { RealtimeChannel } from "@supabase/supabase-js";
 import { setupCompaniesSubscription } from "./realtime";
 import { TableSkeleton } from "./table-skeleton";
 import { cn } from "@/lib/utils";
+import { SummaryCards } from "./summary-cards";
+import { getStripeSubscriptionDetails } from "./stripe-actions";
+import { subscriptionDetailsCache, CACHE_TTL } from "./cache";
 
 export default function CompaniesPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -216,6 +219,35 @@ export default function CompaniesPage() {
     }
   };
 
+  const handleClearCompanyCache = async () => {
+    try {
+      setIsSyncing(true);
+      const response = await fetch("/api/cache/clear", {
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to clear cache");
+      }
+
+      await fetchCompanies();
+      toast({
+        title: "Success",
+        description: "Cache cleared successfully",
+      });
+    } catch (error) {
+      console.error("Error clearing cache:", error);
+      toast({
+        title: "Error",
+        description:
+          error instanceof Error ? error.message : "Failed to clear cache",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const handleSyncStripe = async (company: Company) => {
     try {
       setLoadingRows((prev) => ({ ...prev, [company.id]: true }));
@@ -296,8 +328,41 @@ export default function CompaniesPage() {
     }
   };
 
-  const handleRowClick = (company: Company) => {
+  const handleRowClick = async (company: Company) => {
     setSelectedCompany(company);
+
+    // Start loading Stripe data in the background if the company has a Stripe customer ID
+    if (company.stripe_customer_id) {
+      try {
+        // Set loading state in the row
+        setLoadingRows((prev) => ({ ...prev, [company.id]: true }));
+
+        // Start loading the data immediately
+        const data = await getStripeSubscriptionDetails(company.id);
+
+        // Store the data in a cache that can be accessed by the dialog
+        subscriptionDetailsCache.set(company.id, {
+          data: data,
+          timestamp: Date.now(),
+        });
+
+        // Keep the loading state active for a much longer period to ensure smooth transition
+        // This forces the skeleton UI to be visible for a guaranteed amount of time
+        setTimeout(() => {
+          setLoadingRows((prev) => ({ ...prev, [company.id]: false }));
+        }, 3000); // Increased to 3 seconds for a guaranteed visible loading state
+      } catch (error) {
+        console.error("Error pre-loading Stripe data:", error);
+        // Don't show an error toast here, let the dialog handle errors
+
+        // Even on error, delay turning off the loading state
+        setTimeout(() => {
+          setLoadingRows((prev) => ({ ...prev, [company.id]: false }));
+        }, 3000);
+      }
+    }
+
+    // Open the dialog
     setSideDialogOpen(true);
   };
 
@@ -341,23 +406,22 @@ export default function CompaniesPage() {
   };
 
   return (
-    <div className="h-full flex flex-col space-y-4">
-      <div className="flex items-center justify-between p-4">
+    <div className="px-4 py-6 space-y-6">
+      <div className="flex justify-between items-center">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight">Companies</h2>
+          <h1 className="text-3xl font-bold tracking-tight">Companies</h1>
           <p className="text-muted-foreground">
-            Manage your companies and their subscriptions
+            Manage your companies and their Stripe integrations
+            {lastFetchTime && (
+              <span className="ml-2 text-xs">
+                Last updated: {lastFetchTime.toLocaleTimeString()} ({dataSource}
+                )
+              </span>
+            )}
           </p>
-          {lastFetchTime && (
-            <p className="text-sm text-muted-foreground mt-1">
-              Data source: {dataSource === "cache" ? "Cache" : "Database"}
-              {" • "}
-              Last updated: {lastFetchTime.toLocaleTimeString()}
-            </p>
-          )}
         </div>
-        <div className="flex items-center space-x-2">
-          <Button onClick={() => setDialogOpen(true)}>
+        <div className="flex items-center gap-2">
+          <Button onClick={() => setDialogOpen(true)} className="h-9">
             <PlusCircle className="mr-2 h-4 w-4" />
             Add Company
           </Button>
@@ -365,81 +429,77 @@ export default function CompaniesPage() {
             variant="outline"
             onClick={handleSyncAllStripe}
             disabled={isSyncing}
+            className="h-9"
           >
             <RefreshCw
               className={cn("mr-2 h-4 w-4", isSyncing && "animate-spin")}
             />
-            {isSyncing ? "Syncing..." : "Sync All"}
+            Sync Stripe
           </Button>
           <Button
             variant="outline"
-            onClick={fetchCompanies}
-            disabled={isInitialLoading}
+            size="sm"
+            onClick={handleClearCompanyCache}
+            disabled={isSyncing}
+            className="h-9 relative z-0"
           >
-            <RefreshCw
-              className={cn("mr-2 h-4 w-4", isInitialLoading && "animate-spin")}
-            />
-            {isInitialLoading ? "Refreshing..." : "Refresh"}
+            {isSyncing ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Trash2 className="mr-2 h-4 w-4" />
+            )}
+            Clear Cache
           </Button>
         </div>
       </div>
-      <div className="px-4 flex-1">
-        {isInitialLoading ? (
-          <TableSkeleton />
-        ) : (
+
+      {isInitialLoading ? (
+        <TableSkeleton />
+      ) : (
+        <>
+          <SummaryCards companies={companies} />
+
           <DataTable
             columns={columns}
             data={companies}
             loadingRows={loadingRows}
-            error={error}
             meta={{
-              onRowClick: (company) => {
-                setSelectedCompany(company);
-                setSideDialogOpen(true);
-              },
               onEdit: handleEdit,
               onUpdateStatus: handleUpdateStatus,
               onSyncStripe: handleSyncStripe,
-              onStripeSettings: (company) => {
-                setSelectedCompany(company);
-                setStripeDialogOpen(true);
-              },
-              onConnectStripe: (company) => {
-                setSelectedCompany(company);
-                setStripeDialogOpen(true);
-              },
+              onStripeSettings: handleStripeSettings,
+              onConnectStripe: handleConnectStripe,
+              onRowClick: handleRowClick,
             }}
+            error={error}
           />
-        )}
-      </div>
+        </>
+      )}
 
       <CompanyDialog
-        company={selectedCompany}
         open={dialogOpen}
         onOpenChange={setDialogOpen}
+        company={selectedCompany}
         onSubmit={
           selectedCompany ? handleUpdateCompanyInDialog : handleCreateCompany
         }
       />
 
+      <StripeDialog
+        open={stripeDialogOpen}
+        onOpenChange={setStripeDialogOpen}
+        company={selectedCompany}
+        onSubmit={handleUpdateCompanyInDialog}
+      />
+
       {selectedCompany && (
-        <>
-          <StripeDialog
-            company={selectedCompany}
-            open={stripeDialogOpen}
-            onOpenChange={(open: boolean) => {
-              setStripeDialogOpen(open);
-              if (!open) setSelectedCompany(undefined);
-            }}
-          />
-          <CompanySideDialog
-            company={selectedCompany}
-            open={sideDialogOpen}
-            onOpenChange={handleSideDialogOpenChange}
-            onUpdate={handleUpdateCompany}
-            onDelete={handleDeleteCompany}
-          />
-        </>
+        <CompanySideDialog
+          open={sideDialogOpen}
+          onOpenChange={handleSideDialogOpenChange}
+          company={selectedCompany}
+          onDelete={handleDeleteCompany}
+          onUpdate={handleUpdateCompany}
+        />
       )}
     </div>
   );

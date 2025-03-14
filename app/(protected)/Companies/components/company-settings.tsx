@@ -21,7 +21,17 @@ import { Switch } from "@/components/ui/switch";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { Loader2, Trash2 } from "lucide-react";
+import {
+  Loader2,
+  Trash2,
+  Building2,
+  User,
+  Mail,
+  Phone,
+  Clock,
+  Bell,
+  FileText,
+} from "lucide-react";
 import { Company } from "../types";
 import {
   AlertDialog,
@@ -35,6 +45,13 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Separator } from "@/components/ui/separator";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
 
 const settingsFormSchema = z.object({
   name: z.string().min(1, "Company name is required"),
@@ -100,203 +117,272 @@ export function CompanySettings({
   };
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h3 className="text-lg font-medium">Company Settings</h3>
-        <p className="text-sm text-muted-foreground">
-          Manage your company information and preferences.
-        </p>
+    <div className="space-y-8">
+      <div className="flex items-center space-x-2">
+        <div className="p-2 rounded-full bg-primary/10">
+          <Building2 className="h-5 w-5 text-primary" />
+        </div>
+        <div>
+          <h3 className="text-xl font-semibold">Company Settings</h3>
+          <p className="text-sm text-muted-foreground">
+            Manage your company information and preferences.
+          </p>
+        </div>
       </div>
 
       <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-          <div className="space-y-4">
-            <FormField
-              control={form.control}
-              name="name"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Company Name</FormLabel>
-                  <FormControl>
-                    <Input {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <div className="grid grid-cols-2 gap-4">
+        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
+          <Card className="border shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <User className="h-4 w-4 text-primary" />
+                Company Information
+              </CardTitle>
+              <CardDescription>
+                Update your company's basic information
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
               <FormField
                 control={form.control}
-                name="contact_first_name"
+                name="name"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Contact First Name</FormLabel>
+                    <FormLabel className="text-sm font-medium">
+                      Company Name
+                    </FormLabel>
                     <FormControl>
-                      <Input {...field} />
+                      <Input {...field} className="h-10" />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <FormField
+                  control={form.control}
+                  name="contact_first_name"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-sm font-medium">
+                        Contact First Name
+                      </FormLabel>
+                      <FormControl>
+                        <Input {...field} className="h-10" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="contact_last_name"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-sm font-medium">
+                        Contact Last Name
+                      </FormLabel>
+                      <FormControl>
+                        <Input {...field} className="h-10" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
               <FormField
                 control={form.control}
-                name="contact_last_name"
+                name="contact_email"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Contact Last Name</FormLabel>
+                    <FormLabel className="text-sm font-medium">
+                      <span className="flex items-center gap-2">
+                        <Mail className="h-3.5 w-3.5 text-muted-foreground" />
+                        Contact Email
+                      </span>
+                    </FormLabel>
                     <FormControl>
-                      <Input {...field} />
+                      <Input type="email" {...field} className="h-10" />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
-            </div>
 
-            <FormField
-              control={form.control}
-              name="contact_email"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Contact Email</FormLabel>
-                  <FormControl>
-                    <Input type="email" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name="contact_phone"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Contact Phone</FormLabel>
-                  <FormControl>
-                    <Input type="tel" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name="timezone"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Timezone</FormLabel>
-                  <Select
-                    onValueChange={field.onChange}
-                    defaultValue={field.value}
-                  >
+              <FormField
+                control={form.control}
+                name="contact_phone"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="text-sm font-medium">
+                      <span className="flex items-center gap-2">
+                        <Phone className="h-3.5 w-3.5 text-muted-foreground" />
+                        Contact Phone
+                      </span>
+                    </FormLabel>
                     <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select timezone" />
-                      </SelectTrigger>
+                      <Input type="tel" {...field} className="h-10" />
                     </FormControl>
-                    <SelectContent>
-                      <SelectItem value="America/New_York">
-                        Eastern Time (ET)
-                      </SelectItem>
-                      <SelectItem value="America/Chicago">
-                        Central Time (CT)
-                      </SelectItem>
-                      <SelectItem value="America/Denver">
-                        Mountain Time (MT)
-                      </SelectItem>
-                      <SelectItem value="America/Los_Angeles">
-                        Pacific Time (PT)
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-          </div>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
-          <Separator />
+              <FormField
+                control={form.control}
+                name="timezone"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="text-sm font-medium">
+                      <span className="flex items-center gap-2">
+                        <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+                        Timezone
+                      </span>
+                    </FormLabel>
+                    <Select
+                      onValueChange={field.onChange}
+                      defaultValue={field.value}
+                    >
+                      <FormControl>
+                        <SelectTrigger className="h-10">
+                          <SelectValue placeholder="Select timezone" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="America/New_York">
+                          Eastern Time (ET)
+                        </SelectItem>
+                        <SelectItem value="America/Chicago">
+                          Central Time (CT)
+                        </SelectItem>
+                        <SelectItem value="America/Denver">
+                          Mountain Time (MT)
+                        </SelectItem>
+                        <SelectItem value="America/Los_Angeles">
+                          Pacific Time (PT)
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </CardContent>
+          </Card>
 
-          <div className="space-y-4">
-            <h4 className="text-sm font-medium">Preferences</h4>
-            <FormField
-              control={form.control}
-              name="notifications_enabled"
-              render={({ field }) => (
-                <FormItem className="flex items-center justify-between rounded-lg border p-4">
-                  <div className="space-y-0.5">
-                    <FormLabel className="text-base">Notifications</FormLabel>
-                    <FormDescription>
-                      Receive notifications about company activities
-                    </FormDescription>
-                  </div>
-                  <FormControl>
-                    <Switch
-                      checked={field.value}
-                      onCheckedChange={field.onChange}
-                    />
-                  </FormControl>
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={form.control}
-              name="auto_invoice"
-              render={({ field }) => (
-                <FormItem className="flex items-center justify-between rounded-lg border p-4">
-                  <div className="space-y-0.5">
-                    <FormLabel className="text-base">Auto Invoice</FormLabel>
-                    <FormDescription>
-                      Automatically generate invoices at the end of each period
-                    </FormDescription>
-                  </div>
-                  <FormControl>
-                    <Switch
-                      checked={field.value}
-                      onCheckedChange={field.onChange}
-                    />
-                  </FormControl>
-                </FormItem>
-              )}
-            />
-          </div>
+          <Card className="border shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Bell className="h-4 w-4 text-primary" />
+                Preferences
+              </CardTitle>
+              <CardDescription>
+                Configure your company preferences and notification settings
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <FormField
+                control={form.control}
+                name="notifications_enabled"
+                render={({ field }) => (
+                  <FormItem className="flex items-center justify-between rounded-lg border p-4 transition-colors hover:bg-muted/50">
+                    <div className="space-y-1">
+                      <FormLabel className="text-base font-medium">
+                        Notifications
+                      </FormLabel>
+                      <FormDescription className="text-sm">
+                        Receive notifications about company activities
+                      </FormDescription>
+                    </div>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                        className="data-[state=checked]:bg-primary"
+                      />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="auto_invoice"
+                render={({ field }) => (
+                  <FormItem className="flex items-center justify-between rounded-lg border p-4 transition-colors hover:bg-muted/50">
+                    <div className="space-y-1">
+                      <FormLabel className="text-base font-medium flex items-center gap-2">
+                        <FileText className="h-4 w-4 text-muted-foreground" />
+                        Auto Invoice
+                      </FormLabel>
+                      <FormDescription className="text-sm">
+                        Automatically generate invoices at the end of each
+                        period
+                      </FormDescription>
+                    </div>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                        className="data-[state=checked]:bg-primary"
+                      />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+            </CardContent>
+          </Card>
 
-          <div className="flex items-center justify-between">
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="destructive" type="button" disabled={loading}>
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  Delete Company
+          <Card className="border shadow-sm bg-muted/10">
+            <CardContent className="pt-6">
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      variant="destructive"
+                      type="button"
+                      disabled={loading}
+                      className="w-full sm:w-auto"
+                    >
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      Delete Company
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>
+                        Are you absolutely sure?
+                      </AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This action cannot be undone. This will permanently
+                        delete the company and remove all associated data from
+                        our servers.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={handleDelete}
+                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      >
+                        Delete
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+
+                <Button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full sm:w-auto"
+                >
+                  {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Save Changes
                 </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    This action cannot be undone. This will permanently delete
-                    the company and remove all associated data from our servers.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction
-                    onClick={handleDelete}
-                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                  >
-                    Delete
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-
-            <Button type="submit" disabled={loading}>
-              {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Save Changes
-            </Button>
-          </div>
+              </div>
+            </CardContent>
+          </Card>
         </form>
       </Form>
     </div>

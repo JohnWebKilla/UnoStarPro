@@ -1,12 +1,12 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { cachedQuery, buildCacheKey } from "@/lib/cache-utils";
 
 // Cache expiration time in seconds (5 minutes)
 const CACHE_EXPIRATION = 300;
 
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
+export async function GET(request: NextRequest) {
+  const searchParams = request.nextUrl.searchParams;
   const userId = searchParams.get("userId");
 
   if (!userId) {

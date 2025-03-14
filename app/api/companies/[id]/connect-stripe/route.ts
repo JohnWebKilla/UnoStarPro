@@ -1,12 +1,13 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { connectCompanyToStripe } from "@/app/api/webhooks/stripe/route";
 
 export async function POST(
-  request: Request,
-  { params }: { params: { id: string } }
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const companyId = parseInt(params.id, 10);
+    const resolvedParams = await params;
+    const companyId = parseInt(resolvedParams.id, 10);
     if (isNaN(companyId)) {
       return NextResponse.json(
         { error: "Invalid company ID" },
@@ -19,7 +20,7 @@ export async function POST(
   } catch (error: unknown) {
     console.error("Error connecting company to Stripe:", {
       error,
-      companyId: params.id,
+      companyId: (await params).id,
       stack: error instanceof Error ? error.stack : undefined,
     });
 

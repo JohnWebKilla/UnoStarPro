@@ -233,10 +233,25 @@ export async function POST(req: Request) {
       if (
         event.type === "payment_method.attached" ||
         event.type === "payment_method.detached" ||
-        event.type === "payment_method.updated" ||
         event.type === "customer.updated" // This covers default payment method changes
       ) {
-        const customerId = event.data.object.customer || event.data.object.id;
+        let customerId: string | null = null;
+
+        if (event.type === "customer.updated") {
+          const customer = event.data.object as Stripe.Customer;
+          customerId = customer.id;
+        } else {
+          const paymentMethod = event.data.object as Stripe.PaymentMethod;
+          customerId =
+            typeof paymentMethod.customer === "string"
+              ? paymentMethod.customer
+              : null;
+        }
+
+        if (!customerId) {
+          console.error("No customer ID found in webhook event");
+          return new NextResponse("No customer ID found", { status: 400 });
+        }
 
         // Get company ID from customer ID
         const { data: company } = await supabaseAdmin

@@ -1,4 +1,4 @@
-import { Company } from "../../lib/types";
+import { Company } from "./lib/types";
 import {
   Sheet,
   SheetContent,
@@ -35,9 +35,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { format } from "date-fns";
-import { CompanyUsers } from "../company-users";
-import { CompanyDrivers } from "../company-drivers";
-import { CompanySettings } from "../company-settings";
+import { CompanyUsers } from "./app/(protected)/Companies/components/company-users";
+import { CompanyDrivers } from "./app/(protected)/Companies/components/company-drivers";
+import { CompanySettings } from "./app/(protected)/Companies/components/company-settings";
 import { useState, useEffect } from "react";
 import { useToast } from "@/components/ui/use-toast";
 import { cn } from "@/lib/utils";
@@ -55,9 +55,9 @@ import {
   changeSubscriptionPlan,
   getAvailablePlans,
   addSubscriptionItem,
-  removeSubscriptionItem,
-  getUpcomingInvoice,
-} from "../../actions/stripe-actions";
+  cancelSubscription,
+  syncStripeCustomer,
+} from "./app/(protected)/Companies/stripe-actions";
 import {
   Dialog,
   DialogContent,
@@ -160,9 +160,14 @@ export function CompanySideDialog({
           0
         );
 
-        // Get upcoming invoice amount
-
         // Update the stripeData with the real values
+        setStripeData((prev: any) => ({
+          ...prev,
+          nextBillingDate,
+          totalAmount,
+        }));
+      };
+
       updateStripeData();
     }
   }, [stripeData?.subscription?.id]);
@@ -216,9 +221,9 @@ export function CompanySideDialog({
         // Update the company in the UI to reflect that it's no longer connected to Stripe
         if (company) {
           onUpdate(company.id, {
-            stripe_customer_id: null,
-            stripe_subscription_id: null,
-            stripe_payment_method_id: null,
+            stripe_customer_id: undefined,
+            stripe_subscription_id: undefined,
+            stripe_payment_method_id: undefined,
           });
         }
       } else if (error.message?.includes("Invalid customer object")) {
@@ -342,35 +347,23 @@ export function CompanySideDialog({
   };
 
   const handleRemoveSubscriptionItem = async (item: any) => {
-    // Don't allow removing the last item
-    if (stripeData?.subscriptionItems?.length <= 1) {
-      toast({
-        title: "Error",
-        description:
-          "Cannot remove the last subscription item. Please change the plan instead.",
-        variant: "destructive",
-      });
-      return;
-    }
+    if (!company?.id || !stripeData?.subscription?.id) return;
+
+    const subscriptionId: string = stripeData.subscription.id;
 
     try {
       setIsUpdating(true);
-      await removeSubscriptionItem({
-        subscriptionId: stripeData.subscription.id,
-        itemId: item.id,
-      });
-
-      // Refresh subscription data
-      await loadStripeData();
+      await cancelSubscription(subscriptionId);
+      await loadStripeData(); // Refresh the data
       toast({
         title: "Success",
         description: "Subscription item removed successfully",
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error removing subscription item:", error);
       toast({
         title: "Error",
-        description: "Failed to remove subscription item",
+        description: error.message || "Failed to remove subscription item",
         variant: "destructive",
       });
     } finally {
@@ -491,7 +484,7 @@ export function CompanySideDialog({
 
   if (!company) return null;
 
-  const formatDate = (date: string) => {
+  const formatDate = (date: string | undefined) => {
     if (!date) return "N/A";
     try {
       return format(new Date(date), "MMM d, yyyy");
@@ -777,7 +770,10 @@ export function CompanySideDialog({
                                         Current Plan Price
                                       </div>
                                       <div className="text-2xl font-bold">
-                                        {formatCurrency(stripeData?.totalAmount || 0)} / month
+                                        {formatCurrency(
+                                          stripeData?.totalAmount || 0
+                                        )}{" "}
+                                        / month
                                       </div>
                                     </div>
 
@@ -791,7 +787,11 @@ export function CompanySideDialog({
                                             stripeData?.nextBillingDate || ""
                                           )}
                                         </div>
-                                        <Badge variant="outline">{formatCurrency(stripeData?.nextInvoiceAmount || 0)}</Badge>
+                                        <Badge variant="outline">
+                                          {formatCurrency(
+                                            stripeData?.nextInvoiceAmount || 0
+                                          )}
+                                        </Badge>
                                       </div>
                                     </div>
 

@@ -11,11 +11,12 @@ interface SubscriptionItem {
 
 export async function POST(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const id = await params.id;
-
   try {
+    const resolvedParams = await params;
+    const id = resolvedParams.id;
+
     const { items } = (await request.json()) as { items: SubscriptionItem[] };
 
     if (!stripe) {

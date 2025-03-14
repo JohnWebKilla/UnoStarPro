@@ -24,9 +24,10 @@ import { Badge } from "@/components/ui/badge";
 import { CreditCard, Loader2, Plus, Trash } from "lucide-react";
 
 interface StripeDialogProps {
-  company: Company;
+  company?: Company;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onSubmit?: (data: Partial<Company>) => Promise<void>;
 }
 
 export function StripeDialog({
@@ -73,7 +74,9 @@ export function StripeDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[600px]">
         <DialogHeader>
-          <DialogTitle>Stripe Settings - {company.name}</DialogTitle>
+          <DialogTitle>
+            Stripe Settings - {company?.name || "Company"}
+          </DialogTitle>
           <DialogDescription>
             Manage payment methods and subscriptions
           </DialogDescription>
@@ -96,7 +99,7 @@ export function StripeDialog({
               </div>
 
               {/* Example Payment Method Card */}
-              {company.stripe_payment_method_id && (
+              {company?.stripe_payment_method_id && (
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center">
@@ -123,7 +126,7 @@ export function StripeDialog({
                 </Card>
               )}
 
-              {!company.stripe_payment_method_id && (
+              {!company?.stripe_payment_method_id && (
                 <Card>
                   <CardHeader>
                     <CardTitle>No Payment Methods</CardTitle>
@@ -141,7 +144,7 @@ export function StripeDialog({
               <div className="flex justify-between items-center">
                 <h3 className="text-lg font-medium">Subscription Details</h3>
                 <Button onClick={handleUpdateSubscription}>
-                  {company.stripe_subscription_id ? "Update" : "Add"}{" "}
+                  {company?.stripe_subscription_id ? "Update" : "Add"}{" "}
                   Subscription
                 </Button>
               </div>
@@ -150,7 +153,7 @@ export function StripeDialog({
                 <CardHeader>
                   <CardTitle className="flex items-center justify-between">
                     <span>Current Subscription</span>
-                    {company.stripe_subscription_id ? (
+                    {company?.stripe_subscription_id ? (
                       <Badge>Active</Badge>
                     ) : (
                       <Badge variant="secondary">No Subscription</Badge>
@@ -158,7 +161,7 @@ export function StripeDialog({
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  {company.stripe_subscription_id ? (
+                  {company?.stripe_subscription_id ? (
                     <div className="space-y-2">
                       <p>
                         Amount: {formatCurrency(company.subscription_amount)}

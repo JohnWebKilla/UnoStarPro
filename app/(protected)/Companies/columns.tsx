@@ -2,9 +2,19 @@ import { ColumnDef } from "@tanstack/react-table";
 import { Company } from "./types";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { CreditCard, ArrowUpDown, ExternalLink } from "lucide-react";
+import {
+  CreditCard,
+  ArrowUpDown,
+  ExternalLink,
+  AlertCircle,
+  CheckCircle2,
+  Clock,
+  XCircle,
+  Receipt,
+} from "lucide-react";
 
-function formatDate(date: string) {
+function formatDate(date: string | undefined | null) {
+  if (!date) return "-";
   return new Date(date).toLocaleDateString("en-US", {
     year: "numeric",
     month: "short",
@@ -14,6 +24,67 @@ function formatDate(date: string) {
 
 function formatCurrency(amount: number) {
   return amount ? `$${(amount / 100).toFixed(2)}` : "$0.00";
+}
+
+function getSubscriptionStatusBadge(status: string | undefined | null) {
+  if (!status) return null;
+
+  const variants: Record<
+    string,
+    {
+      variant: "default" | "secondary" | "destructive" | "outline" | "success";
+      label: string;
+    }
+  > = {
+    active: { variant: "success", label: "Active" },
+    trialing: { variant: "secondary", label: "Trial" },
+    past_due: { variant: "destructive", label: "Past Due" },
+    canceled: { variant: "outline", label: "Canceled" },
+    incomplete: { variant: "outline", label: "Incomplete" },
+    incomplete_expired: { variant: "outline", label: "Expired" },
+    unpaid: { variant: "destructive", label: "Unpaid" },
+    paused: { variant: "secondary", label: "Paused" },
+  };
+
+  const config = variants[status] || { variant: "outline", label: status };
+
+  return (
+    <Badge variant={config.variant} className="h-6">
+      {config.label}
+    </Badge>
+  );
+}
+
+function getInvoiceStatusBadge(status: string | undefined | null) {
+  if (!status) return null;
+
+  const variants: Record<
+    string,
+    {
+      variant: "default" | "secondary" | "destructive" | "outline" | "success";
+      icon: React.ReactNode;
+    }
+  > = {
+    paid: {
+      variant: "success",
+      icon: <CheckCircle2 className="mr-1 h-3 w-3" />,
+    },
+    open: { variant: "secondary", icon: <Clock className="mr-1 h-3 w-3" /> },
+    void: { variant: "outline", icon: <XCircle className="mr-1 h-3 w-3" /> },
+    uncollectible: {
+      variant: "destructive",
+      icon: <AlertCircle className="mr-1 h-3 w-3" />,
+    },
+  };
+
+  const config = variants[status] || { variant: "outline", icon: null };
+
+  return (
+    <Badge variant={config.variant} className="h-6">
+      {config.icon}
+      {status.charAt(0).toUpperCase() + status.slice(1)}
+    </Badge>
+  );
 }
 
 export const columns: ColumnDef<Company>[] = [
@@ -133,13 +204,55 @@ export const columns: ColumnDef<Company>[] = [
     cell: ({ row }) => {
       const amount = row.getValue("subscription_amount") as number;
       const hasSubscription = row.original.stripe_subscription_id;
+      const status = row.original.subscription_status;
+
       return (
         <div className="flex flex-col space-y-1">
-          <span>{formatCurrency(amount)}</span>
+          <div className="flex items-center gap-2">
+            <span>{formatCurrency(amount)}</span>
+            {status && getSubscriptionStatusBadge(status)}
+          </div>
           {hasSubscription && (
             <span className="text-[11px] text-muted-foreground truncate max-w-[150px]">
               {row.original.stripe_subscription_id}
             </span>
+          )}
+        </div>
+      );
+    },
+  },
+  {
+    accessorKey: "last_invoice",
+    header: ({ column }) => {
+      return (
+        <div className="flex items-center">
+          <Button
+            variant="ghost"
+            className="p-0 h-8 font-medium hover:bg-transparent hover:text-primary"
+            onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+          >
+            Last Invoice
+            <ArrowUpDown className="ml-2 h-4 w-4" />
+          </Button>
+        </div>
+      );
+    },
+    cell: ({ row }) => {
+      const lastInvoiceDate = row.original.last_invoice_date;
+      const lastInvoiceStatus = row.original.last_invoice_status;
+
+      if (!lastInvoiceDate) {
+        return <div>-</div>;
+      }
+
+      return (
+        <div className="flex flex-col space-y-1">
+          <div className="flex items-center gap-2">
+            <Receipt className="h-3 w-3 text-muted-foreground" />
+            <span>{formatDate(lastInvoiceDate)}</span>
+          </div>
+          {lastInvoiceStatus && (
+            <div>{getInvoiceStatusBadge(lastInvoiceStatus)}</div>
           )}
         </div>
       );

@@ -30,7 +30,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { NotificationButton } from "@/components/notification-button";
-import { ROUTES, Role } from "@/utils/protected";
+import { ROUTES } from "@/utils/protected";
+import type { Role } from "@/types/role";
 import { useMemo, useState } from "react";
 import { useBirthdayCheck } from "@/hooks/useBirthdayCheck";
 import { motion } from "framer-motion";

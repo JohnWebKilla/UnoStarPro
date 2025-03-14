@@ -13,7 +13,7 @@ import { Eye, EyeOff } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { getDashboardForRole } from "@/utils/protected";
 import { useUser } from "@/contexts/UserContext";
-import { type Role } from "@/utils/protected";
+import type { Role } from "@/types/role";
 import { LoadingOverlay } from "@/components/ui/loading-overlay";
 
 function SearchParamsMessage() {

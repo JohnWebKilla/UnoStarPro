@@ -4,7 +4,15 @@ import Stripe from "stripe";
 import { createClient } from "@/utils/supabase/server";
 import { Company } from "./types";
 import { revalidatePath } from "next/cache";
-import { getCachedPaymentMethods, cachePaymentMethods } from "@/lib/redis";
+import {
+  getCachedPaymentMethods,
+  cachePaymentMethods,
+  getCachedStripeData,
+  cacheStripeData,
+  invalidateStripeCache,
+  getCachedStripePlans,
+  cacheStripePlans,
+} from "@/lib/redis";
 
 // Initialize Stripe only if the API key is available
 const stripe = process.env.STRIPE_SECRET_KEY
@@ -12,6 +20,78 @@ const stripe = process.env.STRIPE_SECRET_KEY
       apiVersion: "2025-02-24.acacia",
     })
   : null;
+
+// Define our own types that match our serialized data structure
+interface SerializedPrice {
+  id: string;
+  unit_amount: number;
+  currency: string;
+  nickname: string;
+  product: {
+    id: string;
+    name: string;
+  };
+}
+
+interface SerializedSubscriptionItem {
+  id: string;
+  price: SerializedPrice;
+  quantity: number;
+}
+
+interface SerializedSubscription {
+  id: string;
+  status: string;
+  created: number;
+  current_period_end: number;
+  items: SerializedSubscriptionItem[];
+}
+
+interface SerializedCustomer {
+  id: string;
+  email: string | null;
+  name: string | null;
+  phone: string | null;
+  invoice_settings: {
+    default_payment_method: string | null;
+  };
+}
+
+interface SerializedInvoice {
+  id: string;
+  number: string | null;
+  amount_due: number;
+  status: string | null;
+  created: number;
+  hosted_invoice_url: string | null;
+  invoice_pdf: string | null;
+}
+
+interface SerializedPaymentMethod {
+  id: string;
+  type: string;
+  card: {
+    brand: string | null;
+    last4: string | null;
+    exp_month: number | null;
+    exp_year: number | null;
+  };
+}
+
+interface SerializedUpcomingInvoice {
+  amount_due: number;
+  created: number;
+  period_end: number;
+  period_start: number;
+}
+
+interface SerializedStripeData {
+  customer: SerializedCustomer;
+  subscription: SerializedSubscription | null;
+  upcoming_invoice: SerializedUpcomingInvoice | null;
+  invoices: SerializedInvoice[];
+  paymentMethods: SerializedPaymentMethod[];
+}
 
 async function createStripeCustomer(company: Company) {
   if (!stripe) {
@@ -67,7 +147,10 @@ export async function syncStripeCustomers() {
     // Get all Stripe customers
     const customers = await stripe.customers.list({
       limit: 100,
-      expand: ["data.subscriptions"],
+      expand: [
+        "data.subscriptions",
+        "data.invoice_settings.default_payment_method",
+      ],
     });
 
     let syncedCount = 0;
@@ -76,14 +159,34 @@ export async function syncStripeCustomers() {
     for (const customer of customers.data) {
       const subscription = customer.subscriptions?.data[0];
 
-      // Get default payment method if available
-      let paymentMethod: Stripe.PaymentMethod | null = null;
-      if (customer.default_source) {
-        const paymentMethods = await stripe.paymentMethods.list({
-          customer: customer.id,
-          type: "card",
-        });
-        paymentMethod = paymentMethods.data[0];
+      // Get payment methods
+      const paymentMethods = await stripe.paymentMethods.list({
+        customer: customer.id,
+        type: "card",
+      });
+
+      // Get the default payment method
+      let defaultPaymentMethodId = null;
+
+      // First check if there's a default payment method in the customer's invoice settings
+      if (customer.invoice_settings?.default_payment_method) {
+        if (
+          typeof customer.invoice_settings.default_payment_method === "string"
+        ) {
+          defaultPaymentMethodId =
+            customer.invoice_settings.default_payment_method;
+        } else if (
+          (customer.invoice_settings.default_payment_method as any)?.id
+        ) {
+          defaultPaymentMethodId = (
+            customer.invoice_settings.default_payment_method as any
+          ).id;
+        }
+      }
+
+      // If no default payment method is set but there are payment methods, use the first one
+      if (!defaultPaymentMethodId && paymentMethods.data.length > 0) {
+        defaultPaymentMethodId = paymentMethods.data[0].id;
       }
 
       // Find company by Stripe customer ID
@@ -93,18 +196,33 @@ export async function syncStripeCustomers() {
         .eq("stripe_customer_id", customer.id)
         .single();
 
+      // Get subscription status
+      let subscriptionStatus = null;
+      if (subscription) {
+        subscriptionStatus = subscription.status;
+      }
+
       const companyData = {
         name: customer.name || customer.description || "Unknown Company",
         contact_email: customer.email || "",
         contact_phone: customer.phone || "",
         stripe_customer_id: customer.id,
         stripe_subscription_id: subscription?.id || null,
-        stripe_payment_method_id: paymentMethod?.id || null,
+        stripe_payment_method_id: defaultPaymentMethodId,
         subscription_amount:
           subscription?.items.data[0]?.price.unit_amount || 0,
+        subscription_status: subscriptionStatus,
         last_synced_at: new Date().toISOString(),
         status: "active",
       };
+
+      console.log(`Syncing Stripe customer ${customer.id}:`, {
+        name: companyData.name,
+        stripe_subscription_id: companyData.stripe_subscription_id,
+        stripe_payment_method_id: companyData.stripe_payment_method_id,
+        subscription_status: companyData.subscription_status,
+        payment_methods_count: paymentMethods.data.length,
+      });
 
       if (existingCompany) {
         // Update existing company
@@ -112,6 +230,32 @@ export async function syncStripeCustomers() {
           .from("companies")
           .update(companyData)
           .eq("id", existingCompany.id);
+
+        // If there are invoices, update the last invoice information
+        if (subscription) {
+          const invoices = await stripe.invoices.list({
+            customer: customer.id,
+            limit: 1,
+          });
+
+          if (invoices.data.length > 0) {
+            const invoiceUpdateData = {
+              last_invoice_date: new Date(
+                invoices.data[0].created * 1000
+              ).toISOString(),
+              last_invoice_status: invoices.data[0].status,
+            };
+
+            await supabase
+              .from("companies")
+              .update(invoiceUpdateData)
+              .eq("id", existingCompany.id);
+          }
+        }
+
+        // Invalidate cache for this company
+        await invalidateStripeCache(existingCompany.id);
+
         syncedCount++;
       } else {
         // Create new company from Stripe customer
@@ -201,7 +345,10 @@ export async function syncStripeCustomer(companyId: number) {
         const stripeCustomer = await stripe.customers.retrieve(
           company.stripe_customer_id,
           {
-            expand: ["subscriptions"],
+            expand: [
+              "subscriptions",
+              "invoice_settings.default_payment_method",
+            ],
           }
         );
 
@@ -225,21 +372,87 @@ export async function syncStripeCustomer(companyId: number) {
       type: "card",
     });
 
+    // Get the default payment method
+    let defaultPaymentMethodId = null;
+
+    // First check if there's a default payment method in the customer's invoice settings
+    if (customer.invoice_settings?.default_payment_method) {
+      if (
+        typeof customer.invoice_settings.default_payment_method === "string"
+      ) {
+        defaultPaymentMethodId =
+          customer.invoice_settings.default_payment_method;
+      } else if (customer.invoice_settings.default_payment_method?.id) {
+        defaultPaymentMethodId =
+          customer.invoice_settings.default_payment_method.id;
+      }
+    }
+
+    // If no default payment method is set but there are payment methods, use the first one
+    if (!defaultPaymentMethodId && paymentMethods.data.length > 0) {
+      defaultPaymentMethodId = paymentMethods.data[0].id;
+    }
+
     const subscription = customer.subscriptions?.data[0];
-    const paymentMethod = paymentMethods.data[0];
+
+    // Get subscription status
+    let subscriptionStatus = null;
+    if (subscription) {
+      subscriptionStatus = subscription.status;
+      console.log(
+        `Subscription status for ${company.name}: ${subscriptionStatus}`
+      );
+    }
 
     // Update company with latest Stripe data
-    await supabase
-      .from("companies")
-      .update({
-        stripe_customer_id: customer.id,
-        stripe_subscription_id: subscription?.id || null,
-        stripe_payment_method_id: paymentMethod?.id || null,
-        subscription_amount:
-          subscription?.items.data[0]?.price.unit_amount || 0,
-        last_synced_at: new Date().toISOString(),
-      })
-      .eq("id", companyId);
+    const updateData: any = {
+      stripe_customer_id: customer.id,
+      stripe_subscription_id: subscription?.id || null,
+      stripe_payment_method_id: defaultPaymentMethodId,
+      subscription_amount: subscription?.items.data[0]?.price.unit_amount || 0,
+      subscription_status: subscriptionStatus,
+      last_synced_at: new Date().toISOString(),
+    };
+
+    console.log(`Updating company ${company.name} with Stripe data:`, {
+      stripe_customer_id: updateData.stripe_customer_id,
+      stripe_subscription_id: updateData.stripe_subscription_id,
+      stripe_payment_method_id: updateData.stripe_payment_method_id,
+      subscription_status: updateData.subscription_status,
+      payment_methods_count: paymentMethods.data.length,
+    });
+
+    await supabase.from("companies").update(updateData).eq("id", companyId);
+
+    // If there are invoices, update the last invoice information
+    if (subscription) {
+      const invoices = await stripe.invoices.list({
+        customer: customer.id,
+        limit: 1,
+      });
+
+      if (invoices.data.length > 0) {
+        const invoiceUpdateData = {
+          last_invoice_date: new Date(
+            invoices.data[0].created * 1000
+          ).toISOString(),
+          last_invoice_status: invoices.data[0].status,
+        };
+
+        console.log(
+          `Updating invoice data for ${company.name}:`,
+          invoiceUpdateData
+        );
+
+        await supabase
+          .from("companies")
+          .update(invoiceUpdateData)
+          .eq("id", companyId);
+      }
+    }
+
+    // Invalidate cache for this company
+    await invalidateStripeCache(companyId);
 
     revalidatePath("/Companies");
     return { success: true, message: "Customer synced successfully" };
@@ -313,6 +526,9 @@ export async function addCharges(
   if (company.auto_invoice) {
     await createInvoice(company.id, true); // true for auto-charge
   }
+
+  // Invalidate cache after changes
+  await invalidateStripeCache(company.id);
 }
 
 export async function deleteCompanyFromStripe(company: Company): Promise<void> {
@@ -354,19 +570,33 @@ export async function getStripeSubscriptionDetails(companyId: number) {
 
   const supabase = await createClient();
 
-  // Get company details
-  const { data: company } = await supabase
-    .from("companies")
-    .select()
-    .eq("id", companyId)
-    .single();
-
-  if (!company || !company.stripe_customer_id) {
-    throw new Error("Company not found or not connected to Stripe");
-  }
-
   try {
-    // Get customer with expanded payment method
+    // Start timing
+    const startTime = performance.now();
+
+    // Get company from database
+    const { data: company } = await supabase
+      .from("companies")
+      .select()
+      .eq("id", companyId)
+      .single();
+
+    if (!company) {
+      throw new Error("Company not found");
+    }
+
+    if (!company.stripe_customer_id) {
+      throw new Error("Company is not connected to Stripe");
+    }
+
+    // Check if we have cached data
+    const cachedData = await getCachedStripeData(companyId);
+    if (cachedData) {
+      console.log("Using cached Stripe data for company", companyId);
+      return cachedData;
+    }
+
+    // Fetch customer from Stripe
     const customer = await stripe.customers.retrieve(
       company.stripe_customer_id,
       {
@@ -374,103 +604,168 @@ export async function getStripeSubscriptionDetails(companyId: number) {
       }
     );
 
-    if (!("invoice_settings" in customer)) {
-      throw new Error("Invalid customer object returned from Stripe");
+    if (customer.deleted) {
+      throw new Error("Stripe customer has been deleted");
     }
 
-    // Get subscription details separately
-    let subscription = null;
-    let upcomingInvoice = null;
+    // Fetch subscriptions
     const subscriptions = await stripe.subscriptions.list({
       customer: company.stripe_customer_id,
-      limit: 1,
       status: "all",
-      expand: ["data.items.data.price"],
+      limit: 1,
+      expand: ["data.latest_invoice"],
     });
 
-    if (subscriptions.data.length > 0) {
-      subscription = subscriptions.data[0];
-      // Fetch upcoming invoice for the subscription
-      try {
-        upcomingInvoice = await stripe.invoices.retrieveUpcoming({
-          customer: company.stripe_customer_id,
-          subscription: subscription.id,
-        });
-      } catch (error) {
-        console.error("Error fetching upcoming invoice:", error);
-      }
-      // Fetch product details separately for each price
-      const items = await Promise.all(
-        subscription.items.data.map(async (item) => {
-          const price = await stripe.prices.retrieve(item.price.id, {
-            expand: ["product"],
-          });
-          return {
-            id: item.id,
-            price: {
-              id: price.id,
-              unit_amount: price.unit_amount,
-              currency: price.currency,
-              nickname:
-                price.nickname || (price.product as Stripe.Product).name,
-              product: {
-                id: (price.product as Stripe.Product).id,
-                name: (price.product as Stripe.Product).name,
-              },
-            },
-            quantity: item.quantity,
-          };
-        })
-      );
-      subscription.items.data = items;
-    }
-
-    // Get recent invoices
-    const invoices = await stripe.invoices.list({
-      customer: company.stripe_customer_id,
-      limit: 5,
-      status: "paid",
-    });
-
-    // Get all payment methods
+    // Fetch payment methods
     const paymentMethods = await stripe.paymentMethods.list({
       customer: company.stripe_customer_id,
       type: "card",
     });
 
+    // Fetch invoices
+    const invoices = await stripe.invoices.list({
+      customer: company.stripe_customer_id,
+      limit: 10,
+    });
+
+    // Fetch upcoming invoice if there's an active subscription
+    let upcomingInvoice = null;
+    let subscription = null;
+
+    if (subscriptions.data.length > 0) {
+      subscription = subscriptions.data[0];
+
+      // Fetch product details in parallel for all subscription items
+      if (subscription.items.data.length > 0) {
+        const productIds = subscription.items.data
+          .filter(
+            (item) =>
+              item.price?.product && typeof item.price.product === "string"
+          )
+          .map((item) => item.price.product as string);
+
+        if (productIds.length > 0) {
+          try {
+            // Fetch all products in a single call if possible
+            const products = await stripe.products.list({
+              ids: productIds,
+            });
+
+            // Create a map for quick lookup
+            const productMap = new Map(
+              products.data.map((product) => [
+                product.id,
+                {
+                  id: product.id,
+                  name: product.name,
+                  active: product.active,
+                },
+              ])
+            );
+
+            // Assign product details to each item
+            for (const item of subscription.items.data) {
+              if (
+                item.price?.product &&
+                typeof item.price.product === "string"
+              ) {
+                const productId = item.price.product;
+                const productData = productMap.get(productId) || {
+                  id: productId,
+                  name: "Unknown Product",
+                  active: true,
+                };
+
+                (item as any).productDetails = productData;
+              }
+            }
+          } catch (error) {
+            console.error("Error fetching product details:", error);
+          }
+        }
+      }
+
+      try {
+        upcomingInvoice = await stripe.invoices.retrieveUpcoming({
+          customer: company.stripe_customer_id,
+        });
+      } catch (error) {
+        console.log("No upcoming invoice available:", error);
+      }
+    }
+
+    // End timing
+    const endTime = performance.now();
+    console.log(
+      `stripe-data-fetch: ${((endTime - startTime) / 1000).toFixed(3)}s`
+    );
+
+    // Get the default payment method
+    let defaultPaymentMethodId = null;
+
+    // First check if there's a default payment method in the customer's invoice settings
+    if (
+      (customer as Stripe.Customer).invoice_settings?.default_payment_method
+    ) {
+      const defaultPaymentMethod = (customer as Stripe.Customer)
+        .invoice_settings.default_payment_method;
+      if (typeof defaultPaymentMethod === "string") {
+        defaultPaymentMethodId = defaultPaymentMethod;
+      } else if ((defaultPaymentMethod as any)?.id) {
+        defaultPaymentMethodId = (defaultPaymentMethod as any).id;
+      }
+    }
+
+    // If no default payment method is set but there are payment methods, use the first one
+    if (!defaultPaymentMethodId && paymentMethods.data.length > 0) {
+      defaultPaymentMethodId = paymentMethods.data[0].id;
+    }
+
     // Serialize the data to plain objects
     const serializedData = {
       customer: {
-        id: customer.id,
-        email: customer.email,
-        name: customer.name,
-        phone: customer.phone,
+        id: (customer as Stripe.Customer).id,
+        email: (customer as Stripe.Customer).email || null,
+        name: (customer as Stripe.Customer).name || null,
+        phone: (customer as Stripe.Customer).phone || null,
         invoice_settings: {
-          default_payment_method:
-            customer.invoice_settings?.default_payment_method?.id ||
-            customer.invoice_settings?.default_payment_method ||
-            null,
+          default_payment_method: defaultPaymentMethodId,
         },
       },
       subscription: subscription
         ? {
             id: subscription.id,
             status: subscription.status,
+            created: subscription.created,
             current_period_end: subscription.current_period_end,
-            items: subscription.items.data.map((item: any) => ({
-              id: item.id,
-              price: {
-                id: item.price.id,
-                unit_amount: item.price.unit_amount,
-                currency: item.currency || "usd",
-                nickname: item.price.nickname || item.price.product?.name,
-                product: {
-                  id: item.price.product?.id,
-                  name: item.price.product?.name || "Unknown Product",
+            items: subscription.items.data.map((item) => {
+              // Use the product details we fetched separately
+              const productDetails = (item as any).productDetails;
+
+              return {
+                id: item.id,
+                price: {
+                  id: item.price.id,
+                  unit_amount: item.price.unit_amount || 0,
+                  currency: item.price.currency || "usd",
+                  product: productDetails
+                    ? {
+                        id: productDetails.id,
+                        name: productDetails.name,
+                        active: productDetails.active,
+                      }
+                    : {
+                        id:
+                          typeof item.price.product === "string"
+                            ? item.price.product
+                            : "unknown",
+                        name: "Unknown Product",
+                        active: true,
+                      },
                 },
-              },
-              quantity: item.quantity,
-            })),
+                quantity: item.quantity || 1,
+              };
+            }),
           }
         : null,
       upcoming_invoice: upcomingInvoice
@@ -485,20 +780,30 @@ export async function getStripeSubscriptionDetails(companyId: number) {
         id: invoice.id,
         number: invoice.number,
         amount_due: invoice.amount_due,
-        status: invoice.status,
+        status: invoice.status || null,
         created: invoice.created,
+        hosted_invoice_url: invoice.hosted_invoice_url,
+        invoice_pdf: invoice.invoice_pdf,
       })),
       paymentMethods: paymentMethods.data.map((method) => ({
         id: method.id,
         type: method.type,
         card: {
-          brand: method.card?.brand,
-          last4: method.card?.last4,
-          exp_month: method.card?.exp_month,
-          exp_year: method.card?.exp_year,
+          brand: method.card?.brand || null,
+          last4: method.card?.last4 || null,
+          exp_month: method.card?.exp_month || null,
+          exp_year: method.card?.exp_year || null,
         },
       })),
+      subscription_status: subscription?.status || null,
+      last_invoice_date:
+        invoices.data.length > 0 ? invoices.data[0].created : null,
+      last_invoice_status:
+        invoices.data.length > 0 ? invoices.data[0].status : null,
     };
+
+    // Cache the serialized data
+    await cacheStripeData(companyId, serializedData);
 
     console.log("Stripe data serialized:", {
       customerId: company.stripe_customer_id,
@@ -535,6 +840,25 @@ export async function updateSubscriptionQuantity({
       items: [{ id: itemId, quantity }],
     });
 
+    // Find the company ID from the subscription's customer
+    if (subscription.customer) {
+      const supabase = await createClient();
+      const { data: company } = await supabase
+        .from("companies")
+        .select("id")
+        .eq(
+          "stripe_customer_id",
+          typeof subscription.customer === "string"
+            ? subscription.customer
+            : subscription.customer.id
+        )
+        .single();
+
+      if (company) {
+        await invalidateStripeCache(company.id);
+      }
+    }
+
     return {
       success: true,
       message: "Subscription quantity updated successfully",
@@ -567,6 +891,25 @@ export async function changeSubscriptionPlan({
       proration_behavior: "always_invoice",
     });
 
+    // Find the company ID from the subscription's customer
+    if (subscription.customer) {
+      const supabase = await createClient();
+      const { data: company } = await supabase
+        .from("companies")
+        .select("id")
+        .eq(
+          "stripe_customer_id",
+          typeof subscription.customer === "string"
+            ? subscription.customer
+            : subscription.customer.id
+        )
+        .single();
+
+      if (company) {
+        await invalidateStripeCache(company.id);
+      }
+    }
+
     return {
       success: true,
       message: "Subscription plan changed successfully",
@@ -584,6 +927,18 @@ export async function getAvailablePlans() {
   }
 
   try {
+    // Try to get plans from cache first
+    const cachedPlans = await getCachedStripePlans();
+    if (cachedPlans) {
+      console.log("Using cached Stripe plans");
+      return {
+        success: true,
+        plans: cachedPlans,
+      };
+    }
+
+    console.time("stripe-plans-fetch");
+
     // First, get all active products
     const products = await stripe.products.list({
       active: true,
@@ -604,9 +959,16 @@ export async function getAvailablePlans() {
       activeProductIds.has((price.product as Stripe.Product).id)
     );
 
+    console.timeEnd("stripe-plans-fetch");
+
+    const serializedPlans = JSON.parse(JSON.stringify(activePrices));
+
+    // Cache the plans
+    await cacheStripePlans(serializedPlans);
+
     return {
       success: true,
-      plans: JSON.parse(JSON.stringify(activePrices)),
+      plans: serializedPlans,
     };
   } catch (error) {
     console.error("Error fetching available plans:", error);
@@ -638,6 +1000,28 @@ export async function addSubscriptionItem({
       quantity: quantity || 1,
       metadata,
     });
+
+    // Get the subscription to find the customer
+    const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+
+    // Find the company ID from the subscription's customer
+    if (subscription.customer) {
+      const supabase = await createClient();
+      const { data: company } = await supabase
+        .from("companies")
+        .select("id")
+        .eq(
+          "stripe_customer_id",
+          typeof subscription.customer === "string"
+            ? subscription.customer
+            : subscription.customer.id
+        )
+        .single();
+
+      if (company) {
+        await invalidateStripeCache(company.id);
+      }
+    }
 
     return {
       success: true,
@@ -722,6 +1106,10 @@ export async function addPaymentMethod(
     });
   }
 
+  // Invalidate caches
+  await invalidateStripeCache(companyId);
+  await cachePaymentMethods(companyId, paymentMethods.data);
+
   return paymentMethods.data;
 }
 
@@ -752,6 +1140,10 @@ export async function removePaymentMethod(
     customer: company.stripe_customer_id,
     type: "card",
   });
+
+  // Invalidate caches
+  await invalidateStripeCache(companyId);
+  await cachePaymentMethods(companyId, paymentMethods.data);
 
   return paymentMethods.data;
 }
@@ -787,6 +1179,10 @@ export async function setDefaultPaymentMethod(
     customer: company.stripe_customer_id,
     type: "card",
   });
+
+  // Invalidate caches
+  await invalidateStripeCache(companyId);
+  await cachePaymentMethods(companyId, paymentMethods.data);
 
   return paymentMethods.data;
 }
@@ -836,6 +1232,18 @@ export async function createSubscription({
       expand: ["latest_invoice"],
     });
 
+    // Find the company ID from the customer ID
+    const supabase = await createClient();
+    const { data: company } = await supabase
+      .from("companies")
+      .select("id")
+      .eq("stripe_customer_id", customerId)
+      .single();
+
+    if (company) {
+      await invalidateStripeCache(company.id);
+    }
+
     return {
       success: true,
       message: "Subscription created successfully",
@@ -853,7 +1261,30 @@ export async function cancelSubscription(subscriptionId: string) {
   }
 
   try {
+    // Get the subscription first to find the customer
+    const existingSubscription =
+      await stripe.subscriptions.retrieve(subscriptionId);
+
     const subscription = await stripe.subscriptions.cancel(subscriptionId);
+
+    // Find the company ID from the subscription's customer
+    if (existingSubscription.customer) {
+      const supabase = await createClient();
+      const { data: company } = await supabase
+        .from("companies")
+        .select("id")
+        .eq(
+          "stripe_customer_id",
+          typeof existingSubscription.customer === "string"
+            ? existingSubscription.customer
+            : existingSubscription.customer.id
+        )
+        .single();
+
+      if (company) {
+        await invalidateStripeCache(company.id);
+      }
+    }
 
     return {
       success: true,
@@ -872,11 +1303,34 @@ export async function pauseSubscription(subscriptionId: string) {
   }
 
   try {
+    // Get the subscription first to find the customer
+    const existingSubscription =
+      await stripe.subscriptions.retrieve(subscriptionId);
+
     const subscription = await stripe.subscriptions.update(subscriptionId, {
       pause_collection: {
         behavior: "mark_uncollectible",
       },
     });
+
+    // Find the company ID from the subscription's customer
+    if (existingSubscription.customer) {
+      const supabase = await createClient();
+      const { data: company } = await supabase
+        .from("companies")
+        .select("id")
+        .eq(
+          "stripe_customer_id",
+          typeof existingSubscription.customer === "string"
+            ? existingSubscription.customer
+            : existingSubscription.customer.id
+        )
+        .single();
+
+      if (company) {
+        await invalidateStripeCache(company.id);
+      }
+    }
 
     return {
       success: true,
@@ -895,9 +1349,32 @@ export async function resumeSubscription(subscriptionId: string) {
   }
 
   try {
+    // Get the subscription first to find the customer
+    const existingSubscription =
+      await stripe.subscriptions.retrieve(subscriptionId);
+
     const subscription = await stripe.subscriptions.update(subscriptionId, {
       pause_collection: null,
     });
+
+    // Find the company ID from the subscription's customer
+    if (existingSubscription.customer) {
+      const supabase = await createClient();
+      const { data: company } = await supabase
+        .from("companies")
+        .select("id")
+        .eq(
+          "stripe_customer_id",
+          typeof existingSubscription.customer === "string"
+            ? existingSubscription.customer
+            : existingSubscription.customer.id
+        )
+        .single();
+
+      if (company) {
+        await invalidateStripeCache(company.id);
+      }
+    }
 
     return {
       success: true,

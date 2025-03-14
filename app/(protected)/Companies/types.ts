@@ -10,6 +10,18 @@ export interface Company {
   stripe_subscription_id: string | null;
   stripe_payment_method_id: string | null;
   subscription_amount: number;
+  subscription_status?:
+    | "active"
+    | "trialing"
+    | "past_due"
+    | "canceled"
+    | "incomplete"
+    | "incomplete_expired"
+    | "unpaid"
+    | "paused"
+    | null;
+  last_invoice_date?: string | null;
+  last_invoice_status?: "paid" | "open" | "void" | "uncollectible" | null;
   last_synced_at?: string;
   created_at: string;
   updated_at: string;
@@ -17,6 +29,10 @@ export interface Company {
   notifications_enabled: boolean;
   auto_invoice: boolean;
   default_payment_method?: string;
+  street?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
 }
 
 export interface PaymentMethod {
