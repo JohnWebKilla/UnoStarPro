@@ -87,12 +87,9 @@ export function MessageBubble({
               name={senderInfo?.name || "Unknown"}
               image={senderInfo?.image}
               size="sm"
-          <Avatar
-            name={senderInfo?.name || "Unknown"}
-            image={senderInfo?.image}
-            size="sm"
-            online={senderInfo ? onlineUsers[senderInfo.id] : undefined}
-          />
+              online={senderInfo ? onlineUsers[senderInfo.id] : undefined}
+            />
+          </div>
         )}
         {!isOwn && !isLastInGroup && <div className="w-8" />}
 
