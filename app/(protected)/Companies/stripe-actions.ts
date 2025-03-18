@@ -565,56 +565,42 @@ export async function deleteCompanyFromStripe(company: Company): Promise<void> {
 
 export async function getStripeSubscriptionDetails(companyId: number) {
   if (!stripe) {
-    throw new Error("Stripe is not configured");
+    throw new Error("Stripe is not initialized");
   }
 
   const supabase = await createClient();
 
   try {
-    // Start timing
-    const startTime = performance.now();
-
-    // Get company from database
-    const { data: company } = await supabase
+    const { data: company, error: companyError } = await supabase
       .from("companies")
       .select()
       .eq("id", companyId)
       .single();
 
-    if (!company) {
-      throw new Error("Company not found");
+    if (companyError) {
+      throw companyError;
     }
 
     if (!company.stripe_customer_id) {
-      throw new Error("Company is not connected to Stripe");
+      throw new Error("Company does not have a Stripe customer ID");
     }
 
-    // Check if we have cached data
-    const cachedData = await getCachedStripeData(companyId);
-    if (cachedData) {
-      console.log("Using cached Stripe data for company", companyId);
-      return cachedData;
-    }
+    console.log("Fetching Stripe details for company:", {
+      companyId,
+      stripeCustomerId: company.stripe_customer_id,
+    });
 
-    // Fetch customer from Stripe
-    const customer = await stripe.customers.retrieve(
+    // Fetch customer details
+    const customer = (await stripe.customers.retrieve(
       company.stripe_customer_id,
       {
-        expand: ["invoice_settings.default_payment_method"],
+        expand: ["subscriptions", "invoice_settings.default_payment_method"],
       }
-    );
+    )) as Stripe.Customer;
 
     if (customer.deleted) {
       throw new Error("Stripe customer has been deleted");
     }
-
-    // Fetch subscriptions
-    const subscriptions = await stripe.subscriptions.list({
-      customer: company.stripe_customer_id,
-      status: "all",
-      limit: 1,
-      expand: ["data.latest_invoice"],
-    });
 
     // Fetch payment methods
     const paymentMethods = await stripe.paymentMethods.list({
@@ -622,103 +608,134 @@ export async function getStripeSubscriptionDetails(companyId: number) {
       type: "card",
     });
 
-    // Fetch invoices
+    // Get default payment method ID
+    let defaultPaymentMethodId = null;
+    if (customer.invoice_settings?.default_payment_method) {
+      defaultPaymentMethodId =
+        typeof customer.invoice_settings.default_payment_method === "string"
+          ? customer.invoice_settings.default_payment_method
+          : (
+              customer.invoice_settings
+                .default_payment_method as Stripe.PaymentMethod
+            ).id;
+    } else if (paymentMethods.data.length > 0) {
+      defaultPaymentMethodId = paymentMethods.data[0].id;
+    }
+
+    // Get subscription
+    const subscription = customer.subscriptions?.data[0];
+
+    // Fetch invoices with expanded subscription data
     const invoices = await stripe.invoices.list({
       customer: company.stripe_customer_id,
-      limit: 10,
+      limit: 100,
+      expand: ["data.subscription"],
     });
 
-    // Fetch upcoming invoice if there's an active subscription
+    console.log("Fetched Stripe data:", {
+      customerId: company.stripe_customer_id,
+      hasSubscription: !!subscription,
+      subscriptionStatus: subscription?.status,
+      invoiceCount: invoices.data.length,
+      defaultPaymentMethodId,
+    });
+
+    // Get upcoming invoice if there's an active subscription
     let upcomingInvoice = null;
-    let subscription = null;
-
-    if (subscriptions.data.length > 0) {
-      subscription = subscriptions.data[0];
-
-      // Fetch product details in parallel for all subscription items
-      if (subscription.items.data.length > 0) {
-        const productIds = subscription.items.data
-          .filter(
-            (item) =>
-              item.price?.product && typeof item.price.product === "string"
-          )
-          .map((item) => item.price.product as string);
-
-        if (productIds.length > 0) {
-          try {
-            // Fetch all products in a single call if possible
-            const products = await stripe.products.list({
-              ids: productIds,
-            });
-
-            // Create a map for quick lookup
-            const productMap = new Map(
-              products.data.map((product) => [
-                product.id,
-                {
-                  id: product.id,
-                  name: product.name,
-                  active: product.active,
-                },
-              ])
-            );
-
-            // Assign product details to each item
-            for (const item of subscription.items.data) {
-              if (
-                item.price?.product &&
-                typeof item.price.product === "string"
-              ) {
-                const productId = item.price.product;
-                const productData = productMap.get(productId) || {
-                  id: productId,
-                  name: "Unknown Product",
-                  active: true,
-                };
-
-                (item as any).productDetails = productData;
-              }
-            }
-          } catch (error) {
-            console.error("Error fetching product details:", error);
-          }
-        }
-      }
-
+    if (
+      subscription?.status === "active" ||
+      subscription?.status === "trialing"
+    ) {
       try {
         upcomingInvoice = await stripe.invoices.retrieveUpcoming({
           customer: company.stripe_customer_id,
         });
       } catch (error) {
-        console.log("No upcoming invoice available:", error);
+        console.warn("Error fetching upcoming invoice:", error);
       }
     }
 
-    // End timing
-    const endTime = performance.now();
-    console.log(
-      `stripe-data-fetch: ${((endTime - startTime) / 1000).toFixed(3)}s`
-    );
+    // Update company with latest invoice and subscription status
+    const latestInvoice = invoices.data[0];
+    if (latestInvoice || subscription) {
+      const updateData: {
+        last_synced_at: string;
+        last_invoice_date?: string;
+        last_invoice_status?: string;
+        subscription_status?: string;
+      } = {
+        last_synced_at: new Date().toISOString(),
+      };
 
-    // Get the default payment method
-    let defaultPaymentMethodId = null;
+      if (latestInvoice) {
+        updateData.last_invoice_date = new Date(
+          latestInvoice.created * 1000
+        ).toISOString();
+        updateData.last_invoice_status = latestInvoice.status || undefined;
+      }
 
-    // First check if there's a default payment method in the customer's invoice settings
-    if (
-      (customer as Stripe.Customer).invoice_settings?.default_payment_method
-    ) {
-      const defaultPaymentMethod = (customer as Stripe.Customer)
-        .invoice_settings.default_payment_method;
-      if (typeof defaultPaymentMethod === "string") {
-        defaultPaymentMethodId = defaultPaymentMethod;
-      } else if ((defaultPaymentMethod as any)?.id) {
-        defaultPaymentMethodId = (defaultPaymentMethod as any).id;
+      if (subscription) {
+        updateData.subscription_status = subscription.status || undefined;
+      }
+
+      console.log("Updating company with latest status:", updateData);
+
+      const { error: updateError } = await supabase
+        .from("companies")
+        .update(updateData)
+        .eq("id", companyId);
+
+      if (updateError) {
+        console.error("Error updating company status:", updateError);
       }
     }
 
-    // If no default payment method is set but there are payment methods, use the first one
-    if (!defaultPaymentMethodId && paymentMethods.data.length > 0) {
-      defaultPaymentMethodId = paymentMethods.data[0].id;
+    // Fetch product details in parallel for all subscription items
+    const subscriptionItems = subscription?.items?.data;
+    if (subscriptionItems && subscriptionItems.length > 0) {
+      const productIds = subscriptionItems
+        .filter(
+          (item: Stripe.SubscriptionItem) =>
+            item.price?.product && typeof item.price.product === "string"
+        )
+        .map((item: Stripe.SubscriptionItem) => item.price?.product as string);
+
+      if (productIds.length > 0) {
+        try {
+          // Fetch all products in a single call if possible
+          const products = await stripe.products.list({
+            ids: productIds,
+          });
+
+          // Create a map for quick lookup
+          const productMap = new Map(
+            products.data.map((product) => [
+              product.id,
+              {
+                id: product.id,
+                name: product.name,
+                active: product.active,
+              },
+            ])
+          );
+
+          // Assign product details to each item
+          for (const item of subscriptionItems) {
+            if (item.price?.product && typeof item.price.product === "string") {
+              const productId = item.price.product;
+              const productData = productMap.get(productId) || {
+                id: productId,
+                name: "Unknown Product",
+                active: true,
+              };
+
+              (item as any).productDetails = productData;
+            }
+          }
+        } catch (error) {
+          console.error("Error fetching product details:", error);
+        }
+      }
     }
 
     // Serialize the data to plain objects

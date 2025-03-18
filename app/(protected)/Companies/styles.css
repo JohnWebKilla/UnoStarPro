@@ -1,0 +1,65 @@
+/* Custom styles for the Companies table */
+
+.companies-table {
+    width: 100% !important;
+    table-layout: fixed !important;
+}
+
+.companies-table th,
+.companies-table td {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Column widths */
+.companies-table th:nth-child(1),
+.companies-table td:nth-child(1) {
+    width: 20% !important;
+}
+
+.companies-table th:nth-child(2),
+.companies-table td:nth-child(2) {
+    width: 25% !important;
+}
+
+.companies-table th:nth-child(3),
+.companies-table td:nth-child(3) {
+    width: 15% !important;
+}
+
+.companies-table th:nth-child(4),
+.companies-table td:nth-child(4) {
+    width: 20% !important;
+}
+
+.companies-table th:nth-child(5),
+.companies-table td:nth-child(5),
+.companies-table th:nth-child(6),
+.companies-table td:nth-child(6) {
+    width: 10% !important;
+}
+
+/* Truncate long subscription IDs */
+.companies-table .subscription-id {
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: inline-block;
+}
+
+/* Make badges more visible */
+.companies-table .badge {
+    display: inline-flex !important;
+    align-items: center !important;
+    white-space: nowrap !important;
+    min-width: 85px !important;
+    justify-content: center !important;
+}
+
+/* Fix invoice date display */
+.companies-table .invoice-date {
+    white-space: nowrap !important;
+    display: block !important;
+}

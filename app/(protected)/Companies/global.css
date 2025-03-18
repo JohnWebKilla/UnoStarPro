@@ -1,0 +1,121 @@
+/* Custom styles for the Companies table */
+
+.companies-table {
+    width: 100% !important;
+    table-layout: fixed !important;
+}
+
+.companies-table th,
+.companies-table td {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Column widths - update after adding new columns */
+.companies-table th:nth-child(1),
+.companies-table td:nth-child(1) {
+    width: 15% !important;
+    /* Company name */
+}
+
+.companies-table th:nth-child(2),
+.companies-table td:nth-child(2) {
+    width: 12% !important;
+    /* Contact name */
+}
+
+.companies-table th:nth-child(3),
+.companies-table td:nth-child(3) {
+    width: 15% !important;
+    /* Email */
+}
+
+.companies-table th:nth-child(4),
+.companies-table td:nth-child(4) {
+    width: 12% !important;
+    /* Phone */
+}
+
+.companies-table th:nth-child(5),
+.companies-table td:nth-child(5) {
+    width: 15% !important;
+    /* Subscription */
+}
+
+.companies-table th:nth-child(6),
+.companies-table td:nth-child(6) {
+    width: 12% !important;
+    /* Last Invoice */
+}
+
+.companies-table th:nth-child(7),
+.companies-table td:nth-child(7),
+.companies-table th:nth-child(8),
+.companies-table td:nth-child(8) {
+    width: 9.5% !important;
+    /* Status and Stripe */
+}
+
+/* Truncate long subscription IDs */
+.companies-table .subscription-id {
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: inline-block;
+}
+
+/* Update the badge styling to be more compact */
+.companies-table .badge {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding-left: 0.5rem !important;
+    padding-right: 0.5rem !important;
+    min-width: unset !important;
+}
+
+/* Add styling for the date icon hover */
+.companies-table .text-xs.cursor-help {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border-radius: 9999px;
+    padding: 1px;
+    transition: background-color 0.2s;
+}
+
+.companies-table .text-xs.cursor-help:hover {
+    background-color: rgba(0, 0, 0, 0.05);
+}
+
+/* Fix invoice date display */
+.companies-table .invoice-date {
+    white-space: nowrap !important;
+    display: block !important;
+}
+
+/* Email truncation */
+.companies-table a.truncate {
+    max-width: 200px;
+    display: inline-block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Add styling for ID hover icons */
+.companies-table .cursor-help {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    padding: 2px;
+    transition: background-color 0.2s, color 0.2s;
+}
+
+.companies-table .cursor-help:hover {
+    background-color: rgba(0, 0, 0, 0.05);
+    color: var(--primary);
+}

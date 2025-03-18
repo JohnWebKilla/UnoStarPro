@@ -150,6 +150,39 @@ export async function POST(req: Request) {
           }
           break;
 
+        case "invoice.created":
+        case "invoice.paid":
+        case "invoice.payment_failed":
+        case "invoice.finalized":
+          try {
+            const invoice = event.data.object as Stripe.Invoice;
+            console.log("Processing invoice event:", {
+              type: event.type,
+              invoiceId: invoice.id,
+              customerId: invoice.customer,
+              status: invoice.status,
+            });
+            result = await handleInvoiceUpdate(invoice, stripe);
+            updated = true;
+          } catch (error: unknown) {
+            console.error("Error in invoice event handler:", {
+              error,
+              type: event.type,
+              stack: error instanceof Error ? error.stack : undefined,
+              data: event.data.object,
+            });
+            // Don't throw, return error response
+            return new NextResponse(
+              JSON.stringify({
+                error: "Error processing invoice event",
+                details:
+                  error instanceof Error ? error.message : "Unknown error",
+              }),
+              { status: 500 }
+            );
+          }
+          break;
+
         case "customer.subscription.updated":
         case "customer.subscription.created":
         case "customer.subscription.deleted":
@@ -549,8 +582,7 @@ async function handleSubscriptionUpdate(
     const { error: updateError } = await supabaseAdmin
       .from("companies")
       .update({
-        stripe_subscription_id:
-          subscription.status === "active" ? subscription.id : null,
+        stripe_subscription_id: subscription.id,
         subscription_amount: subscription.items.data.reduce(
           (total: number, item: Stripe.SubscriptionItem) => {
             return (
@@ -559,6 +591,7 @@ async function handleSubscriptionUpdate(
           },
           0
         ),
+        subscription_status: subscription.status,
         last_synced_at: new Date().toISOString(),
       })
       .eq("id", company.id);
@@ -568,10 +601,32 @@ async function handleSubscriptionUpdate(
       throw updateError;
     }
 
+    // If subscription is canceled or inactive, update invoice status
+    if (
+      subscription.status === "canceled" ||
+      subscription.status === "unpaid"
+    ) {
+      const { error: invoiceUpdateError } = await supabaseAdmin
+        .from("companies")
+        .update({
+          last_invoice_status: "void",
+          last_synced_at: new Date().toISOString(),
+        })
+        .eq("id", company.id);
+
+      if (invoiceUpdateError) {
+        console.error("Error updating invoice status:", invoiceUpdateError);
+        throw invoiceUpdateError;
+      }
+    }
+
     console.log("Successfully updated subscription for company:", {
       companyId: company.id,
       subscriptionId: subscription.id,
+      status: subscription.status,
     });
+
+    return company;
   } catch (error) {
     console.error("Error in handleSubscriptionUpdate:", {
       error,
@@ -670,6 +725,94 @@ async function handlePaymentMethodUpdate(
       error,
       paymentMethodId: paymentMethod.id,
       customerId: paymentMethod.customer,
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    throw error;
+  }
+}
+
+async function handleInvoiceUpdate(
+  invoice: Stripe.Invoice,
+  stripeInstance: Stripe
+) {
+  console.log("Starting handleInvoiceUpdate for invoice:", {
+    invoiceId: invoice.id,
+    customerId: invoice.customer,
+    status: invoice.status,
+  });
+
+  try {
+    // Find company by customer ID
+    const { data: company, error: findError } = await supabaseAdmin
+      .from("companies")
+      .select()
+      .eq("stripe_customer_id", invoice.customer)
+      .maybeSingle();
+
+    if (findError) {
+      console.error("Error finding company for invoice:", findError);
+      throw findError;
+    }
+
+    if (!company) {
+      console.log(`⚠️ No company found for invoice ${invoice.id}`);
+      return;
+    }
+
+    console.log("Updating invoice for company:", {
+      companyId: company.id,
+      invoiceId: invoice.id,
+      status: invoice.status,
+    });
+
+    // Update invoice details
+    const updateData: {
+      last_invoice_date: string;
+      last_invoice_status: string | null;
+      last_synced_at: string;
+      subscription_status?: string;
+    } = {
+      last_invoice_date: new Date(invoice.created * 1000).toISOString(),
+      last_invoice_status: invoice.status,
+      last_synced_at: new Date().toISOString(),
+    };
+
+    // If invoice is paid, update subscription status to active
+    if (invoice.status === "paid" && invoice.subscription) {
+      updateData.subscription_status = "active";
+    }
+
+    // If invoice is uncollectible or void, update subscription status to past_due
+    if (
+      (invoice.status === "uncollectible" || invoice.status === "void") &&
+      invoice.subscription
+    ) {
+      updateData.subscription_status = "past_due";
+    }
+
+    const { error: updateError } = await supabaseAdmin
+      .from("companies")
+      .update(updateData)
+      .eq("id", company.id);
+
+    if (updateError) {
+      console.error("Error updating invoice:", updateError);
+      throw updateError;
+    }
+
+    console.log("Successfully updated invoice for company:", {
+      companyId: company.id,
+      invoiceId: invoice.id,
+      status: invoice.status,
+      updateData,
+    });
+
+    return company;
+  } catch (error) {
+    console.error("Error in handleInvoiceUpdate:", {
+      error,
+      invoiceId: invoice.id,
+      customerId: invoice.customer,
       stack: error instanceof Error ? error.stack : undefined,
     });
     throw error;

@@ -11,7 +11,11 @@ import {
   Clock,
   XCircle,
   Receipt,
+  Building2,
+  Mail,
+  Phone,
 } from "lucide-react";
+import { PaymentStatusBadge } from "./payment-status-badge";
 
 function formatDate(date: string | undefined | null) {
   if (!date) return "-";
@@ -19,6 +23,8 @@ function formatDate(date: string | undefined | null) {
     year: "numeric",
     month: "short",
     day: "numeric",
+    hour: "numeric",
+    minute: "numeric",
   });
 }
 
@@ -34,22 +40,60 @@ function getSubscriptionStatusBadge(status: string | undefined | null) {
     {
       variant: "default" | "secondary" | "destructive" | "outline" | "success";
       label: string;
+      icon: React.ReactNode;
     }
   > = {
-    active: { variant: "success", label: "Active" },
-    trialing: { variant: "secondary", label: "Trial" },
-    past_due: { variant: "destructive", label: "Past Due" },
-    canceled: { variant: "outline", label: "Canceled" },
-    incomplete: { variant: "outline", label: "Incomplete" },
-    incomplete_expired: { variant: "outline", label: "Expired" },
-    unpaid: { variant: "destructive", label: "Unpaid" },
-    paused: { variant: "secondary", label: "Paused" },
+    active: {
+      variant: "success",
+      label: "Active",
+      icon: <CheckCircle2 className="mr-1 h-3 w-3" />,
+    },
+    trialing: {
+      variant: "secondary",
+      label: "Trial",
+      icon: <Clock className="mr-1 h-3 w-3" />,
+    },
+    past_due: {
+      variant: "destructive",
+      label: "Past Due",
+      icon: <AlertCircle className="mr-1 h-3 w-3" />,
+    },
+    canceled: {
+      variant: "outline",
+      label: "Canceled",
+      icon: <XCircle className="mr-1 h-3 w-3" />,
+    },
+    incomplete: {
+      variant: "outline",
+      label: "Incomplete",
+      icon: <AlertCircle className="mr-1 h-3 w-3" />,
+    },
+    incomplete_expired: {
+      variant: "outline",
+      label: "Expired",
+      icon: <XCircle className="mr-1 h-3 w-3" />,
+    },
+    unpaid: {
+      variant: "destructive",
+      label: "Unpaid",
+      icon: <AlertCircle className="mr-1 h-3 w-3" />,
+    },
+    paused: {
+      variant: "secondary",
+      label: "Paused",
+      icon: <Clock className="mr-1 h-3 w-3" />,
+    },
   };
 
-  const config = variants[status] || { variant: "outline", label: status };
+  const config = variants[status] || {
+    variant: "outline",
+    label: status,
+    icon: null,
+  };
 
   return (
-    <Badge variant={config.variant} className="h-6">
+    <Badge variant={config.variant} className="h-6 badge">
+      {config.icon}
       {config.label}
     </Badge>
   );
@@ -67,24 +111,55 @@ function getInvoiceStatusBadge(status: string | undefined | null) {
   > = {
     paid: {
       variant: "success",
-      icon: <CheckCircle2 className="mr-1 h-3 w-3" />,
+      icon: <CheckCircle2 className="h-3 w-3" />,
     },
-    open: { variant: "secondary", icon: <Clock className="mr-1 h-3 w-3" /> },
-    void: { variant: "outline", icon: <XCircle className="mr-1 h-3 w-3" /> },
+    open: {
+      variant: "secondary",
+      icon: <Clock className="h-3 w-3" />,
+    },
+    void: {
+      variant: "outline",
+      icon: <XCircle className="h-3 w-3" />,
+    },
     uncollectible: {
       variant: "destructive",
-      icon: <AlertCircle className="mr-1 h-3 w-3" />,
+      icon: <AlertCircle className="h-3 w-3" />,
     },
   };
 
   const config = variants[status] || { variant: "outline", icon: null };
 
+  // Return a more compact badge with just the icon for most statuses
+  if (status === "paid") {
+    return (
+      <Badge variant={config.variant} className="h-6 px-2 badge">
+        {config.icon}
+        <span className="ml-1">Paid</span>
+      </Badge>
+    );
+  }
+
   return (
-    <Badge variant={config.variant} className="h-6">
+    <Badge variant={config.variant} className="h-6 px-2 badge">
       {config.icon}
-      {status.charAt(0).toUpperCase() + status.slice(1)}
     </Badge>
   );
+}
+
+// Add a function to format phone numbers in US format
+function formatPhoneNumber(phone: string | undefined | null) {
+  if (!phone) return "-";
+
+  // Remove all non-digit characters
+  const cleaned = phone.replace(/\D/g, "");
+
+  // Check for valid US phone number length
+  if (cleaned.length !== 10) {
+    return phone; // Return original if not 10 digits
+  }
+
+  // Format as (XXX) XXX-XXXX
+  return `(${cleaned.substring(0, 3)}) ${cleaned.substring(3, 6)}-${cleaned.substring(6, 10)}`;
 }
 
 export const columns: ColumnDef<Company>[] = [
@@ -92,27 +167,29 @@ export const columns: ColumnDef<Company>[] = [
     accessorKey: "name",
     header: ({ column }) => {
       return (
-        <div className="flex items-center">
-          <Button
-            variant="ghost"
-            className="p-0 h-8 font-medium hover:bg-transparent hover:text-primary"
-            onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-          >
-            Company
-            <ArrowUpDown className="ml-2 h-4 w-4" />
-          </Button>
-        </div>
+        <Button
+          variant="ghost"
+          className="p-0 h-8 font-medium hover:bg-transparent hover:text-primary"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+        >
+          <Building2 className="mr-2 h-4 w-4" />
+          Company
+          <ArrowUpDown className="ml-2 h-4 w-4" />
+        </Button>
       );
     },
     cell: ({ row }) => {
       const name = row.getValue("name") as string;
       const stripeId = row.original.stripe_customer_id;
       return (
-        <div className="flex flex-col space-y-1">
+        <div className="flex items-center">
           <span className="font-medium">{name}</span>
           {stripeId && (
-            <span className="text-[11px] text-muted-foreground truncate max-w-[200px]">
-              {stripeId}
+            <span
+              className="ml-1.5 cursor-help"
+              title={`Stripe ID: ${stripeId}`}
+            >
+              <CreditCard className="h-3 w-3 text-muted-foreground" />
             </span>
           )}
         </div>
@@ -123,23 +200,24 @@ export const columns: ColumnDef<Company>[] = [
     accessorKey: "contact_name",
     header: ({ column }) => {
       return (
-        <div className="flex items-center">
-          <Button
-            variant="ghost"
-            className="p-0 h-8 font-medium hover:bg-transparent hover:text-primary"
-            onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-          >
-            Contact
-            <ArrowUpDown className="ml-2 h-4 w-4" />
-          </Button>
-        </div>
+        <Button
+          variant="ghost"
+          className="p-0 h-8 font-medium hover:bg-transparent hover:text-primary"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+        >
+          Contact
+          <ArrowUpDown className="ml-2 h-4 w-4" />
+        </Button>
       );
     },
     cell: ({ row }) => {
       const firstName = row.original.contact_first_name;
       const lastName = row.original.contact_last_name;
+
       return (
-        <div>{firstName || lastName ? `${firstName} ${lastName}` : "-"}</div>
+        <div className="font-medium">
+          {firstName || lastName ? `${firstName} ${lastName}` : "-"}
+        </div>
       );
     },
   },
@@ -147,74 +225,89 @@ export const columns: ColumnDef<Company>[] = [
     accessorKey: "contact_email",
     header: ({ column }) => {
       return (
-        <div className="flex items-center">
-          <Button
-            variant="ghost"
-            className="p-0 h-8 font-medium hover:bg-transparent hover:text-primary"
-            onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-          >
-            Email
-            <ArrowUpDown className="ml-2 h-4 w-4" />
-          </Button>
-        </div>
+        <Button
+          variant="ghost"
+          className="p-0 h-8 font-medium hover:bg-transparent hover:text-primary"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+        >
+          Email
+          <ArrowUpDown className="ml-2 h-4 w-4" />
+        </Button>
       );
     },
     cell: ({ row }) => {
       const email = row.original.contact_email;
-      return <div>{email || "-"}</div>;
+
+      if (!email) return <div className="text-muted-foreground">-</div>;
+
+      return (
+        <a
+          href={`mailto:${email}`}
+          className="hover:underline truncate text-sm"
+        >
+          {email}
+        </a>
+      );
     },
   },
   {
     accessorKey: "contact_phone",
     header: ({ column }) => {
       return (
-        <div className="flex items-center">
-          <Button
-            variant="ghost"
-            className="p-0 h-8 font-medium hover:bg-transparent hover:text-primary"
-            onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-          >
-            Phone
-            <ArrowUpDown className="ml-2 h-4 w-4" />
-          </Button>
-        </div>
+        <Button
+          variant="ghost"
+          className="p-0 h-8 font-medium hover:bg-transparent hover:text-primary"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+        >
+          Phone
+          <ArrowUpDown className="ml-2 h-4 w-4" />
+        </Button>
       );
     },
     cell: ({ row }) => {
       const phone = row.original.contact_phone;
-      return <div>{phone || "-"}</div>;
+
+      if (!phone) return <div className="text-muted-foreground">-</div>;
+
+      const formattedPhone = formatPhoneNumber(phone);
+
+      return (
+        <a href={`tel:${phone}`} className="hover:underline text-sm">
+          {formattedPhone}
+        </a>
+      );
     },
   },
   {
-    accessorKey: "subscription_amount",
+    accessorKey: "subscription",
     header: ({ column }) => {
       return (
-        <div className="flex items-center">
-          <Button
-            variant="ghost"
-            className="p-0 h-8 font-medium hover:bg-transparent hover:text-primary"
-            onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-          >
-            Subscription
-            <ArrowUpDown className="ml-2 h-4 w-4" />
-          </Button>
-        </div>
+        <Button
+          variant="ghost"
+          className="p-0 h-8 font-medium hover:bg-transparent hover:text-primary"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+        >
+          <CreditCard className="mr-2 h-4 w-4" />
+          Subscription
+          <ArrowUpDown className="ml-2 h-4 w-4" />
+        </Button>
       );
     },
     cell: ({ row }) => {
-      const amount = row.getValue("subscription_amount") as number;
-      const hasSubscription = row.original.stripe_subscription_id;
+      const amount = row.original.subscription_amount;
       const status = row.original.subscription_status;
+      const subscriptionId = row.original.stripe_subscription_id;
 
       return (
-        <div className="flex flex-col space-y-1">
-          <div className="flex items-center gap-2">
-            <span>{formatCurrency(amount)}</span>
-            {status && getSubscriptionStatusBadge(status)}
-          </div>
-          {hasSubscription && (
-            <span className="text-[11px] text-muted-foreground truncate max-w-[150px]">
-              {row.original.stripe_subscription_id}
+        <div className="flex items-center gap-2">
+          <span className="font-medium">{formatCurrency(amount)}</span>
+          {status && getSubscriptionStatusBadge(status)}
+          {subscriptionId && (
+            <span
+              className="cursor-help"
+              title={`Subscription ID: ${subscriptionId}`}
+            >
+              <Receipt className="h-3.5 w-3.5 text-muted-foreground" />
             </span>
           )}
         </div>
@@ -225,34 +318,35 @@ export const columns: ColumnDef<Company>[] = [
     accessorKey: "last_invoice",
     header: ({ column }) => {
       return (
-        <div className="flex items-center">
-          <Button
-            variant="ghost"
-            className="p-0 h-8 font-medium hover:bg-transparent hover:text-primary"
-            onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-          >
-            Last Invoice
-            <ArrowUpDown className="ml-2 h-4 w-4" />
-          </Button>
-        </div>
+        <Button
+          variant="ghost"
+          className="p-0 h-8 font-medium hover:bg-transparent hover:text-primary"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+        >
+          <Receipt className="mr-2 h-4 w-4" />
+          Last Invoice
+          <ArrowUpDown className="ml-2 h-4 w-4" />
+        </Button>
       );
     },
     cell: ({ row }) => {
       const lastInvoiceDate = row.original.last_invoice_date;
       const lastInvoiceStatus = row.original.last_invoice_status;
 
-      if (!lastInvoiceDate) {
-        return <div>-</div>;
+      if (!lastInvoiceDate && !lastInvoiceStatus) {
+        return <div className="text-muted-foreground">No invoices yet</div>;
       }
 
       return (
-        <div className="flex flex-col space-y-1">
-          <div className="flex items-center gap-2">
-            <Receipt className="h-3 w-3 text-muted-foreground" />
-            <span>{formatDate(lastInvoiceDate)}</span>
-          </div>
-          {lastInvoiceStatus && (
-            <div>{getInvoiceStatusBadge(lastInvoiceStatus)}</div>
+        <div className="flex items-center space-x-2">
+          {lastInvoiceStatus && getInvoiceStatusBadge(lastInvoiceStatus)}
+          {lastInvoiceDate && (
+            <div
+              className="text-xs text-muted-foreground cursor-help"
+              title={formatDate(lastInvoiceDate)}
+            >
+              <Clock className="h-3.5 w-3.5" />
+            </div>
           )}
         </div>
       );
@@ -262,98 +356,38 @@ export const columns: ColumnDef<Company>[] = [
     accessorKey: "status",
     header: ({ column }) => {
       return (
-        <div className="flex items-center">
-          <Button
-            variant="ghost"
-            className="p-0 h-8 font-medium hover:bg-transparent hover:text-primary"
-            onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-          >
-            Status
-            <ArrowUpDown className="ml-2 h-4 w-4" />
-          </Button>
-        </div>
+        <Button
+          variant="ghost"
+          className="p-0 h-8 font-medium hover:bg-transparent hover:text-primary"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+        >
+          Status
+          <ArrowUpDown className="ml-2 h-4 w-4" />
+        </Button>
       );
     },
     cell: ({ row }) => {
       const status = row.getValue("status") as string;
       return (
-        <div>
-          <Badge
-            variant={status === "active" ? "default" : "secondary"}
-            className="h-6"
-          >
-            {status}
-          </Badge>
-        </div>
+        <Badge
+          variant={status === "active" ? "success" : "secondary"}
+          className="h-6"
+        >
+          {status === "active" ? (
+            <CheckCircle2 className="mr-1 h-3 w-3" />
+          ) : (
+            <XCircle className="mr-1 h-3 w-3" />
+          )}
+          {status.charAt(0).toUpperCase() + status.slice(1)}
+        </Badge>
       );
     },
   },
   {
-    accessorKey: "stripe_status",
-    header: ({ column }) => {
-      return (
-        <div className="flex items-center">
-          <Button
-            variant="ghost"
-            className="p-0 h-8 font-medium hover:bg-transparent hover:text-primary"
-            onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-          >
-            Stripe
-            <ArrowUpDown className="ml-2 h-4 w-4" />
-          </Button>
-        </div>
-      );
-    },
+    accessorKey: "stripe",
+    header: "Stripe",
     cell: ({ row }) => {
-      const stripeId = row.original.stripe_customer_id;
-      const lastSynced = row.original.last_synced_at;
-      const hasPaymentMethod = row.original.stripe_payment_method_id;
-
-      if (!stripeId) {
-        return (
-          <div>
-            <Badge variant="secondary" className="h-6">
-              Not Connected
-            </Badge>
-          </div>
-        );
-      }
-
-      return (
-        <div className="flex flex-col space-y-1">
-          <div className="flex items-center gap-1">
-            <Badge
-              variant={hasPaymentMethod ? "default" : "secondary"}
-              className="h-6"
-            >
-              <CreditCard className="mr-1 h-3 w-3" />
-              {hasPaymentMethod ? "Active" : "No Payment"}
-            </Badge>
-            {stripeId && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6 p-0"
-                asChild
-                onClick={(e) => e.stopPropagation()}
-              >
-                <a
-                  href={`https://dashboard.stripe.com/customers/${stripeId}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <ExternalLink className="h-3 w-3" />
-                </a>
-              </Button>
-            )}
-          </div>
-          {lastSynced && (
-            <span className="text-[11px] text-muted-foreground">
-              {formatDate(lastSynced)}
-            </span>
-          )}
-        </div>
-      );
+      return <PaymentStatusBadge company={row.original} />;
     },
   },
 ];

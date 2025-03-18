@@ -3,6 +3,7 @@ import { ThemeProvider } from "next-themes";
 import { GeistSans } from "geist/font/sans";
 import { UserProvider } from "@/contexts/UserContext";
 import "./globals.css";
+import "./(protected)/Companies/global.css";
 import { Toaster } from "@/components/ui/toaster";
 import { NotificationProvider } from "@/app/(protected)/Banners/components/NotificationProvider";
 

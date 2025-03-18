@@ -15,7 +15,11 @@ export function SummaryCards({ companies }: SummaryCardsProps) {
 
   const activeSubscriptions = companies.filter(
     (c) =>
-      c.subscription_status === "active" || c.subscription_status === "trialing"
+      c.subscription_status === "active" ||
+      c.subscription_status === "trialing" ||
+      (c.stripe_subscription_id &&
+        c.subscription_amount > 0 &&
+        c.status === "active")
   ).length;
 
   const totalSubscriptionRevenue = companies.reduce(
