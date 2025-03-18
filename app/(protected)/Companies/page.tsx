@@ -10,12 +10,7 @@ import { CompanyDialog } from "./company-dialog";
 import { StripeDialog } from "./stripe-dialog";
 import { CompanySideDialog } from "./company-side-dialog";
 import { useToast } from "@/components/ui/use-toast";
-import {
-  getCompanies,
-  createCompany,
-  updateCompany,
-  deleteCompany,
-} from "./actions";
+import { getCompanies, createCompany, updateCompany } from "./actions";
 import { syncStripeCustomers, syncStripeCustomer } from "./stripe-actions";
 import { createClient } from "@/utils/supabase/client";
 import { RealtimeChannel } from "@supabase/supabase-js";
@@ -40,6 +35,7 @@ export default function CompaniesPage() {
     "database"
   );
   const [lastFetchTime, setLastFetchTime] = useState<Date | null>(null);
+  const [editDialogMode, setEditDialogMode] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -167,7 +163,8 @@ export default function CompaniesPage() {
 
   const handleEdit = (company: Company) => {
     setSelectedCompany(company);
-    setDialogOpen(true);
+    setSideDialogOpen(true);
+    setEditDialogMode(true);
   };
 
   const handleUpdateStatus = async (company: Company) => {
@@ -329,67 +326,39 @@ export default function CompaniesPage() {
   };
 
   const handleRowClick = async (company: Company) => {
+    // Reset edit mode
+    setEditDialogMode(false);
+
+    // Open the dialog immediately
     setSelectedCompany(company);
+    setSideDialogOpen(true);
 
     // Start loading Stripe data in the background if the company has a Stripe customer ID
     if (company.stripe_customer_id) {
       try {
-        // Set loading state in the row
+        // Set loading state in the row, but don't wait for data to show the dialog
         setLoadingRows((prev) => ({ ...prev, [company.id]: true }));
 
-        // Start loading the data immediately
-        const data = await getStripeSubscriptionDetails(company.id);
+        // Fetch data in the background - don't await here
+        getStripeSubscriptionDetails(company.id)
+          .then((data) => {
+            // Store the data in a cache that can be accessed by the dialog
+            subscriptionDetailsCache.set(company.id, {
+              data: data,
+              timestamp: Date.now(),
+            });
 
-        // Store the data in a cache that can be accessed by the dialog
-        subscriptionDetailsCache.set(company.id, {
-          data: data,
-          timestamp: Date.now(),
-        });
-
-        // Keep the loading state active for a much longer period to ensure smooth transition
-        // This forces the skeleton UI to be visible for a guaranteed amount of time
-        setTimeout(() => {
-          setLoadingRows((prev) => ({ ...prev, [company.id]: false }));
-        }, 3000); // Increased to 3 seconds for a guaranteed visible loading state
+            // Remove loading state once data is loaded
+            setLoadingRows((prev) => ({ ...prev, [company.id]: false }));
+          })
+          .catch((error) => {
+            console.error("Error loading Stripe data:", error);
+            setLoadingRows((prev) => ({ ...prev, [company.id]: false }));
+          });
       } catch (error) {
-        console.error("Error pre-loading Stripe data:", error);
-        // Don't show an error toast here, let the dialog handle errors
-
-        // Even on error, delay turning off the loading state
-        setTimeout(() => {
-          setLoadingRows((prev) => ({ ...prev, [company.id]: false }));
-        }, 3000);
+        console.error("Error setting up Stripe data load:", error);
+        setLoadingRows((prev) => ({ ...prev, [company.id]: false }));
       }
-    }
-
-    // Open the dialog
-    setSideDialogOpen(true);
-  };
-
-  const handleDeleteCompany = async (companyId: number) => {
-    try {
-      setError(undefined);
-      setLoadingRows((prev) => ({ ...prev, [companyId]: true }));
-      await deleteCompany(companyId);
-      setCompanies((prev) => prev.filter((c) => c.id !== companyId));
-      setDataSource("database");
-      setLastFetchTime(new Date());
-      toast({
-        title: "Success",
-        description: "Company deleted successfully",
-      });
-    } catch (error) {
-      console.error("Error deleting company:", error);
-      const errorMessage =
-        error instanceof Error ? error.message : "Failed to delete company";
-      setError(errorMessage);
-      toast({
-        title: "Error",
-        description: errorMessage,
-        variant: "destructive",
-      });
-    } finally {
-      setLoadingRows((prev) => ({ ...prev, [companyId]: false }));
     }
   };
 
@@ -402,6 +371,7 @@ export default function CompaniesPage() {
     setSideDialogOpen(open);
     if (!open) {
       setSelectedCompany(undefined);
+      setEditDialogMode(false);
     }
   };
 
@@ -497,8 +467,8 @@ export default function CompaniesPage() {
           open={sideDialogOpen}
           onOpenChange={handleSideDialogOpenChange}
           company={selectedCompany}
-          onDelete={handleDeleteCompany}
           onUpdate={handleUpdateCompany}
+          initialEditMode={editDialogMode}
         />
       )}
     </div>

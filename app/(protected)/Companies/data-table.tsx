@@ -29,6 +29,7 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
@@ -39,6 +40,9 @@ import {
   Settings2,
   SlidersHorizontal,
   ChevronDown,
+  Edit,
+  Eye,
+  Trash,
 } from "lucide-react";
 import { useState } from "react";
 import { Company, CompanyMeta } from "./types";
@@ -179,7 +183,34 @@ export function DataTable<TData, TValue>({
                     "cursor-pointer hover:bg-muted/50 relative",
                     loadingRows[row.index] && "bg-muted/30"
                   )}
-                  onClick={() => meta?.onRowClick?.(row.original as Company)}
+                  onClick={(e) => {
+                    const target = e.target as HTMLElement;
+                    if (
+                      target.closest(".row-actions-menu") ||
+                      target.closest("[data-dropdown-menu]")
+                    ) {
+                      e.stopPropagation();
+                      return;
+                    }
+
+                    if (!loadingRows[row.index]) {
+                      const rowElem = document.getElementById(
+                        `table-row-${row.id}`
+                      );
+                      if (rowElem) {
+                        rowElem.classList.add("bg-muted/30");
+                      }
+                    }
+                    meta?.onRowClick?.(row.original as Company);
+                  }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    const shouldEdit = window.confirm("Edit this company?");
+                    if (shouldEdit) {
+                      meta?.onEdit?.(row.original as Company);
+                    }
+                  }}
+                  id={`table-row-${row.id}`}
                 >
                   {loadingRows[row.index] && (
                     <div className="absolute inset-0 flex items-center justify-center bg-background/50 backdrop-blur-[1px] z-10">

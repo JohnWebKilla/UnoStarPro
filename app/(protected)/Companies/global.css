@@ -74,6 +74,8 @@
     padding-left: 0.5rem !important;
     padding-right: 0.5rem !important;
     min-width: unset !important;
+    border: 1px solid transparent;
+    transition: all 0.2s ease;
 }
 
 /* Add styling for the date icon hover */
@@ -90,10 +92,34 @@
     background-color: rgba(0, 0, 0, 0.05);
 }
 
-/* Fix invoice date display */
+/* Update the invoice date styling for improved visibility */
+.companies-table .invoice-date-container {
+    display: flex;
+    flex-direction: column;
+}
+
 .companies-table .invoice-date {
-    white-space: nowrap !important;
-    display: block !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    font-size: 0.75rem;
+    color: var(--muted-foreground);
+    white-space: nowrap;
+}
+
+.companies-table .invoice-date-time {
+    font-size: 10px;
+    white-space: nowrap;
+    color: hsl(var(--muted-foreground));
+}
+
+.dark .companies-table .invoice-date,
+.dark .companies-table .invoice-date-time {
+    color: hsl(var(--muted-foreground) / 0.8);
+}
+
+/* Make the clock icon more visible in dark mode */
+.dark .companies-table .invoice-date .clock-icon {
+    color: hsl(var(--muted-foreground) / 0.9);
 }
 
 /* Email truncation */
@@ -107,15 +133,129 @@
 
 /* Add styling for ID hover icons */
 .companies-table .cursor-help {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 9999px;
-    padding: 2px;
-    transition: background-color 0.2s, color 0.2s;
+    cursor: help;
+    position: relative;
 }
 
+/* Make sure there are no unwanted icons */
+.companies-table .cursor-help::before,
+.companies-table .cursor-help::after {
+    display: none !important;
+    content: none !important;
+}
+
+/* Ensure clock icon is properly displayed */
+.companies-table .cursor-help .clock-icon {
+    margin-right: 4px;
+    display: inline-flex !important;
+}
+
+/* Fix additional styling for dark mode */
+.dark .companies-table .cursor-help {
+    background-color: transparent;
+    color: hsl(var(--muted-foreground) / 0.8);
+}
+
+.dark .companies-table .cursor-help:hover {
+    background-color: hsl(var(--muted) / 0.1);
+    color: hsl(var(--muted-foreground));
+}
+
+/* Enhance status badges in dark mode */
+.dark .companies-table .badge[data-variant="success"] {
+    border-color: hsl(var(--green-500) / 0.2);
+    color: hsl(var(--green-400));
+    background-color: hsl(var(--green-900) / 0.2);
+}
+
+.dark .companies-table .badge[data-variant="destructive"] {
+    border-color: hsl(var(--red-500) / 0.2);
+    color: hsl(var(--red-400));
+    background-color: hsl(var(--red-900) / 0.2);
+}
+
+.dark .companies-table .badge[data-variant="secondary"] {
+    border-color: hsl(var(--secondary) / 0.2);
+    color: hsl(var(--secondary-foreground));
+    background-color: hsl(var(--secondary) / 0.1);
+}
+
+.dark .companies-table .badge[data-variant="outline"] {
+    border-color: hsl(var(--border) / 0.4);
+    color: hsl(var(--muted-foreground));
+    background-color: transparent;
+}
+
+/* Add specific styling for the inactive status badge */
+.companies-table .badge[data-state="inactive"],
+.companies-table .badge[data-variant="destructive"] {
+    border-color: hsl(var(--red-500) / 0.3);
+    background-color: hsl(var(--red-500) / 0.1);
+    color: hsl(var(--red-600));
+}
+
+.dark .companies-table .badge[data-state="inactive"],
+.dark .companies-table .badge[data-variant="destructive"] {
+    border-color: hsl(var(--red-500) / 0.3);
+    background-color: hsl(var(--red-900) / 0.3);
+    color: hsl(var(--red-500));
+}
+
+/* Add back light mode hover style */
 .companies-table .cursor-help:hover {
     background-color: rgba(0, 0, 0, 0.05);
     color: var(--primary);
+}
+
+/* Reset any other Tippy or tooltip styling that might be applied */
+.companies-table .invoice-date::before,
+.companies-table .invoice-date::after {
+    display: none !important;
+    content: none !important;
+}
+
+/* Remove tooltip icon */
+.tippy-icon,
+[data-tippy-root],
+[data-reach-tooltip],
+[data-reach-tooltip-trigger]::before,
+[data-reach-tooltip-trigger]::after,
+[data-tooltip]::before,
+[data-tooltip]::after {
+    display: none !important;
+}
+
+/* Ensure no other elements can add tooltips */
+*[title]::before,
+*[title]::after {
+    display: none !important;
+    content: none !important;
+}
+
+/* Target specific tooltip elements that might be coming from UI libraries */
+.tooltip,
+.Tooltip,
+.tooltip-inner,
+.tooltip-container,
+.MuiTooltip-tooltip,
+.tooltip-arrow,
+.info-tooltip,
+.info-icon,
+.info-circle {
+    display: none !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+}
+
+/* Make date display cleaner in table cell */
+.companies-table td .invoice-date {
+    display: flex !important;
+    align-items: center !important;
+    gap: 0.25rem;
+    color: hsl(var(--muted-foreground));
+    font-size: 0.75rem;
+}
+
+.dark .companies-table td .invoice-date {
+    color: hsl(var(--muted-foreground) / 0.85);
 }

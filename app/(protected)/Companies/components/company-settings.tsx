@@ -31,6 +31,9 @@ import {
   Clock,
   Bell,
   FileText,
+  MapPin,
+  XCircle,
+  CheckCircle,
 } from "lucide-react";
 import { Company } from "../types";
 import {
@@ -52,6 +55,14 @@ import {
   CardTitle,
   CardDescription,
 } from "@/components/ui/card";
+import { DeactivationDialog } from "./deactivation-dialog";
+import { CompanyEditForm } from "../components/company-edit-form";
+
+interface ToggleStatusOptions {
+  cancelSubscription?: boolean;
+  cancellationType?: "now" | "end_period";
+  issueRefund?: boolean;
+}
 
 const settingsFormSchema = z.object({
   name: z.string().min(1, "Company name is required"),
@@ -62,6 +73,10 @@ const settingsFormSchema = z.object({
   timezone: z.string().min(1, "Timezone is required"),
   notifications_enabled: z.boolean(),
   auto_invoice: z.boolean(),
+  street: z.string().optional(),
+  city: z.string().optional(),
+  state: z.string().optional(),
+  zip: z.string().optional(),
 });
 
 type SettingsFormValues = z.infer<typeof settingsFormSchema>;
@@ -69,15 +84,16 @@ type SettingsFormValues = z.infer<typeof settingsFormSchema>;
 interface CompanySettingsProps {
   company: Company;
   onUpdate: (data: Partial<Company>) => Promise<void>;
-  onDelete: () => Promise<void>;
+  onToggleStatus: (options?: ToggleStatusOptions) => Promise<void>;
 }
 
 export function CompanySettings({
   company,
   onUpdate,
-  onDelete,
+  onToggleStatus,
 }: CompanySettingsProps) {
   const [loading, setLoading] = useState(false);
+  const [showDeactivationDialog, setShowDeactivationDialog] = useState(false);
 
   const form = useForm<SettingsFormValues>({
     resolver: zodResolver(settingsFormSchema),
@@ -88,8 +104,12 @@ export function CompanySettings({
       contact_first_name: company.contact_first_name,
       contact_last_name: company.contact_last_name,
       timezone: company.timezone || "America/New_York",
-      notifications_enabled: company.notifications_enabled || false,
-      auto_invoice: company.auto_invoice || false,
+      notifications_enabled: Boolean(company.notifications_enabled),
+      auto_invoice: Boolean(company.auto_invoice),
+      street: company.street || "",
+      city: company.city || "",
+      state: company.state || "",
+      zip: company.zip || "",
     },
   });
 
@@ -105,12 +125,21 @@ export function CompanySettings({
     }
   };
 
-  const handleDelete = async () => {
+  const handleToggleStatusClick = async () => {
+    setShowDeactivationDialog(true);
+  };
+
+  const handleCancelDeactivation = () => {
+    setShowDeactivationDialog(false);
+  };
+
+  const handleToggleStatus = async (options?: ToggleStatusOptions) => {
     try {
       setLoading(true);
-      await onDelete();
+      await onToggleStatus(options);
+      setShowDeactivationDialog(false);
     } catch (error) {
-      console.error("Error deleting company:", error);
+      console.error("Error toggling company status:", error);
     } finally {
       setLoading(false);
     }
@@ -275,6 +304,83 @@ export function CompanySettings({
           <Card className="border shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="text-lg flex items-center gap-2">
+                <MapPin className="h-4 w-4 text-primary" />
+                Company Address
+              </CardTitle>
+              <CardDescription>
+                Update your company's address information
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <FormField
+                control={form.control}
+                name="street"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="text-sm font-medium">
+                      Street Address
+                    </FormLabel>
+                    <FormControl>
+                      <Input {...field} className="h-10" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <FormField
+                  control={form.control}
+                  name="city"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-sm font-medium">
+                        City
+                      </FormLabel>
+                      <FormControl>
+                        <Input {...field} className="h-10" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="state"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-sm font-medium">
+                        State
+                      </FormLabel>
+                      <FormControl>
+                        <Input {...field} className="h-10" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="zip"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-sm font-medium">
+                        ZIP Code
+                      </FormLabel>
+                      <FormControl>
+                        <Input {...field} className="h-10" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg flex items-center gap-2">
                 <Bell className="h-4 w-4 text-primary" />
                 Preferences
               </CardTitle>
@@ -337,54 +443,56 @@ export function CompanySettings({
           <Card className="border shadow-sm bg-muted/10">
             <CardContent className="pt-6">
               <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button
-                      variant="destructive"
-                      type="button"
-                      disabled={loading}
-                      className="w-full sm:w-auto"
-                    >
-                      <Trash2 className="h-4 w-4 mr-2" />
-                      Delete Company
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>
-                        Are you absolutely sure?
-                      </AlertDialogTitle>
-                      <AlertDialogDescription>
-                        This action cannot be undone. This will permanently
-                        delete the company and remove all associated data from
-                        our servers.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction
-                        onClick={handleDelete}
-                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                      >
-                        Delete
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-
                 <Button
-                  type="submit"
+                  variant={
+                    company.status === "active" ? "destructive" : "default"
+                  }
+                  type="button"
                   disabled={loading}
                   className="w-full sm:w-auto"
+                  onClick={handleToggleStatusClick}
                 >
-                  {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Save Changes
+                  {company.status === "active" ? (
+                    <>
+                      <XCircle className="h-4 w-4 mr-2" />
+                      Deactivate Company
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle className="h-4 w-4 mr-2" />
+                      Activate Company
+                    </>
+                  )}
                 </Button>
+
+                <div className="flex gap-2">
+                  <Button
+                    type="submit"
+                    disabled={loading}
+                    className="w-full sm:w-auto"
+                  >
+                    {loading ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Saving...
+                      </>
+                    ) : (
+                      "Save Changes"
+                    )}
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
         </form>
       </Form>
+
+      <DeactivationDialog
+        company={company}
+        onToggleStatus={handleToggleStatus}
+        onCancel={handleCancelDeactivation}
+        open={showDeactivationDialog}
+      />
     </div>
   );
 }

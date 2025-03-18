@@ -75,15 +75,17 @@ import {
 import { StripeTabs } from "./components/stripe-tabs";
 import { toast } from "sonner";
 import { subscriptionDetailsCache, CACHE_TTL } from "./cache";
+import { CompanyEditForm } from "./components/company-edit-form";
 
 interface CompanySideDialogProps {
   company?: Company;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onUpdate: (companyId: number, data: Partial<Company>) => Promise<void>;
-  onDelete?: (companyId: number) => Promise<void>;
+  initialEditMode?: boolean;
 }
 
+// Update the statusStyles object with more pronounced colors for dark mode
 const statusStyles = {
   active: {
     button: "text-emerald-600 dark:text-emerald-400",
@@ -92,19 +94,26 @@ const statusStyles = {
     icon: "text-emerald-600 dark:text-emerald-400",
   },
   inactive: {
-    button: "text-red-600 dark:text-red-400",
+    button: "text-red-600 dark:text-red-500",
     dropdown:
-      "hover:bg-red-50 dark:hover:bg-red-950 text-red-600 dark:text-red-400",
-    icon: "text-red-600 dark:text-red-400",
+      "hover:bg-red-50 dark:hover:bg-red-950 text-red-600 dark:text-red-500",
+    icon: "text-red-600 dark:text-red-500",
   },
 };
+
+// Create a new interface for toggle status options
+interface ToggleStatusOptions {
+  cancelSubscription?: boolean;
+  cancellationType?: "now" | "end_period";
+  issueRefund?: boolean;
+}
 
 export function CompanySideDialog({
   company: initialCompany,
   open,
   onOpenChange,
   onUpdate,
-  onDelete,
+  initialEditMode,
 }: CompanySideDialogProps) {
   const [isUpdating, setIsUpdating] = useState(false);
   const [stripeData, setStripeData] = useState<any>(null);
@@ -130,30 +139,31 @@ export function CompanySideDialog({
     "asc" | "desc"
   >("asc");
   const [activeTab, setActiveTab] = useState<string>("details");
-  const [company, setCompany] = useState<Company | null>(null);
+  const [company, setCompany] = useState<Company>(initialCompany as Company);
+  const [isDialogContentLoading, setIsDialogContentLoading] = useState(false);
+  const [isEditMode, setIsEditMode] = useState(false);
 
-  // Use useMemo to create a stable reference to the company
-  const companyMemo = useMemo(() => {
-    if (!initialCompany) return null;
-    return initialCompany;
-  }, [initialCompany]);
-
-  // Early return if no company is provided
-  if (!companyMemo) {
+  // Early return if no initialCompany is provided
+  if (!initialCompany) {
     return null;
   }
 
-  // Set the active tab to "details" when the dialog opens and start background data loading
+  // Fix the useEffect for initial load
   useEffect(() => {
-    if (open && companyMemo) {
+    if (open) {
+      // Set edit mode from prop if provided
+      setIsEditMode(initialEditMode || false);
+
       // Update local state when dialog opens
       setActiveTab("overview");
-      setCompany(companyMemo);
+
+      // Always use the latest company data from props
+      setCompany(initialCompany);
 
       // Start fetching Stripe data in the background immediately when dialog opens
-      if (companyMemo?.stripe_customer_id) {
+      if (initialCompany?.stripe_customer_id) {
         // Check for cached data first
-        const cachedData = subscriptionDetailsCache.get(companyMemo.id);
+        const cachedData = subscriptionDetailsCache.get(initialCompany.id);
         const now = Date.now();
 
         if (cachedData && now - cachedData.timestamp < CACHE_TTL) {
@@ -187,45 +197,61 @@ export function CompanySideDialog({
         }
       }
     }
-  }, [open]); // Only depend on open state to prevent refetching
+  }, [open, initialEditMode, initialCompany]);
+
+  // Add a specific effect for company updates from Settings tab
+  const LoadingSpinner = () => (
+    <div className="flex justify-center items-center py-8">
+      <div className="flex flex-col items-center gap-2">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <p className="text-sm text-muted-foreground">Loading company data...</p>
+      </div>
+    </div>
+  );
 
   const loadStripeData = async (showLoadingUI = true) => {
-    if (!companyMemo) return;
+    if (!company) return;
+
+    if (showLoadingUI) {
+      setIsDialogContentLoading(true);
+    }
 
     try {
-      // Only show loading UI if explicitly requested (when clicking billing tab)
-      if (showLoadingUI) {
-        setIsLoadingStripe(true);
+      // First check if we have cached data
+      const cached = subscriptionDetailsCache.get(company.id);
+      if (
+        cached &&
+        cached.timestamp &&
+        Date.now() - cached.timestamp < CACHE_TTL
+      ) {
+        console.log("Using cached Stripe data");
+        setStripeData(cached.data);
+        setIsLoadingStripe(false);
+        setIsDialogContentLoading(false);
+        return;
       }
 
-      console.log("Fetching Stripe data from API");
-      const data = await getStripeSubscriptionDetails(companyMemo.id);
-      console.log("Stripe data fetched successfully");
+      // No cache or expired, load from API
+      console.log("Loading Stripe data from API");
+      setIsLoadingStripe(true);
+      const data = await getStripeSubscriptionDetails(company.id);
       setStripeData(data);
 
-      // Update the shared cache
-      subscriptionDetailsCache.set(companyMemo.id, {
+      // Update the cache
+      subscriptionDetailsCache.set(company.id, {
         data: data,
         timestamp: Date.now(),
       });
-
-      // Only manage loading state if showLoadingUI is true
-      if (showLoadingUI) {
-        // Ensure loading state is visible for a minimum time
-        setTimeout(() => {
-          setIsLoadingStripe(false);
-        }, 1000); // 1 second minimum loading time for better UX
-      }
     } catch (error) {
       console.error("Error loading Stripe data:", error);
-      if (showLoadingUI) {
-        toast({
-          title: "Error",
-          description: "Failed to load subscription details",
-          variant: "destructive",
-        });
-        setIsLoadingStripe(false);
-      }
+      toast({
+        title: "Error",
+        description: "Failed to load Stripe data",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingStripe(false);
+      setIsDialogContentLoading(false);
     }
   };
 
@@ -442,7 +468,7 @@ export function CompanySideDialog({
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ companyId: companyMemo.id }),
+        body: JSON.stringify({ companyId: company.id }),
       });
 
       if (!response.ok) {
@@ -450,7 +476,7 @@ export function CompanySideDialog({
       }
 
       // Refresh the company data after connecting to Stripe
-      await onUpdate(companyMemo.id, {
+      await onUpdate(company.id, {
         stripe_customer_id: await response.text(),
       });
       toast({
@@ -493,29 +519,23 @@ export function CompanySideDialog({
   const handleUpdateCompany = async (data: Partial<Company>) => {
     try {
       setIsUpdating(true);
+      await onUpdate(initialCompany.id, data);
 
-      // Show loading toast
-      const loadingToast = toast({
-        title: "Updating company...",
-        description: "Please wait while we save your changes.",
+      // Update the local company state with the new data to refresh all tabs
+      setCompany((prevCompany) => {
+        if (!prevCompany) return initialCompany;
+        return { ...prevCompany, ...data };
       });
 
-      // Perform the update
-      await onUpdate(companyMemo.id, data);
-
-      // Dismiss loading toast and show success
-      loadingToast.dismiss();
       toast({
         title: "Success",
         description: "Company updated successfully",
-        variant: "default",
       });
     } catch (error) {
       console.error("Error updating company:", error);
       toast({
         title: "Error",
-        description:
-          error instanceof Error ? error.message : "Failed to update company",
+        description: "Failed to update company",
         variant: "destructive",
       });
     } finally {
@@ -523,31 +543,78 @@ export function CompanySideDialog({
     }
   };
 
-  const handleDeleteCompany = async () => {
-    if (!companyMemo || !onDelete) return;
+  // Update the handleToggleStatus function to use our API endpoint
+  const handleToggleStatus = async (options?: ToggleStatusOptions) => {
+    if (!company) return;
 
     try {
       setIsUpdating(true);
+      const newStatus = company.status === "active" ? "inactive" : "active";
+
       const loadingToast = toast({
-        title: "Deleting company...",
+        title:
+          company.status === "active"
+            ? "Deactivating company..."
+            : "Activating company...",
         description: "Please wait while we process your request.",
       });
 
-      await onDelete(companyMemo.id);
-      onOpenChange(false);
+      // Handle subscription cancellation if requested
+      if (
+        company.status === "active" &&
+        options?.cancelSubscription &&
+        company.stripe_subscription_id
+      ) {
+        console.log("Cancelling subscription with options:", options);
+
+        // Call our API endpoint to cancel the subscription
+        const response = await fetch(
+          `/api/companies/${company.id}/subscription/cancel`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              atPeriodEnd: options.cancellationType === "end_period",
+              issueRefund: options.issueRefund,
+            }),
+          }
+        );
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.details || "Failed to cancel subscription");
+        }
+
+        const result = await response.json();
+        console.log("Subscription cancellation result:", result);
+      }
+
+      // Update company status
+      await onUpdate(company.id, { status: newStatus });
+
+      // Update local state
+      setCompany((prevCompany) => {
+        if (!prevCompany) return company;
+        return { ...prevCompany, status: newStatus };
+      });
 
       loadingToast.dismiss();
       toast({
         title: "Success",
-        description: "Company deleted successfully",
+        description:
+          company.status === "active"
+            ? "Company deactivated successfully"
+            : "Company activated successfully",
         variant: "default",
       });
     } catch (error) {
-      console.error("Error deleting company:", error);
+      console.error("Error updating company status:", error);
       toast({
         title: "Error",
         description:
-          error instanceof Error ? error.message : "Failed to delete company",
+          error instanceof Error
+            ? error.message
+            : "Failed to update company status",
         variant: "destructive",
       });
     } finally {
@@ -559,7 +626,7 @@ export function CompanySideDialog({
     setActiveTab(tab);
 
     // If switching to billing tab and we have a Stripe customer ID
-    if (tab === "billing" && companyMemo?.stripe_customer_id) {
+    if (tab === "billing" && company?.stripe_customer_id) {
       // Show a brief loading indicator regardless of data status for consistent UX
       setIsLoadingStripe(true);
 
@@ -576,11 +643,11 @@ export function CompanySideDialog({
   };
 
   const handleClearCompanyCache = async () => {
-    if (!companyMemo?.id) return;
+    if (!company?.id) return;
 
     try {
       setIsUpdating(true);
-      const result = await clearCompanyCache(companyMemo.id);
+      const result = await clearCompanyCache(company.id);
       if (result.success) {
         toast({
           title: "Success",
@@ -603,6 +670,10 @@ export function CompanySideDialog({
     }
   };
 
+  const handleCancelEdit = () => {
+    setIsEditMode(false);
+  };
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <style jsx global>{`
@@ -621,17 +692,17 @@ export function CompanySideDialog({
           <SheetHeader className="px-6 py-4 border-b">
             <SheetTitle className="flex items-center gap-2">
               <Building2 className="h-5 w-5" />
-              {companyMemo.name}
+              {company.name}
               <Badge
                 variant="outline"
                 className={cn(
                   "ml-2 capitalize",
-                  companyMemo.status === "active"
-                    ? "border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-950 dark:text-green-300"
-                    : "border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300"
+                  company.status === "active"
+                    ? "border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-950/50 dark:text-green-400"
+                    : "border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950/50 dark:text-red-400"
                 )}
               >
-                {companyMemo.status}
+                {company.status}
               </Badge>
             </SheetTitle>
           </SheetHeader>
@@ -685,105 +756,207 @@ export function CompanySideDialog({
               <ScrollArea className="flex-1">
                 <TabsContent
                   value="overview"
-                  className="p-4 h-full"
+                  className="p-6 h-full"
                   tabIndex={-1}
                 >
-                  <div className="space-y-6">
-                    <div className="grid grid-cols-2 gap-6 p-6 border rounded-xl shadow-sm bg-card">
-                      <div className="space-y-1">
-                        <h3 className="text-sm font-medium text-muted-foreground">
-                          Company Name
-                        </h3>
-                        <p className="text-base">{companyMemo.name}</p>
-                      </div>
-                      <div className="space-y-1">
-                        <h3 className="text-sm font-medium text-muted-foreground">
-                          Status
-                        </h3>
-                        <p className="text-base capitalize">
-                          {companyMemo.status}
+                  {isDialogContentLoading ? (
+                    <LoadingSpinner />
+                  ) : isEditMode ? (
+                    <CompanyEditForm
+                      company={company}
+                      onUpdate={async (data) => {
+                        await handleUpdateCompany(data);
+                        setIsEditMode(false);
+                      }}
+                      onCancel={handleCancelEdit}
+                      isUpdating={isUpdating}
+                    />
+                  ) : (
+                    <div className="space-y-6">
+                      <div>
+                        <h3 className="text-lg font-medium">Company Details</h3>
+                        <p className="text-sm text-muted-foreground">
+                          View company information. Use the Settings tab to edit
+                          details.
                         </p>
                       </div>
-                      <div className="space-y-1">
-                        <h3 className="text-sm font-medium text-muted-foreground">
-                          Created
-                        </h3>
-                        <p className="text-base">
-                          {formatDate(companyMemo.created_at)}
-                        </p>
+                      <div className="grid grid-cols-2 gap-6 p-6 border rounded-xl shadow-sm bg-card">
+                        <div className="space-y-1">
+                          <h3 className="text-sm font-medium text-muted-foreground">
+                            Company Name
+                          </h3>
+                          <p className="text-base">{company.name}</p>
+                        </div>
+                        <div className="space-y-1">
+                          <h3 className="text-sm font-medium text-muted-foreground">
+                            Status
+                          </h3>
+                          <p className="text-base capitalize">
+                            {company.status}
+                          </p>
+                        </div>
+                        <div className="space-y-1">
+                          <h3 className="text-sm font-medium text-muted-foreground">
+                            Created
+                          </h3>
+                          <p className="text-base">
+                            {formatDate(company.created_at)}
+                          </p>
+                        </div>
+                        <div className="space-y-1">
+                          <h3 className="text-sm font-medium text-muted-foreground">
+                            Last Updated
+                          </h3>
+                          <p className="text-base">
+                            {formatDate(company.updated_at)}
+                          </p>
+                        </div>
                       </div>
-                      <div className="space-y-1">
-                        <h3 className="text-sm font-medium text-muted-foreground">
-                          Last Updated
-                        </h3>
-                        <p className="text-base">
-                          {formatDate(companyMemo.updated_at)}
-                        </p>
-                      </div>
-                    </div>
 
-                    <div className="space-y-4 p-6 border rounded-xl shadow-sm bg-card">
-                      <h3 className="text-lg font-medium">
-                        Contact Information
-                      </h3>
-                      <div className="grid grid-cols-2 gap-6">
-                        <div className="space-y-1">
-                          <h4 className="text-sm font-medium text-muted-foreground">
-                            Email
-                          </h4>
-                          <p className="text-base">
-                            {companyMemo.contact_email || "—"}
-                          </p>
-                        </div>
-                        <div className="space-y-1">
-                          <h4 className="text-sm font-medium text-muted-foreground">
-                            Phone
-                          </h4>
-                          <p className="text-base">
-                            {companyMemo.contact_phone || "—"}
-                          </p>
+                      <div className="space-y-4 p-6 border rounded-xl shadow-sm bg-card">
+                        <h3 className="text-lg font-medium">
+                          Contact Information
+                        </h3>
+                        <div className="grid grid-cols-2 gap-6">
+                          <div className="space-y-1">
+                            <h4 className="text-sm font-medium text-muted-foreground">
+                              Contact Name
+                            </h4>
+                            <p className="text-base">
+                              {company.contact_first_name ||
+                              company.contact_last_name
+                                ? `${company.contact_first_name || ""} ${company.contact_last_name || ""}`.trim()
+                                : "—"}
+                            </p>
+                          </div>
+                          <div className="space-y-1">
+                            <h4 className="text-sm font-medium text-muted-foreground">
+                              Email
+                            </h4>
+                            <p className="text-base">
+                              {company.contact_email ? (
+                                <a
+                                  href={`mailto:${company.contact_email}`}
+                                  className="hover:underline"
+                                >
+                                  {company.contact_email}
+                                </a>
+                              ) : (
+                                "—"
+                              )}
+                            </p>
+                          </div>
+                          <div className="space-y-1">
+                            <h4 className="text-sm font-medium text-muted-foreground">
+                              Phone
+                            </h4>
+                            <p className="text-base">
+                              {company.contact_phone ? (
+                                <a
+                                  href={`tel:${company.contact_phone}`}
+                                  className="hover:underline"
+                                >
+                                  {company.contact_phone}
+                                </a>
+                              ) : (
+                                "—"
+                              )}
+                            </p>
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div className="space-y-4 p-6 border rounded-xl shadow-sm bg-card">
-                      <h3 className="text-lg font-medium">Address</h3>
-                      <div className="grid grid-cols-2 gap-6">
-                        <div className="space-y-1">
-                          <h4 className="text-sm font-medium text-muted-foreground">
-                            Street
-                          </h4>
-                          <p className="text-base">
-                            {companyMemo.street || "—"}
-                          </p>
-                        </div>
-                        <div className="space-y-1">
-                          <h4 className="text-sm font-medium text-muted-foreground">
-                            City
-                          </h4>
-                          <p className="text-base">{companyMemo.city || "—"}</p>
-                        </div>
-                        <div className="space-y-1">
-                          <h4 className="text-sm font-medium text-muted-foreground">
-                            State
-                          </h4>
-                          <p className="text-base">
-                            {companyMemo.state || "—"}
-                          </p>
-                        </div>
-                        <div className="space-y-1">
-                          <h4 className="text-sm font-medium text-muted-foreground">
-                            Zip
-                          </h4>
-                          <p className="text-base">{companyMemo.zip || "—"}</p>
+                      <div className="space-y-4 p-6 border rounded-xl shadow-sm bg-card">
+                        <h3 className="text-lg font-medium">Address</h3>
+                        {!company.street &&
+                        !company.city &&
+                        !company.state &&
+                        !company.zip ? (
+                          <div className="text-center py-6">
+                            <p className="text-muted-foreground">
+                              No address information available
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-2 gap-6">
+                            <div className="space-y-1">
+                              <h4 className="text-sm font-medium text-muted-foreground">
+                                Street
+                              </h4>
+                              <p className="text-base">
+                                {company.street || "—"}
+                              </p>
+                            </div>
+                            <div className="space-y-1">
+                              <h4 className="text-sm font-medium text-muted-foreground">
+                                City
+                              </h4>
+                              <p className="text-base">{company.city || "—"}</p>
+                            </div>
+                            <div className="space-y-1">
+                              <h4 className="text-sm font-medium text-muted-foreground">
+                                State
+                              </h4>
+                              <p className="text-base">
+                                {company.state || "—"}
+                              </p>
+                            </div>
+                            <div className="space-y-1">
+                              <h4 className="text-sm font-medium text-muted-foreground">
+                                Zip
+                              </h4>
+                              <p className="text-base">{company.zip || "—"}</p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="space-y-4 p-6 border rounded-xl shadow-sm bg-card">
+                        <h3 className="text-lg font-medium">Settings</h3>
+                        <div className="space-y-4">
+                          <div className="flex justify-between items-center">
+                            <div>
+                              <h4 className="font-medium">Notifications</h4>
+                              <p className="text-sm text-muted-foreground">
+                                Receive email notifications
+                              </p>
+                            </div>
+                            <Badge
+                              variant={
+                                company.notifications_enabled
+                                  ? "success"
+                                  : "outline"
+                              }
+                            >
+                              {company.notifications_enabled
+                                ? "Enabled"
+                                : "Disabled"}
+                            </Badge>
+                          </div>
+                          <Separator />
+                          <div className="flex justify-between items-center">
+                            <div>
+                              <h4 className="font-medium">Auto Invoice</h4>
+                              <p className="text-sm text-muted-foreground">
+                                Generate invoices automatically
+                              </p>
+                            </div>
+                            <Badge
+                              variant={
+                                company.auto_invoice ? "success" : "outline"
+                              }
+                            >
+                              {company.auto_invoice ? "Enabled" : "Disabled"}
+                            </Badge>
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
+                  )}
                 </TabsContent>
 
                 <TabsContent value="users" className="p-6 h-full" tabIndex={-1}>
-                  <CompanyUsers company={companyMemo} />
+                  <CompanyUsers company={company} />
                 </TabsContent>
 
                 <TabsContent
@@ -791,7 +964,7 @@ export function CompanySideDialog({
                   className="p-6 h-full"
                   tabIndex={-1}
                 >
-                  <CompanyDrivers company={companyMemo} />
+                  <CompanyDrivers company={company} />
                 </TabsContent>
 
                 <TabsContent
@@ -799,31 +972,12 @@ export function CompanySideDialog({
                   className="px-4 py-2 h-full"
                   tabIndex={-1}
                 >
-                  {isLoadingStripe ? (
-                    <div className="flex flex-col items-center justify-center space-y-6 p-10 min-h-[400px] border rounded-xl shadow-sm bg-background">
-                      <div className="flex items-center justify-center w-20 h-20 rounded-full bg-primary/10">
-                        <Loader2 className="h-10 w-10 text-primary animate-spin" />
-                      </div>
-                      <div className="text-center space-y-3">
-                        <h3 className="text-xl font-medium">
-                          Loading Billing Information
-                        </h3>
-                        <p className="text-sm text-muted-foreground max-w-md">
-                          Please wait while we retrieve your billing data. This
-                          may take a few moments...
-                        </p>
-                      </div>
-                      <div className="w-full max-w-md h-3 bg-muted rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-primary animate-pulse rounded-full"
-                          style={{ width: "75%" }}
-                        ></div>
-                      </div>
-                    </div>
-                  ) : companyMemo.stripe_customer_id ? (
+                  {isDialogContentLoading ? (
+                    <LoadingSpinner />
+                  ) : company.stripe_customer_id ? (
                     <>
                       <StripeTabs
-                        company={companyMemo}
+                        company={company}
                         preloadedData={stripeData}
                         isLoading={isLoadingStripe}
                         defaultTab="subscription"
@@ -861,9 +1015,9 @@ export function CompanySideDialog({
                   tabIndex={-1}
                 >
                   <CompanySettings
-                    company={companyMemo}
+                    company={company}
                     onUpdate={handleUpdateCompany}
-                    onDelete={handleDeleteCompany}
+                    onToggleStatus={handleToggleStatus}
                   />
                 </TabsContent>
               </ScrollArea>
