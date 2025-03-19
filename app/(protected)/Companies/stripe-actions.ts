@@ -1258,7 +1258,58 @@ export async function createSubscription({
       .single();
 
     if (company) {
+      // Update the companies table with subscription information
+      const { error: updateError } = await supabase
+        .from("companies")
+        .update({
+          stripe_subscription_id: subscription.id,
+          subscription_status: subscription.status,
+          subscription_amount: subscription.items.data.reduce(
+            (total, item) =>
+              total + (item.price.unit_amount || 0) * (item.quantity || 1),
+            0
+          ),
+          last_synced_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", company.id);
+
+      if (updateError) {
+        console.error(
+          "Error updating company with subscription data:",
+          updateError
+        );
+      }
+
+      // Update invoice information if available
+      if (
+        subscription.latest_invoice &&
+        typeof subscription.latest_invoice !== "string"
+      ) {
+        const { error: invoiceUpdateError } = await supabase
+          .from("companies")
+          .update({
+            last_invoice_date: new Date(
+              subscription.latest_invoice.created * 1000
+            ).toISOString(),
+            last_invoice_status: subscription.latest_invoice.status,
+          })
+          .eq("id", company.id);
+
+        if (invoiceUpdateError) {
+          console.error(
+            "Error updating company with invoice data:",
+            invoiceUpdateError
+          );
+        }
+      }
+
       await invalidateStripeCache(company.id);
+    } else {
+      console.error(
+        "Could not find company with Stripe customer ID:",
+        customerId
+      );
     }
 
     return {

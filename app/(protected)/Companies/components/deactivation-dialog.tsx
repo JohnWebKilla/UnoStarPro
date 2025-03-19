@@ -101,10 +101,26 @@ export function DeactivationDialog({
         if (cancellationType === "now" && issueRefund) {
           options.issueRefund = true;
         }
-      }
 
-      // Log options for debugging
-      console.log("Deactivation options:", options);
+        // Log detailed info about what's happening
+        console.log("Processing deactivation with subscription cancellation:", {
+          companyId: company.id,
+          companyName: company.name,
+          hasSubscription,
+          subscriptionId: company.stripe_subscription_id,
+          options,
+        });
+      } else {
+        console.log(
+          "Processing deactivation without subscription cancellation:",
+          {
+            companyId: company.id,
+            companyName: company.name,
+            hasSubscription,
+            cancelSubscription,
+          }
+        );
+      }
 
       // Pass options to the toggle status function
       await onToggleStatus(options);

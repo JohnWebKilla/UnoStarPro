@@ -5,9 +5,10 @@ import { revalidatePath } from "next/cache";
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: { id: string } }
 ) {
   try {
+    const { params } = context;
     const companyId = parseInt(params.id, 10);
 
     if (isNaN(companyId)) {
@@ -24,6 +25,15 @@ export async function POST(
       updateStatus = true,
     } = await request.json();
 
+    console.log(
+      `Cancelling subscription for company ${companyId} with options:`,
+      {
+        atPeriodEnd,
+        issueRefund,
+        updateStatus,
+      }
+    );
+
     // Get the company from the database
     const supabase = await createClient();
     const { data: company, error: companyError } = await supabase
@@ -33,6 +43,7 @@ export async function POST(
       .single();
 
     if (companyError || !company) {
+      console.error("Company not found:", companyError);
       return NextResponse.json({ error: "Company not found" }, { status: 404 });
     }
 
@@ -42,6 +53,14 @@ export async function POST(
         { status: 400 }
       );
     }
+
+    console.log(
+      `Cancelling subscription ${company.stripe_subscription_id} with options:`,
+      {
+        atPeriodEnd,
+        issueRefund,
+      }
+    );
 
     // Cancel the subscription with the provided options
     const result = await cancelSubscription({
@@ -70,6 +89,8 @@ export async function POST(
     if (updateStatus && company.status !== "inactive") {
       updateFields.status = "inactive";
     }
+
+    console.log("Updating company with fields:", updateFields);
 
     // Update the company in the database
     const { error: updateError } = await supabase

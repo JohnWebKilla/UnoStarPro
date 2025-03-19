@@ -577,6 +577,7 @@ export function CompanySideDialog({
               body: JSON.stringify({
                 atPeriodEnd: options.cancellationType === "end_period",
                 issueRefund: options.issueRefund,
+                updateStatus: true,
               }),
             }
           );
@@ -585,7 +586,8 @@ export function CompanySideDialog({
             let errorMessage = "Failed to cancel subscription";
             try {
               const errorData = await response.json();
-              errorMessage = errorData.details || errorMessage;
+              errorMessage =
+                errorData.details || errorData.error || errorMessage;
             } catch (jsonError) {
               console.error("Error parsing error response:", jsonError);
             }
@@ -593,15 +595,23 @@ export function CompanySideDialog({
           }
 
           // Handle successful response
+          let resultText = "Subscription cancelled successfully";
           try {
             const result = await response.json();
             console.log("Subscription cancellation result:", result);
+            resultText = result.message || resultText;
           } catch (jsonError) {
             // If response cannot be parsed as JSON, that's ok, just log it
             console.log(
               "Subscription cancelled successfully (no JSON response)"
             );
           }
+
+          // Show success message
+          toast({
+            title: "Success",
+            description: resultText,
+          });
         } catch (subscriptionError) {
           console.error("Error cancelling subscription:", subscriptionError);
           loadingToast.dismiss();
