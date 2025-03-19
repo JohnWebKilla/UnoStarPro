@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { DataTable } from "./data-table";
 import { columns } from "./columns";
 import { Company } from "./types";
 import { Button } from "@/components/ui/button";
-import { PlusCircle, RefreshCw, Trash2, Loader2 } from "lucide-react";
+import { PlusCircle, RefreshCw, Trash2, Loader2, Plus } from "lucide-react";
 import { CompanyDialog } from "./company-dialog";
 import { StripeDialog } from "./stripe-dialog";
 import { CompanySideDialog } from "./company-side-dialog";
@@ -20,6 +20,13 @@ import { cn } from "@/lib/utils";
 import { SummaryCards } from "./summary-cards";
 import { getStripeSubscriptionDetails } from "./stripe-actions";
 import { subscriptionDetailsCache, CACHE_TTL } from "./cache";
+import { DeactivationDialog } from "./components/deactivation-dialog";
+
+interface ToggleStatusOptions {
+  cancelSubscription?: boolean;
+  cancellationType?: "now" | "end_period";
+  issueRefund?: boolean;
+}
 
 export default function CompaniesPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -36,6 +43,10 @@ export default function CompaniesPage() {
   );
   const [lastFetchTime, setLastFetchTime] = useState<Date | null>(null);
   const [editDialogMode, setEditDialogMode] = useState(false);
+  const [showDeactivationDialog, setShowDeactivationDialog] = useState(false);
+  const [companyToDeactivate, setCompanyToDeactivate] = useState<
+    Company | undefined
+  >();
   const { toast } = useToast();
 
   useEffect(() => {
@@ -93,30 +104,31 @@ export default function CompaniesPage() {
     };
   }, []);
 
-  const fetchCompanies = async () => {
+  const fetchCompanies = useCallback(async (skipCache = false) => {
     try {
-      const response = await getCompanies();
-      setCompanies(response.data);
-      setDataSource(response.source);
+      console.log("Fetching companies, skipCache:", skipCache);
+      const result = await getCompanies(skipCache);
+      setCompanies(result.data);
+      setDataSource(result.source);
       setLastFetchTime(new Date());
+      console.log(
+        `Loaded ${result.data.length} companies from ${result.source} in ${result.timing.total.toFixed(
+          0
+        )}ms`
+      );
     } catch (error) {
       console.error("Error fetching companies:", error);
-      toast({
-        title: "Error",
-        description: "Failed to load companies",
-        variant: "destructive",
-      });
+      setError("Failed to load companies");
     } finally {
       setIsInitialLoading(false);
     }
-  };
+  }, []);
 
   const handleCreateCompany = async (data: Partial<Company>) => {
     try {
-      const newCompany = await createCompany(data);
-      setCompanies((prev) => [newCompany, ...prev]);
-      setDataSource("database");
-      setLastFetchTime(new Date());
+      await createCompany(data);
+      await fetchCompanies(true);
+      setDialogOpen(false);
       toast({
         title: "Success",
         description: "Company created successfully",
@@ -168,19 +180,54 @@ export default function CompaniesPage() {
   };
 
   const handleUpdateStatus = async (company: Company) => {
+    if (company.status === "active") {
+      setCompanyToDeactivate(company);
+      setShowDeactivationDialog(true);
+    } else {
+      await performStatusUpdate(company.id, "active" as "active" | "inactive");
+    }
+  };
+
+  const performStatusUpdate = async (
+    companyId: number,
+    status: "active" | "inactive",
+    options?: ToggleStatusOptions
+  ) => {
     try {
-      setLoadingRows((prev) => ({ ...prev, [company.id]: true }));
-      const updatedCompany = await updateCompany(company.id, {
-        status: company.status === "active" ? "inactive" : "active",
-      });
-      setCompanies((prev) =>
-        prev.map((c) => (c.id === company.id ? updatedCompany : c))
-      );
+      setLoadingRows((prev) => ({ ...prev, [companyId]: true }));
+
+      if (options?.cancelSubscription) {
+        const response = await fetch(
+          `/api/companies/${companyId}/subscription/cancel`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              atPeriodEnd: options.cancellationType === "end_period",
+              issueRefund: options.issueRefund,
+              updateStatus: true,
+            }),
+          }
+        );
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.details || "Failed to cancel subscription");
+        }
+
+        await fetchCompanies(true);
+      } else {
+        const updatedCompany = await updateCompany(companyId, { status });
+        setCompanies((prev) =>
+          prev.map((c) => (c.id === companyId ? updatedCompany : c))
+        );
+      }
+
       setDataSource("database");
       setLastFetchTime(new Date());
       toast({
         title: "Success",
-        description: "Company status updated successfully",
+        description: `Company ${status === "active" ? "activated" : "deactivated"} successfully`,
       });
     } catch (error) {
       console.error("Error updating company status:", error);
@@ -190,21 +237,33 @@ export default function CompaniesPage() {
         variant: "destructive",
       });
     } finally {
-      setLoadingRows((prev) => ({ ...prev, [company.id]: false }));
+      setLoadingRows((prev) => ({ ...prev, [companyId]: false }));
     }
+  };
+
+  const handleDeactivationConfirm = async (options?: ToggleStatusOptions) => {
+    if (!companyToDeactivate) return;
+    await performStatusUpdate(companyToDeactivate.id, "inactive", options);
+    setShowDeactivationDialog(false);
+    setCompanyToDeactivate(undefined);
+  };
+
+  const handleDeactivationCancel = () => {
+    setShowDeactivationDialog(false);
+    setCompanyToDeactivate(undefined);
   };
 
   const handleSyncAllStripe = async () => {
     try {
       setIsSyncing(true);
-      const result = await syncStripeCustomers();
-      await fetchCompanies();
+      await syncStripeCustomers();
+      await fetchCompanies(true);
       toast({
         title: "Success",
-        description: result.message,
+        description: "All companies synced with Stripe successfully",
       });
     } catch (error) {
-      console.error("Error syncing with Stripe:", error);
+      console.error("Error syncing companies with Stripe:", error);
       toast({
         title: "Error",
         description:
@@ -227,7 +286,7 @@ export default function CompaniesPage() {
         throw new Error("Failed to clear cache");
       }
 
-      await fetchCompanies();
+      await fetchCompanies(true);
       toast({
         title: "Success",
         description: "Cache cleared successfully",
@@ -249,19 +308,10 @@ export default function CompaniesPage() {
     try {
       setLoadingRows((prev) => ({ ...prev, [company.id]: true }));
       const result = await syncStripeCustomer(company.id);
-      const updatedCompany = await getCompanies();
-      setCompanies((prev) =>
-        prev.map((c) =>
-          c.id === company.id
-            ? updatedCompany.data.find((uc) => uc.id === company.id) || c
-            : c
-        )
-      );
-      setDataSource("database");
-      setLastFetchTime(new Date());
+      await fetchCompanies(true);
       toast({
         title: "Success",
-        description: result.message,
+        description: "Company synced with Stripe successfully",
       });
     } catch (error) {
       console.error("Error syncing company with Stripe:", error);
@@ -283,6 +333,26 @@ export default function CompaniesPage() {
     setStripeDialogOpen(true);
   };
 
+  const handleUpdateCompanyInDialog = async (data: Partial<Company>) => {
+    if (!selectedCompany) return;
+    await handleUpdateCompany(selectedCompany.id, data);
+    setDialogOpen(false);
+    setStripeDialogOpen(false);
+  };
+
+  const handleRowClick = (company: Company) => {
+    setSelectedCompany(company);
+    setSideDialogOpen(true);
+    setEditDialogMode(false);
+  };
+
+  const handleSideDialogOpenChange = (open: boolean) => {
+    setSideDialogOpen(open);
+    if (!open) {
+      setEditDialogMode(false);
+    }
+  };
+
   const handleConnectStripe = async (company: Company) => {
     try {
       setLoadingRows((prev) => ({ ...prev, [company.id]: true }));
@@ -294,21 +364,13 @@ export default function CompaniesPage() {
       );
 
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.details || "Failed to connect company to Stripe");
+        throw new Error("Failed to connect to Stripe");
       }
 
-      const updatedCompanies = await getCompanies();
-      setCompanies((prev) =>
-        prev.map((c) =>
-          c.id === company.id
-            ? updatedCompanies.data.find((uc) => uc.id === company.id) || c
-            : c
-        )
-      );
+      await fetchCompanies(true);
       toast({
         title: "Success",
-        description: "Company successfully connected to Stripe",
+        description: "Company connected to Stripe successfully",
       });
     } catch (error) {
       console.error("Error connecting company to Stripe:", error);
@@ -322,56 +384,6 @@ export default function CompaniesPage() {
       });
     } finally {
       setLoadingRows((prev) => ({ ...prev, [company.id]: false }));
-    }
-  };
-
-  const handleRowClick = async (company: Company) => {
-    // Reset edit mode
-    setEditDialogMode(false);
-
-    // Open the dialog immediately
-    setSelectedCompany(company);
-    setSideDialogOpen(true);
-
-    // Start loading Stripe data in the background if the company has a Stripe customer ID
-    if (company.stripe_customer_id) {
-      try {
-        // Set loading state in the row, but don't wait for data to show the dialog
-        setLoadingRows((prev) => ({ ...prev, [company.id]: true }));
-
-        // Fetch data in the background - don't await here
-        getStripeSubscriptionDetails(company.id)
-          .then((data) => {
-            // Store the data in a cache that can be accessed by the dialog
-            subscriptionDetailsCache.set(company.id, {
-              data: data,
-              timestamp: Date.now(),
-            });
-
-            // Remove loading state once data is loaded
-            setLoadingRows((prev) => ({ ...prev, [company.id]: false }));
-          })
-          .catch((error) => {
-            console.error("Error loading Stripe data:", error);
-            setLoadingRows((prev) => ({ ...prev, [company.id]: false }));
-          });
-      } catch (error) {
-        console.error("Error setting up Stripe data load:", error);
-        setLoadingRows((prev) => ({ ...prev, [company.id]: false }));
-      }
-    }
-  };
-
-  const handleUpdateCompanyInDialog = async (data: Partial<Company>) => {
-    if (!selectedCompany) return;
-    await handleUpdateCompany(selectedCompany.id, data);
-  };
-
-  const handleSideDialogOpenChange = (open: boolean) => {
-    setSideDialogOpen(open);
-    if (!open) {
-      setSelectedCompany(undefined);
-      setEditDialogMode(false);
     }
   };
 
@@ -401,9 +413,11 @@ export default function CompaniesPage() {
             disabled={isSyncing}
             className="h-9"
           >
-            <RefreshCw
-              className={cn("mr-2 h-4 w-4", isSyncing && "animate-spin")}
-            />
+            {isSyncing ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="mr-2 h-4 w-4" />
+            )}
             Sync Stripe
           </Button>
           <Button
@@ -469,6 +483,15 @@ export default function CompaniesPage() {
           company={selectedCompany}
           onUpdate={handleUpdateCompany}
           initialEditMode={editDialogMode}
+        />
+      )}
+
+      {companyToDeactivate && (
+        <DeactivationDialog
+          company={companyToDeactivate}
+          onToggleStatus={handleDeactivationConfirm}
+          onCancel={handleDeactivationCancel}
+          open={showDeactivationDialog}
         />
       )}
     </div>

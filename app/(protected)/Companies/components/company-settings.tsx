@@ -57,6 +57,7 @@ import {
 } from "@/components/ui/card";
 import { DeactivationDialog } from "./deactivation-dialog";
 import { CompanyEditForm } from "../components/company-edit-form";
+import { toast } from "@/components/ui/use-toast";
 
 interface ToggleStatusOptions {
   cancelSubscription?: boolean;
@@ -140,6 +141,14 @@ export function CompanySettings({
       setShowDeactivationDialog(false);
     } catch (error) {
       console.error("Error toggling company status:", error);
+      toast({
+        title: "Error",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Failed to update company status",
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
     }

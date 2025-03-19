@@ -18,13 +18,17 @@ export async function POST(
     }
 
     // Get options from the request body
-    const { atPeriodEnd = true, issueRefund = false } = await request.json();
+    const {
+      atPeriodEnd = true,
+      issueRefund = false,
+      updateStatus = true,
+    } = await request.json();
 
     // Get the company from the database
     const supabase = await createClient();
     const { data: company, error: companyError } = await supabase
       .from("companies")
-      .select("stripe_subscription_id")
+      .select("stripe_subscription_id, status")
       .eq("id", companyId)
       .single();
 
@@ -46,23 +50,58 @@ export async function POST(
       issueRefund,
     });
 
-    // Update the company in the database if cancelled immediately
+    // Update database fields based on cancellation options
+    const updateFields: any = {};
+
+    // If cancelling immediately (not at period end), update subscription fields
     if (!atPeriodEnd) {
-      await supabase
-        .from("companies")
-        .update({
-          stripe_subscription_id: null,
-          subscription_status: "canceled",
-          subscription_amount: 0,
-          last_synced_at: new Date().toISOString(),
-        })
-        .eq("id", companyId);
+      updateFields.stripe_subscription_id = null;
+      updateFields.subscription_status = "canceled";
+      updateFields.subscription_amount = 0;
+    } else {
+      // If cancelling at period end, just update the subscription status
+      updateFields.subscription_status = "scheduled_for_cancellation";
+    }
+
+    // Always update the last synced timestamp
+    updateFields.last_synced_at = new Date().toISOString();
+
+    // Update company status to inactive if requested and not already inactive
+    if (updateStatus && company.status !== "inactive") {
+      updateFields.status = "inactive";
+    }
+
+    // Update the company in the database
+    const { error: updateError } = await supabase
+      .from("companies")
+      .update(updateFields)
+      .eq("id", companyId);
+
+    if (updateError) {
+      console.error("Error updating company:", updateError);
+      return NextResponse.json(
+        {
+          error: "Failed to update company record",
+          details: updateError.message,
+          subscription: result, // Still return subscription result
+        },
+        { status: 500 }
+      );
     }
 
     // Revalidate the Companies page
     revalidatePath("/Companies");
 
-    return NextResponse.json(result);
+    return NextResponse.json({
+      success: true,
+      message: atPeriodEnd
+        ? "Subscription will be canceled at the end of the current billing period"
+        : "Subscription has been canceled immediately",
+      companyUpdated: updateStatus
+        ? "Company status set to inactive"
+        : "Company status unchanged",
+      subscription: result,
+    });
   } catch (error) {
     console.error("Error cancelling subscription:", error);
 

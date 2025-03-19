@@ -567,26 +567,54 @@ export function CompanySideDialog({
       ) {
         console.log("Cancelling subscription with options:", options);
 
-        // Call our API endpoint to cancel the subscription
-        const response = await fetch(
-          `/api/companies/${company.id}/subscription/cancel`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              atPeriodEnd: options.cancellationType === "end_period",
-              issueRefund: options.issueRefund,
-            }),
+        try {
+          // Call our API endpoint to cancel the subscription
+          const response = await fetch(
+            `/api/companies/${company.id}/subscription/cancel`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                atPeriodEnd: options.cancellationType === "end_period",
+                issueRefund: options.issueRefund,
+              }),
+            }
+          );
+
+          if (!response.ok) {
+            let errorMessage = "Failed to cancel subscription";
+            try {
+              const errorData = await response.json();
+              errorMessage = errorData.details || errorMessage;
+            } catch (jsonError) {
+              console.error("Error parsing error response:", jsonError);
+            }
+            throw new Error(errorMessage);
           }
-        );
 
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.details || "Failed to cancel subscription");
+          // Handle successful response
+          try {
+            const result = await response.json();
+            console.log("Subscription cancellation result:", result);
+          } catch (jsonError) {
+            // If response cannot be parsed as JSON, that's ok, just log it
+            console.log(
+              "Subscription cancelled successfully (no JSON response)"
+            );
+          }
+        } catch (subscriptionError) {
+          console.error("Error cancelling subscription:", subscriptionError);
+          loadingToast.dismiss();
+          toast({
+            title: "Error",
+            description:
+              subscriptionError instanceof Error
+                ? subscriptionError.message
+                : "Failed to cancel subscription",
+            variant: "destructive",
+          });
+          throw subscriptionError; // Re-throw to prevent further processing
         }
-
-        const result = await response.json();
-        console.log("Subscription cancellation result:", result);
       }
 
       // Update company status
