@@ -14,7 +14,7 @@ import {
   getCompanyPaymentMethods,
   removePaymentMethod,
   setDefaultPaymentMethod,
-  getStripeSubscriptionDetails,
+  syncStripeCustomer as getStripeSubscriptionDetails,
 } from "./stripe-actions";
 import { CreditCard, Loader2, Star, Trash } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";

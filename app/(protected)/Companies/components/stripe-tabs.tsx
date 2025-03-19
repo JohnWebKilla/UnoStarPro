@@ -5,7 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Company } from "../types";
 import { useEffect, useState, useRef, useCallback } from "react";
 import {
-  getStripeSubscriptionDetails,
+  syncStripeCustomer as getStripeSubscriptionDetails,
   getCompanyPaymentMethods,
   removePaymentMethod,
   setDefaultPaymentMethod,
@@ -58,6 +58,7 @@ import {
   X,
   Eye,
   CalendarClock,
+  AlertTriangle,
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -141,6 +142,19 @@ function CreateSubscriptionDialog({
   const plansRef = useRef<any[]>([]);
   const { toast } = useToast();
 
+  // Check if a product is already selected in another item
+  const isProductSelected = (productId: string, currentIndex: number) => {
+    return subscriptionItems.some(
+      (item, i) => i !== currentIndex && item.priceId === productId
+    );
+  };
+
+  // Debug logs
+  console.log("CreateSubscriptionDialog rendered with props:", {
+    isOpen,
+    isProcessing,
+  });
+
   // Preload plans when component mounts, not just when dialog opens
   useEffect(() => {
     const preloadPlans = async () => {
@@ -164,9 +178,15 @@ function CreateSubscriptionDialog({
 
   // Initialize subscription items when dialog opens
   useEffect(() => {
+    console.log(
+      "CreateSubscriptionDialog useEffect triggered, isOpen:",
+      isOpen
+    );
+
     const initializeDialog = async () => {
       if (!isOpen) return;
 
+      console.log("Dialog is open, initializing...");
       try {
         setIsLoading(true);
 
@@ -219,6 +239,23 @@ function CreateSubscriptionDialog({
     field: keyof SubscriptionItem,
     value: string | number
   ) => {
+    // If changing a priceId, check if it's already selected in another item
+    if (field === "priceId" && typeof value === "string") {
+      const isAlreadySelected = subscriptionItems.some(
+        (item, i) => i !== index && item.priceId === value
+      );
+
+      if (isAlreadySelected) {
+        toast({
+          title: "Product already selected",
+          description:
+            "You've already added this product to your subscription.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
     const newItems = [...subscriptionItems];
     newItems[index] = { ...newItems[index], [field]: value };
     setSubscriptionItems(newItems);
@@ -231,7 +268,7 @@ function CreateSubscriptionDialog({
     if (validItems.length === 0) {
       toast({
         title: "Error",
-        description: "Please select at least one plan",
+        description: "Please select at least one product",
         variant: "destructive",
       });
       return;
@@ -248,51 +285,81 @@ function CreateSubscriptionDialog({
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
-        <DialogHeader>
-          <DialogTitle>Create Subscription</DialogTitle>
-          <DialogDescription>
-            Select the plans you want to subscribe to
+    <Dialog
+      open={isOpen}
+      onOpenChange={(open) => {
+        console.log("Dialog onOpenChange called with:", open);
+        onOpenChange(open);
+      }}
+    >
+      <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+        <DialogHeader className="pb-4 border-b">
+          <DialogTitle className="text-xl">Create Subscription</DialogTitle>
+          <DialogDescription className="text-muted-foreground mt-1">
+            Select the products you want to subscribe to
           </DialogDescription>
         </DialogHeader>
         {isLoading ? (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            <span className="ml-2">Loading subscription plans...</span>
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-10 w-10 animate-spin text-primary" />
+            <span className="ml-3 text-lg">
+              Loading subscription products...
+            </span>
           </div>
         ) : (
-          <div className="flex-1 min-h-0 flex flex-col">
-            <ScrollArea className="flex-1">
-              <div className="space-y-4 py-4">
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+            <div className="h-[350px] overflow-y-auto overflow-x-hidden pr-2 py-2 scrollbar scrollbar-thumb-rounded scrollbar-thumb-gray-300 scrollbar-track-gray-100">
+              <div className="space-y-6 px-1">
                 {subscriptionItems.map((item, index) => (
                   <div
                     key={index}
-                    className="grid grid-cols-12 gap-4 items-center"
+                    className="grid grid-cols-12 gap-4 items-center bg-muted/5 p-4 rounded-lg border"
                   >
-                    <div className="col-span-5">
+                    <div className="col-span-12 md:col-span-6">
+                      <Label
+                        htmlFor={`plan-${index}`}
+                        className="text-sm font-medium mb-1.5 block text-muted-foreground"
+                      >
+                        Select Product
+                      </Label>
                       <Select
                         value={item.priceId}
                         onValueChange={(value) =>
                           handleItemChange(index, "priceId", value)
                         }
                       >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select Plan" />
+                        <SelectTrigger id={`plan-${index}`} className="w-full">
+                          <SelectValue placeholder="Select Product" />
                         </SelectTrigger>
                         <SelectContent>
                           {availablePlans.map((plan) => (
-                            <SelectItem key={plan.id} value={plan.id}>
+                            <SelectItem
+                              key={plan.id}
+                              value={plan.id}
+                              disabled={isProductSelected(plan.id, index)}
+                              className={
+                                isProductSelected(plan.id, index)
+                                  ? "opacity-50 cursor-not-allowed"
+                                  : ""
+                              }
+                            >
                               {plan.product.name} -{" "}
                               {formatCurrency(plan.unit_amount)}
+                              {isProductSelected(plan.id, index) &&
+                                " (Already added)"}
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="col-span-5">
-                      <div className="flex items-center space-x-2">
-                        <Label htmlFor={`quantity-${index}`}>Quantity</Label>
+                    <div className="col-span-9 md:col-span-4">
+                      <div className="space-y-1.5">
+                        <Label
+                          htmlFor={`quantity-${index}`}
+                          className="text-sm font-medium text-muted-foreground"
+                        >
+                          Quantity
+                        </Label>
                         <Input
                           id={`quantity-${index}`}
                           type="number"
@@ -305,16 +372,17 @@ function CreateSubscriptionDialog({
                               parseInt(e.target.value) || 1
                             )
                           }
-                          className="w-20"
+                          className="w-full"
                         />
                       </div>
                     </div>
-                    <div className="col-span-2 flex justify-end">
+                    <div className="col-span-3 md:col-span-2 flex justify-end">
                       <Button
                         variant="ghost"
                         size="icon"
                         onClick={() => handleRemoveItem(index)}
                         disabled={subscriptionItems.length === 1}
+                        className="h-9 w-9 rounded-full hover:bg-destructive/10 hover:text-destructive"
                       >
                         <Trash className="h-4 w-4" />
                         <span className="sr-only">Remove</span>
@@ -324,37 +392,46 @@ function CreateSubscriptionDialog({
                 ))}
                 <Button
                   variant="outline"
-                  className="w-full"
+                  className="w-full py-6 border-dashed"
                   onClick={handleAddItem}
                 >
-                  <Plus className="mr-2 h-4 w-4" /> Add Another Plan
+                  <Plus className="mr-2 h-5 w-5" /> Add Another Product
                 </Button>
               </div>
-            </ScrollArea>
+            </div>
 
-            <div className="border-t pt-4 space-y-2">
-              <div className="flex justify-between">
-                <span>Subtotal</span>
-                <span>{formatCurrency(calculateSubtotal() * 100)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Total excluding tax</span>
-                <span>{formatCurrency(calculateSubtotal() * 100)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Tax</span>
-                <span>{formatCurrency(0)}</span>
-              </div>
-              <div className="flex justify-between font-bold">
-                <span>Total</span>
-                <span>{formatCurrency(calculateSubtotal() * 100)}</span>
+            <div className="border-t pt-4 mt-4 space-y-3 bg-background">
+              <div className="bg-muted/10 p-4 rounded-lg border space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Subtotal</span>
+                  <span className="font-medium">
+                    {formatCurrency(calculateSubtotal() * 100)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">
+                    Total excluding tax
+                  </span>
+                  <span className="font-medium">
+                    {formatCurrency(calculateSubtotal() * 100)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Tax</span>
+                  <span className="font-medium">{formatCurrency(0)}</span>
+                </div>
+                <div className="flex justify-between font-bold text-lg pt-2 border-t border-border/40">
+                  <span>Total</span>
+                  <span>{formatCurrency(calculateSubtotal() * 100)}</span>
+                </div>
               </div>
 
-              <div className="flex justify-end space-x-2 mt-4">
+              <div className="flex justify-end space-x-2 mt-6">
                 <Button
                   variant="outline"
                   onClick={() => onOpenChange(false)}
                   disabled={isProcessing}
+                  className="px-6"
                 >
                   Cancel
                 </Button>
@@ -404,6 +481,13 @@ function UpdateSubscriptionDialog({
   const plansRef = useRef<any[]>([]);
   const { toast } = useToast();
 
+  // Check if a product is already selected in another item
+  const isProductSelected = (productId: string, currentIndex: number) => {
+    return subscriptionItems.some(
+      (item, i) => i !== currentIndex && item.priceId === productId
+    );
+  };
+
   // Preload plans when component mounts, not just when dialog opens
   useEffect(() => {
     const preloadPlans = async () => {
@@ -439,10 +523,12 @@ function UpdateSubscriptionDialog({
 
           // Initialize subscription items from current subscription
           if (subscription?.items) {
-            const currentItems = subscription.items.map((item: any) => ({
-              priceId: item.price.id,
-              quantity: item.quantity,
-            }));
+            const currentItems = Array.isArray(subscription.items)
+              ? subscription.items.map((item: any) => ({
+                  priceId: item.price.id,
+                  quantity: item.quantity,
+                }))
+              : [];
             setSubscriptionItems(currentItems);
           }
 
@@ -460,10 +546,12 @@ function UpdateSubscriptionDialog({
 
           // Initialize subscription items from current subscription
           if (subscription?.items) {
-            const currentItems = subscription.items.map((item: any) => ({
-              priceId: item.price.id,
-              quantity: item.quantity,
-            }));
+            const currentItems = Array.isArray(subscription.items)
+              ? subscription.items.map((item: any) => ({
+                  priceId: item.price.id,
+                  quantity: item.quantity,
+                }))
+              : [];
             setSubscriptionItems(currentItems);
           }
         } else {
@@ -501,6 +589,23 @@ function UpdateSubscriptionDialog({
     field: keyof SubscriptionItem,
     value: string | number
   ) => {
+    // If changing a priceId, check if it's already selected in another item
+    if (field === "priceId" && typeof value === "string") {
+      const isAlreadySelected = subscriptionItems.some(
+        (item, i) => i !== index && item.priceId === value
+      );
+
+      if (isAlreadySelected) {
+        toast({
+          title: "Product already selected",
+          description:
+            "You've already added this product to your subscription.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
     const newItems = [...subscriptionItems];
     newItems[index] = { ...newItems[index], [field]: value };
     setSubscriptionItems(newItems);
@@ -520,7 +625,7 @@ function UpdateSubscriptionDialog({
     if (validItems.length === 0) {
       toast({
         title: "Error",
-        description: "Please select at least one plan",
+        description: "Please select at least one product",
         variant: "destructive",
       });
       return;
@@ -530,7 +635,13 @@ function UpdateSubscriptionDialog({
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={onOpenChange}>
+    <Dialog
+      open={isOpen}
+      onOpenChange={(open) => {
+        console.log("Dialog onOpenChange called with:", open);
+        onOpenChange(open);
+      }}
+    >
       <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>Update Subscription</DialogTitle>
@@ -560,13 +671,24 @@ function UpdateSubscriptionDialog({
                         }
                       >
                         <SelectTrigger>
-                          <SelectValue placeholder="Select Plan" />
+                          <SelectValue placeholder="Select Product" />
                         </SelectTrigger>
                         <SelectContent>
                           {availablePlans.map((plan) => (
-                            <SelectItem key={plan.id} value={plan.id}>
+                            <SelectItem
+                              key={plan.id}
+                              value={plan.id}
+                              disabled={isProductSelected(plan.id, index)}
+                              className={
+                                isProductSelected(plan.id, index)
+                                  ? "opacity-50 cursor-not-allowed"
+                                  : ""
+                              }
+                            >
                               {plan.product.name} -{" "}
                               {formatCurrency(plan.unit_amount)}
+                              {isProductSelected(plan.id, index) &&
+                                " (Already added)"}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -608,7 +730,7 @@ function UpdateSubscriptionDialog({
                   className="w-full"
                   onClick={handleAddItem}
                 >
-                  <Plus className="mr-2 h-4 w-4" /> Add Another Plan
+                  <Plus className="mr-2 h-4 w-4" /> Add Another Product
                 </Button>
               </div>
             </ScrollArea>
@@ -654,7 +776,7 @@ function UpdateSubscriptionDialog({
                   {isProcessing ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : (
-                    <Pencil className="mr-2 h-4 w-4" />
+                    <ChevronRight className="mr-2 h-4 w-4" />
                   )}
                   Update
                 </Button>
@@ -866,6 +988,14 @@ export function StripeTabs({
     useState(false);
   const [isCreateInvoiceOpen, setIsCreateInvoiceOpen] = useState(false);
 
+  // Debug effect for dialog state
+  useEffect(() => {
+    console.log(
+      "createSubscriptionDialogOpen state changed:",
+      createSubscriptionDialogOpen
+    );
+  }, [createSubscriptionDialogOpen]);
+
   // All useRef hooks
   const dataFetchedRef = useRef({
     subscription: false,
@@ -873,6 +1003,9 @@ export function StripeTabs({
     invoices: false,
     any: false,
   });
+
+  // Add plansRef for storing available plans
+  const plansRef = useRef<any[]>([]);
 
   // Get toast from context
   const { toast } = useToast();
@@ -1196,6 +1329,16 @@ export function StripeTabs({
         const plansData = await plansResponse.json();
         const availablePlans = plansData.plans || [];
 
+        // Calculate total subscription amount in cents (Stripe uses cents)
+        const totalAmount = items.reduce((sum, item) => {
+          const plan = availablePlans.find(
+            (plan: { id: string }) => plan.id === item.priceId
+          );
+          return sum + (plan ? plan.unit_amount * item.quantity : 0);
+        }, 0);
+
+        console.log("Calculated new subscription total amount:", totalAmount);
+
         // Optimistically update the UI
         const updatedSubscription = {
           ...subscriptionDetails.subscription,
@@ -1231,6 +1374,26 @@ export function StripeTabs({
             body: JSON.stringify({ items }),
           }
         );
+
+        // Update the company's subscription amount in the database
+        try {
+          await fetch(`/api/companies/${company.id}/update`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              stripe_subscription_amount: totalAmount,
+              stripe_subscription_id: subscriptionDetails.subscription.id,
+            }),
+          });
+          console.log("Updated company subscription amount:", totalAmount);
+        } catch (updateError) {
+          console.error(
+            "Failed to update company subscription amount:",
+            updateError
+          );
+        }
 
         // Close the dialog before fetching fresh data
         setIsUpdateSubscriptionOpen(false);
@@ -1269,8 +1432,40 @@ export function StripeTabs({
         return;
       }
 
+      // Check if payment methods are available
+      if (paymentMethods.length === 0) {
+        toast({
+          title: "Payment Method Required",
+          description:
+            "Please add a payment method before creating a subscription",
+          variant: "destructive",
+        });
+        // Switch to the payment methods tab
+        setActiveTab("payment-methods");
+        // Open the dialog to add a payment method
+        setIsPaymentMethodsOpen(true);
+        return;
+      }
+
       try {
         setIsProcessing(true);
+
+        // Calculate total subscription amount in cents (Stripe uses cents)
+        let totalAmount = 0;
+        // First get available plans if we don't have them
+        if (!plansRef.current.length) {
+          const plansResponse = await fetch("/api/stripe/plans");
+          const plansData = await plansResponse.json();
+          plansRef.current = plansData.plans || [];
+        }
+
+        // Calculate total amount based on items and their quantities
+        totalAmount = items.reduce((sum, item) => {
+          const plan = plansRef.current.find((p) => p.id === item.priceId);
+          return sum + (plan ? plan.unit_amount * item.quantity : 0);
+        }, 0);
+
+        console.log("Creating subscription with total amount:", totalAmount);
 
         // Create subscription with multiple items
         const result = await createSubscription({
@@ -1282,7 +1477,7 @@ export function StripeTabs({
         });
 
         // Close the dialog before fetching fresh data
-        setIsCreateSubscriptionOpen(false);
+        setCreateSubscriptionDialogOpen(false);
 
         // Update the local state optimistically
         if (result?.subscription) {
@@ -1296,6 +1491,26 @@ export function StripeTabs({
             data: updatedDetails,
             timestamp: Date.now(),
           });
+
+          // Update the company's subscription amount in the database
+          try {
+            await fetch(`/api/companies/${company.id}/update`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                stripe_subscription_amount: totalAmount,
+                stripe_subscription_id: result.subscription.id,
+              }),
+            });
+            console.log("Updated company subscription amount:", totalAmount);
+          } catch (updateError) {
+            console.error(
+              "Failed to update company subscription amount:",
+              updateError
+            );
+          }
         }
 
         // Refresh data in the background to ensure consistency
@@ -1323,6 +1538,10 @@ export function StripeTabs({
       fetchData,
       subscriptionDetails,
       toast,
+      paymentMethods,
+      setActiveTab,
+      setIsPaymentMethodsOpen,
+      plansRef,
     ]
   );
 
@@ -1345,6 +1564,25 @@ export function StripeTabs({
 
       await cancelSubscription(subscriptionDetails.subscription.id);
 
+      // Update the company's subscription amount to 0 in the database
+      try {
+        await fetch(`/api/companies/${company.id}/update`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            stripe_subscription_amount: 0,
+          }),
+        });
+        console.log("Reset company subscription amount to 0");
+      } catch (updateError) {
+        console.error(
+          "Failed to reset company subscription amount:",
+          updateError
+        );
+      }
+
       // Refresh data to ensure consistency
       await fetchData();
 
@@ -1364,7 +1602,7 @@ export function StripeTabs({
     } finally {
       setIsProcessing(false);
     }
-  }, [fetchData, subscriptionDetails, toast]);
+  }, [fetchData, subscriptionDetails, toast, company.id]);
 
   const handlePauseSubscription = useCallback(async () => {
     if (!subscriptionDetails?.subscription?.id) return;
@@ -1620,7 +1858,15 @@ export function StripeTabs({
             <Button
               variant={isCanceled ? "outline" : "default"}
               size="sm"
-              onClick={() => setIsCreateSubscriptionOpen(true)}
+              onClick={() => {
+                console.log("Subscription actions Create button clicked");
+                console.log(
+                  "Before state change:",
+                  createSubscriptionDialogOpen
+                );
+                setCreateSubscriptionDialogOpen(true);
+                console.log("After state change:", true);
+              }}
               disabled={isProcessing}
               className="flex items-center gap-2"
             >
@@ -1628,12 +1874,14 @@ export function StripeTabs({
               {isCanceled ? "Create New Subscription" : "Create Subscription"}
             </Button>
           </div>
+          {/* Temporarily comment out this instance of the dialog to avoid duplicate components
           <CreateSubscriptionDialog
             onSubscribe={handleCreateSubscription}
-            isOpen={isCreateSubscriptionOpen}
-            onOpenChange={setIsCreateSubscriptionOpen}
+            isOpen={createSubscriptionDialogOpen}
+            onOpenChange={setCreateSubscriptionDialogOpen}
             isProcessing={isProcessing}
           />
+          */}
           {isCanceled && (
             <div className="text-sm text-muted-foreground mt-2 p-4 bg-muted/20 rounded-lg border border-dashed">
               <div className="flex items-center gap-2">
@@ -1663,11 +1911,13 @@ export function StripeTabs({
     }
 
     const isPaused = subscription.status === "paused";
-    const totalAmount = subscription.items.reduce(
-      (sum: number, item: any) =>
-        sum + (item.price.unit_amount * item.quantity || 0),
-      0
-    );
+    const totalAmount = Array.isArray(subscription.items)
+      ? subscription.items.reduce(
+          (sum: number, item: any) =>
+            sum + (item.price.unit_amount * item.quantity || 0),
+          0
+        )
+      : 0;
 
     return (
       <div className="space-y-6">
@@ -1702,12 +1952,15 @@ export function StripeTabs({
                   Next invoice $
                   {(
                     (subscriptionDetails?.upcoming_invoice?.amount_due ??
-                      subscriptionDetails?.subscription?.items?.reduce(
-                        (sum: number, item: any) =>
-                          sum +
-                          (item.price?.unit_amount ?? 0) * (item.quantity ?? 1),
-                        0
-                      )) / 100
+                      (Array.isArray(subscriptionDetails?.subscription?.items)
+                        ? subscriptionDetails.subscription.items.reduce(
+                            (sum: number, item: any) =>
+                              sum +
+                              (item.price?.unit_amount ?? 0) *
+                                (item.quantity ?? 1),
+                            0
+                          )
+                        : 0)) / 100
                   ).toFixed(2)}{" "}
                   on{" "}
                   {new Date(
@@ -1809,7 +2062,7 @@ export function StripeTabs({
   }, [
     subscriptionDetails,
     isProcessing,
-    isCreateSubscriptionOpen,
+    createSubscriptionDialogOpen,
     handleCreateSubscription,
     handlePauseSubscription,
     handleSharePaymentLink,
@@ -1817,7 +2070,7 @@ export function StripeTabs({
     handleExcludeFromAutoCancellation,
     handleCancelSubscription,
     handleResumeSubscription,
-    setIsCreateSubscriptionOpen,
+    setCreateSubscriptionDialogOpen,
     setIsUpdateSubscriptionOpen,
   ]);
 
@@ -2077,11 +2330,14 @@ export function StripeTabs({
                     <Table>
                       <TableHeader>
                         <TableRow className="hover:bg-transparent">
-                          <TableHead className="w-[40%] font-semibold">
+                          <TableHead className="w-[35%] font-semibold">
                             Plan
                           </TableHead>
                           <TableHead className="font-semibold">
                             Status
+                          </TableHead>
+                          <TableHead className="font-semibold">
+                            Quantity
                           </TableHead>
                           <TableHead className="font-semibold">
                             Amount
@@ -2092,35 +2348,58 @@ export function StripeTabs({
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {subscriptionDetails?.subscription?.items?.map(
-                          (item: any) => (
-                            <TableRow
-                              key={item.id}
-                              className="hover:bg-muted/50"
-                            >
-                              <TableCell className="font-medium">
-                                {item.price.nickname || item.price.product.name}
-                              </TableCell>
-                              <TableCell>
-                                <Badge variant="outline" className="capitalize">
-                                  {subscriptionDetails.subscription.status}
-                                </Badge>
-                              </TableCell>
-                              <TableCell>
-                                $
-                                {((item.price.unit_amount || 0) / 100).toFixed(
-                                  2
-                                )}
-                              </TableCell>
-                              <TableCell className="text-right">
-                                {new Date(
-                                  subscriptionDetails.subscription
-                                    .current_period_end * 1000
-                                ).toLocaleDateString()}
-                              </TableCell>
-                            </TableRow>
-                          )
-                        )}
+                        {Array.isArray(subscriptionDetails?.subscription?.items)
+                          ? subscriptionDetails.subscription.items.map(
+                              (item: any) => (
+                                <TableRow
+                                  key={item.id}
+                                  className="hover:bg-muted/50"
+                                >
+                                  <TableCell className="font-medium">
+                                    {item.price.nickname ||
+                                      item.price.product.name}
+                                  </TableCell>
+                                  <TableCell>
+                                    <Badge
+                                      variant="outline"
+                                      className="capitalize"
+                                    >
+                                      {subscriptionDetails.subscription.status}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell>{item.quantity || 1}</TableCell>
+                                  <TableCell>
+                                    {item.quantity > 1 ? (
+                                      <>
+                                        $
+                                        {(
+                                          (item.price.unit_amount || 0) / 100
+                                        ).toFixed(2)}{" "}
+                                        × {item.quantity} = $
+                                        {(
+                                          (item.price.unit_amount *
+                                            item.quantity || 0) / 100
+                                        ).toFixed(2)}
+                                      </>
+                                    ) : (
+                                      <>
+                                        $
+                                        {(
+                                          (item.price.unit_amount || 0) / 100
+                                        ).toFixed(2)}
+                                      </>
+                                    )}
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    {new Date(
+                                      subscriptionDetails.subscription
+                                        .current_period_end * 1000
+                                    ).toLocaleDateString()}
+                                  </TableCell>
+                                </TableRow>
+                              )
+                            )
+                          : null}
                       </TableBody>
                     </Table>
                   </div>
@@ -2130,14 +2409,16 @@ export function StripeTabs({
                         <span className="text-muted-foreground">Subtotal</span>
                         <span className="font-medium">
                           $
-                          {(
-                            subscriptionDetails.subscription.items.reduce(
-                              (sum: number, item: any) =>
-                                sum +
-                                (item.price.unit_amount * item.quantity || 0),
-                              0
-                            ) / 100
-                          ).toFixed(2)}
+                          {(Array.isArray(
+                            subscriptionDetails.subscription.items
+                          )
+                            ? subscriptionDetails.subscription.items.reduce(
+                                (sum: number, item: any) =>
+                                  sum +
+                                  (item.price.unit_amount * item.quantity || 0),
+                                0
+                              )
+                            : 0) / 100}
                         </span>
                       </div>
                       <div className="flex justify-between text-sm">
@@ -2151,14 +2432,17 @@ export function StripeTabs({
                           </span>
                           <span className="text-base font-semibold">
                             $
-                            {(
-                              subscriptionDetails.subscription.items.reduce(
-                                (sum: number, item: any) =>
-                                  sum +
-                                  (item.price.unit_amount * item.quantity || 0),
-                                0
-                              ) / 100
-                            ).toFixed(2)}
+                            {(Array.isArray(
+                              subscriptionDetails.subscription.items
+                            )
+                              ? subscriptionDetails.subscription.items.reduce(
+                                  (sum: number, item: any) =>
+                                    sum +
+                                    (item.price.unit_amount * item.quantity ||
+                                      0),
+                                  0
+                                )
+                              : 0) / 100}
                           </span>
                         </div>
                       </div>
@@ -2182,17 +2466,56 @@ export function StripeTabs({
                     access premium features.
                   </p>
                 </div>
-                <Button
-                  onClick={() => setIsCreateSubscriptionOpen(true)}
-                  className="mt-4"
-                  size="lg"
-                >
-                  <Plus className="mr-2 h-4 w-4" />
-                  Create Subscription
-                </Button>
+                {paymentMethods.length === 0 ? (
+                  <div className="space-y-4 w-full max-w-md mt-2">
+                    <div className="bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-200 p-4 rounded-lg text-sm border border-amber-200 dark:border-amber-800/30">
+                      <p className="flex items-start">
+                        <AlertTriangle className="h-5 w-5 mr-2 flex-shrink-0 text-amber-500" />
+                        <span>
+                          You need to add a payment method before creating a
+                          subscription.
+                        </span>
+                      </p>
+                    </div>
+                    <Button
+                      className="w-full"
+                      onClick={() => {
+                        setActiveTab("payment-methods");
+                        setIsPaymentMethodsOpen(true);
+                      }}
+                      size="lg"
+                    >
+                      <CreditCard className="mr-2 h-4 w-4" />
+                      Add Payment Method
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    onClick={() => {
+                      console.log("Create Subscription button clicked");
+                      console.log(
+                        "Before state change:",
+                        createSubscriptionDialogOpen
+                      );
+                      setCreateSubscriptionDialogOpen(true);
+                      console.log("After state change:", true);
+                    }}
+                    className="mt-4"
+                    size="lg"
+                  >
+                    <Plus className="mr-2 h-4 w-4" />
+                    Create Subscription
+                  </Button>
+                )}
               </div>
             </Card>
           )}
+          <CreateSubscriptionDialog
+            onSubscribe={handleCreateSubscription}
+            isOpen={createSubscriptionDialogOpen}
+            onOpenChange={setCreateSubscriptionDialogOpen}
+            isProcessing={isProcessing}
+          />
         </TabsContent>
 
         <TabsContent value="invoices">
@@ -2404,6 +2727,14 @@ export function StripeTabs({
         onOpenChange={setIsUpdateSubscriptionOpen}
         isProcessing={isProcessing}
         onUpdate={handleUpdateSubscriptionItems}
+      />
+
+      {/* Add CreateSubscriptionDialog at the root level */}
+      <CreateSubscriptionDialog
+        onSubscribe={handleCreateSubscription}
+        isOpen={createSubscriptionDialogOpen}
+        onOpenChange={setCreateSubscriptionDialogOpen}
+        isProcessing={isProcessing}
       />
     </>
   );

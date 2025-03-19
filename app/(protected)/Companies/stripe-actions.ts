@@ -424,219 +424,37 @@ export async function syncStripeCustomer(companyId: number) {
 
     await supabase.from("companies").update(updateData).eq("id", companyId);
 
-    // If there are invoices, update the last invoice information
-    if (subscription) {
-      const invoices = await stripe.invoices.list({
-        customer: customer.id,
-        limit: 1,
-      });
-
-      if (invoices.data.length > 0) {
-        const invoiceUpdateData = {
-          last_invoice_date: new Date(
-            invoices.data[0].created * 1000
-          ).toISOString(),
-          last_invoice_status: invoices.data[0].status,
-        };
-
-        console.log(
-          `Updating invoice data for ${company.name}:`,
-          invoiceUpdateData
-        );
-
-        await supabase
-          .from("companies")
-          .update(invoiceUpdateData)
-          .eq("id", companyId);
-      }
-    }
-
-    // Invalidate cache for this company
-    await invalidateStripeCache(companyId);
-
-    revalidatePath("/Companies");
-    return { success: true, message: "Customer synced successfully" };
-  } catch (error) {
-    console.error("Error syncing Stripe customer:", error);
-    throw error;
-  }
-}
-
-interface StripeCharge {
-  amount: number;
-  description: string;
-  metadata?: Record<string, string>;
-}
-
-export async function createInvoiceItem(
-  companyId: number,
-  charge: StripeCharge
-): Promise<Response> {
-  const response = await fetch(`/api/companies/${companyId}/invoice-items`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(charge),
-  });
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.details || "Failed to create invoice item");
-  }
-
-  return response;
-}
-
-export async function createInvoice(
-  companyId: number,
-  autoCharge: boolean = false
-): Promise<Response> {
-  const response = await fetch(`/api/companies/${companyId}/invoices`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ auto_charge: autoCharge }),
-  });
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.details || "Failed to create invoice");
-  }
-
-  return response;
-}
-
-// Function to add charges and optionally create an invoice
-export async function addCharges(
-  company: Company,
-  charges: StripeCharge[]
-): Promise<void> {
-  if (!company.stripe_customer_id) {
-    throw new Error("Company is not connected to Stripe");
-  }
-
-  // Add all charges as invoice items
-  for (const charge of charges) {
-    await createInvoiceItem(company.id, charge);
-  }
-
-  // If auto_invoice is enabled, create and finalize the invoice immediately
-  if (company.auto_invoice) {
-    await createInvoice(company.id, true); // true for auto-charge
-  }
-
-  // Invalidate cache after changes
-  await invalidateStripeCache(company.id);
-}
-
-export async function deleteCompanyFromStripe(company: Company): Promise<void> {
-  if (!stripe) {
-    throw new Error("Stripe is not configured");
-  }
-
-  if (!company.stripe_customer_id) {
-    return; // Nothing to delete in Stripe
-  }
-
-  try {
-    // Check for active subscriptions
-    const customer = await stripe.customers.retrieve(
-      company.stripe_customer_id,
-      {
-        expand: ["subscriptions"],
-      }
-    );
-
-    if ((customer as Stripe.Customer).subscriptions?.data.length) {
-      throw new Error("Cannot delete company with active subscriptions");
-    }
-
-    // Delete the customer in Stripe
-    await stripe.customers.del(company.stripe_customer_id);
-  } catch (error) {
-    if (error instanceof Error) {
-      throw error;
-    }
-    throw new Error("Failed to delete customer in Stripe");
-  }
-}
-
-export async function getStripeSubscriptionDetails(companyId: number) {
-  if (!stripe) {
-    throw new Error("Stripe is not initialized");
-  }
-
-  const supabase = await createClient();
-
-  try {
-    const { data: company, error: companyError } = await supabase
-      .from("companies")
-      .select()
-      .eq("id", companyId)
-      .single();
-
-    if (companyError) {
-      throw companyError;
-    }
-
-    if (!company.stripe_customer_id) {
-      throw new Error("Company does not have a Stripe customer ID");
-    }
-
-    console.log("Fetching Stripe details for company:", {
-      companyId,
-      stripeCustomerId: company.stripe_customer_id,
-    });
-
-    // Fetch customer details
-    const customer = (await stripe.customers.retrieve(
-      company.stripe_customer_id,
-      {
-        expand: ["subscriptions", "invoice_settings.default_payment_method"],
-      }
-    )) as Stripe.Customer;
-
-    if (customer.deleted) {
-      throw new Error("Stripe customer has been deleted");
-    }
-
-    // Fetch payment methods
-    const paymentMethods = await stripe.paymentMethods.list({
-      customer: company.stripe_customer_id,
-      type: "card",
-    });
-
-    // Get default payment method ID
-    let defaultPaymentMethodId = null;
-    if (customer.invoice_settings?.default_payment_method) {
-      defaultPaymentMethodId =
-        typeof customer.invoice_settings.default_payment_method === "string"
-          ? customer.invoice_settings.default_payment_method
-          : (
-              customer.invoice_settings
-                .default_payment_method as Stripe.PaymentMethod
-            ).id;
-    } else if (paymentMethods.data.length > 0) {
-      defaultPaymentMethodId = paymentMethods.data[0].id;
-    }
-
-    // Get subscription
-    const subscription = customer.subscriptions?.data[0];
-
     // Fetch invoices with expanded subscription data
     const invoices = await stripe.invoices.list({
       customer: company.stripe_customer_id,
       limit: 100,
-      expand: ["data.subscription"],
+      expand: ["data.subscription", "data.lines.data"],
+    });
+
+    // Also fetch draft invoices to ensure we get their correct amounts
+    const draftInvoices = await stripe.invoices.list({
+      customer: company.stripe_customer_id,
+      status: "draft",
+      limit: 10,
+      expand: ["data.lines.data"],
+    });
+
+    // Combine regular invoices with draft invoices, removing duplicates
+    const allInvoices = [...invoices.data];
+
+    // Add draft invoices if they're not already in the list
+    draftInvoices.data.forEach((draftInvoice) => {
+      if (!allInvoices.some((invoice) => invoice.id === draftInvoice.id)) {
+        allInvoices.push(draftInvoice);
+      }
     });
 
     console.log("Fetched Stripe data:", {
       customerId: company.stripe_customer_id,
       hasSubscription: !!subscription,
       subscriptionStatus: subscription?.status,
-      invoiceCount: invoices.data.length,
+      invoiceCount: allInvoices.length,
+      draftInvoicesCount: draftInvoices.data.length,
       defaultPaymentMethodId,
     });
 
@@ -648,7 +466,7 @@ export async function getStripeSubscriptionDetails(companyId: number) {
     ) {
       try {
         upcomingInvoice = await stripe.invoices.retrieveUpcoming({
-          customer: company.stripe_customer_id,
+          customer: customer.id,
         });
       } catch (error) {
         console.warn("Error fetching upcoming invoice:", error);
@@ -656,7 +474,7 @@ export async function getStripeSubscriptionDetails(companyId: number) {
     }
 
     // Update company with latest invoice and subscription status
-    const latestInvoice = invoices.data[0];
+    const latestInvoice = allInvoices[0];
     if (latestInvoice || subscription) {
       const updateData: {
         last_synced_at: string;
@@ -793,15 +611,28 @@ export async function getStripeSubscriptionDetails(companyId: number) {
             period_start: upcomingInvoice.period_start,
           }
         : null,
-      invoices: invoices.data.map((invoice) => ({
-        id: invoice.id,
-        number: invoice.number,
-        amount_due: invoice.amount_due,
-        status: invoice.status || null,
-        created: invoice.created,
-        hosted_invoice_url: invoice.hosted_invoice_url,
-        invoice_pdf: invoice.invoice_pdf,
-      })),
+      invoices: allInvoices.map((invoice) => {
+        // For draft invoices, calculate the correct amount from the lines data
+        let amount = invoice.amount_due;
+
+        // If it's a draft and amount is 0, calculate from line items
+        if (invoice.status === "draft" && amount === 0 && invoice.lines?.data) {
+          amount = invoice.lines.data.reduce((sum, line) => {
+            const lineAmount = line.amount || 0;
+            return sum + lineAmount;
+          }, 0);
+        }
+
+        return {
+          id: invoice.id,
+          number: invoice.number,
+          amount_due: amount,
+          status: invoice.status || null,
+          created: invoice.created,
+          hosted_invoice_url: invoice.hosted_invoice_url,
+          invoice_pdf: invoice.invoice_pdf,
+        };
+      }),
       paymentMethods: paymentMethods.data.map((method) => ({
         id: method.id,
         type: method.type,
@@ -813,10 +644,9 @@ export async function getStripeSubscriptionDetails(companyId: number) {
         },
       })),
       subscription_status: subscription?.status || null,
-      last_invoice_date:
-        invoices.data.length > 0 ? invoices.data[0].created : null,
+      last_invoice_date: allInvoices.length > 0 ? allInvoices[0].created : null,
       last_invoice_status:
-        invoices.data.length > 0 ? invoices.data[0].status : null,
+        allInvoices.length > 0 ? allInvoices[0].status : null,
     };
 
     // Cache the serialized data
@@ -872,6 +702,28 @@ export async function updateSubscriptionQuantity({
         .single();
 
       if (company) {
+        // Update the companies table with updated subscription information
+        const { error: updateError } = await supabase
+          .from("companies")
+          .update({
+            subscription_status: subscription.status,
+            subscription_amount: subscription.items.data.reduce(
+              (total, item) =>
+                total + (item.price.unit_amount || 0) * (item.quantity || 1),
+              0
+            ),
+            last_synced_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", company.id);
+
+        if (updateError) {
+          console.error(
+            "Error updating company with subscription data:",
+            updateError
+          );
+        }
+
         await invalidateStripeCache(company.id);
       }
     }
@@ -923,6 +775,51 @@ export async function changeSubscriptionPlan({
         .single();
 
       if (company) {
+        // Update the companies table with updated subscription information
+        const { error: updateError } = await supabase
+          .from("companies")
+          .update({
+            subscription_status: subscription.status,
+            subscription_amount: subscription.items.data.reduce(
+              (total, item) =>
+                total + (item.price.unit_amount || 0) * (item.quantity || 1),
+              0
+            ),
+            last_synced_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", company.id);
+
+        if (updateError) {
+          console.error(
+            "Error updating company with subscription data:",
+            updateError
+          );
+        }
+
+        // Update invoice information if available in the response
+        if (
+          subscription.latest_invoice &&
+          typeof subscription.latest_invoice !== "string"
+        ) {
+          const { error: invoiceUpdateError } = await supabase
+            .from("companies")
+            .update({
+              last_invoice_date: new Date(
+                (subscription.latest_invoice as any).created * 1000
+              ).toISOString(),
+              last_invoice_status: (subscription.latest_invoice as any).status,
+            })
+            .eq("id", company.id);
+
+          if (invoiceUpdateError) {
+            console.error(
+              "Error updating company with invoice data:",
+              invoiceUpdateError
+            );
+          }
+        }
+
         await invalidateStripeCache(company.id);
       }
     }
@@ -1019,7 +916,9 @@ export async function addSubscriptionItem({
     });
 
     // Get the subscription to find the customer
-    const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+    const subscription = await stripe.subscriptions.retrieve(subscriptionId, {
+      expand: ["latest_invoice"],
+    });
 
     // Find the company ID from the subscription's customer
     if (subscription.customer) {
@@ -1036,6 +935,51 @@ export async function addSubscriptionItem({
         .single();
 
       if (company) {
+        // Update the companies table with updated subscription information
+        const { error: updateError } = await supabase
+          .from("companies")
+          .update({
+            subscription_status: subscription.status,
+            subscription_amount: subscription.items.data.reduce(
+              (total, item) =>
+                total + (item.price.unit_amount || 0) * (item.quantity || 1),
+              0
+            ),
+            last_synced_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", company.id);
+
+        if (updateError) {
+          console.error(
+            "Error updating company with subscription data:",
+            updateError
+          );
+        }
+
+        // Update invoice information if available in the response
+        if (
+          subscription.latest_invoice &&
+          typeof subscription.latest_invoice !== "string"
+        ) {
+          const { error: invoiceUpdateError } = await supabase
+            .from("companies")
+            .update({
+              last_invoice_date: new Date(
+                subscription.latest_invoice.created * 1000
+              ).toISOString(),
+              last_invoice_status: subscription.latest_invoice.status,
+            })
+            .eq("id", company.id);
+
+          if (invoiceUpdateError) {
+            console.error(
+              "Error updating company with invoice data:",
+              invoiceUpdateError
+            );
+          }
+        }
+
         await invalidateStripeCache(company.id);
       }
     }
@@ -1223,22 +1167,62 @@ export async function createSubscription({
   }
 
   try {
-    // First, get the customer to check for default payment method
+    // First, get the customer to check for payment methods
     const customer = await stripe.customers.retrieve(customerId, {
       expand: ["invoice_settings.default_payment_method"],
     });
 
-    if (
-      !("invoice_settings" in customer) ||
-      !customer.invoice_settings.default_payment_method ||
-      typeof customer.invoice_settings.default_payment_method === "string"
-    ) {
+    // Check for payment methods
+    const paymentMethods = await stripe.paymentMethods.list({
+      customer: customerId,
+      type: "card",
+    });
+
+    if (paymentMethods.data.length === 0) {
       throw new Error(
-        "No default payment method found. Please add a payment method first."
+        "No payment methods found. Please add a payment method before creating a subscription."
       );
     }
 
-    const subscription = await stripe.subscriptions.create({
+    // Check if default payment method exists
+    let defaultPaymentMethodId: string | null = null;
+
+    if (
+      "invoice_settings" in customer &&
+      customer.invoice_settings.default_payment_method
+    ) {
+      if (
+        typeof customer.invoice_settings.default_payment_method === "string"
+      ) {
+        defaultPaymentMethodId =
+          customer.invoice_settings.default_payment_method;
+      } else if (
+        (customer.invoice_settings.default_payment_method as any)?.id
+      ) {
+        defaultPaymentMethodId = (
+          customer.invoice_settings.default_payment_method as any
+        ).id;
+      }
+    }
+
+    // If no default payment method, use the first available payment method
+    if (!defaultPaymentMethodId && paymentMethods.data.length > 0) {
+      defaultPaymentMethodId = paymentMethods.data[0].id;
+
+      // Set this payment method as default
+      await stripe.customers.update(customerId, {
+        invoice_settings: {
+          default_payment_method: defaultPaymentMethodId,
+        },
+      });
+
+      console.log(
+        `Set payment method ${defaultPaymentMethodId} as default for customer ${customerId}`
+      );
+    }
+
+    // Create the subscription with explicit default payment method
+    const subscriptionParams: Stripe.SubscriptionCreateParams = {
       customer: customerId,
       items: items,
       metadata,
@@ -1247,7 +1231,14 @@ export async function createSubscription({
         save_default_payment_method: "on_subscription",
       },
       expand: ["latest_invoice"],
-    });
+    };
+
+    // Only add default_payment_method if we have a valid ID
+    if (defaultPaymentMethodId) {
+      subscriptionParams.default_payment_method = defaultPaymentMethodId;
+    }
+
+    const subscription = await stripe.subscriptions.create(subscriptionParams);
 
     // Find the company ID from the customer ID
     const supabase = await createClient();
@@ -1479,3 +1470,40 @@ export async function resumeSubscription(subscriptionId: string) {
     throw error;
   }
 }
+
+export async function getDraftInvoiceDetails(invoiceId: string) {
+  if (!stripe) {
+    throw new Error("Stripe is not configured");
+  }
+
+  try {
+    // Retrieve the draft invoice with line items expanded
+    const invoice = await stripe.invoices.retrieve(invoiceId, {
+      expand: ["lines.data"],
+    });
+
+    if (invoice.status !== "draft") {
+      return invoice;
+    }
+
+    // For draft invoices, calculate the correct amount from the lines data
+    let calculatedAmount = 0;
+    if (invoice.lines?.data) {
+      calculatedAmount = invoice.lines.data.reduce((sum, line) => {
+        const lineAmount = line.amount || 0;
+        return sum + lineAmount;
+      }, 0);
+    }
+
+    // Return the invoice with the correct calculated amount
+    return {
+      ...invoice,
+      calculated_amount: calculatedAmount,
+    };
+  } catch (error) {
+    console.error("Error retrieving draft invoice details:", error);
+    throw error;
+  }
+}
+
+export const getStripeSubscriptionDetails = syncStripeCustomer;

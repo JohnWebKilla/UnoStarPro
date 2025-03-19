@@ -18,7 +18,7 @@ import { setupCompaniesSubscription } from "./realtime";
 import { TableSkeleton } from "./table-skeleton";
 import { cn } from "@/lib/utils";
 import { SummaryCards } from "./summary-cards";
-import { getStripeSubscriptionDetails } from "./stripe-actions";
+import { syncStripeCustomer as getStripeSubscriptionDetails } from "./stripe-actions";
 import { subscriptionDetailsCache, CACHE_TTL } from "./cache";
 import { DeactivationDialog } from "./components/deactivation-dialog";
 

@@ -49,7 +49,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  getStripeSubscriptionDetails,
+  syncStripeCustomer as getStripeSubscriptionDetails,
   updateSubscriptionQuantity,
   changeSubscriptionPlan,
   getAvailablePlans,
@@ -875,7 +875,7 @@ export function CompanySideDialog({
                               {company.contact_email ? (
                                 <a
                                   href={`mailto:${company.contact_email}`}
-                                  className="hover:underline"
+                                  className="text-primary hover:underline"
                                 >
                                   {company.contact_email}
                                 </a>
@@ -884,174 +884,67 @@ export function CompanySideDialog({
                               )}
                             </p>
                           </div>
-                          <div className="space-y-1">
-                            <h4 className="text-sm font-medium text-muted-foreground">
-                              Phone
-                            </h4>
-                            <p className="text-base">
-                              {company.contact_phone ? (
-                                <a
-                                  href={`tel:${company.contact_phone}`}
-                                  className="hover:underline"
-                                >
-                                  {company.contact_phone}
-                                </a>
-                              ) : (
-                                "—"
-                              )}
-                            </p>
-                          </div>
                         </div>
                       </div>
 
-                      <div className="space-y-4 p-6 border rounded-xl shadow-sm bg-card">
-                        <h3 className="text-lg font-medium">Address</h3>
-                        {!company.street &&
-                        !company.city &&
-                        !company.state &&
-                        !company.zip ? (
-                          <div className="text-center py-6">
-                            <p className="text-muted-foreground">
-                              No address information available
-                            </p>
-                          </div>
-                        ) : (
-                          <div className="grid grid-cols-2 gap-6">
-                            <div className="space-y-1">
-                              <h4 className="text-sm font-medium text-muted-foreground">
-                                Street
-                              </h4>
-                              <p className="text-base">
-                                {company.street || "—"}
-                              </p>
-                            </div>
-                            <div className="space-y-1">
-                              <h4 className="text-sm font-medium text-muted-foreground">
-                                City
-                              </h4>
-                              <p className="text-base">{company.city || "—"}</p>
-                            </div>
-                            <div className="space-y-1">
-                              <h4 className="text-sm font-medium text-muted-foreground">
-                                State
-                              </h4>
-                              <p className="text-base">
-                                {company.state || "—"}
-                              </p>
-                            </div>
-                            <div className="space-y-1">
-                              <h4 className="text-sm font-medium text-muted-foreground">
-                                Zip
-                              </h4>
-                              <p className="text-base">{company.zip || "—"}</p>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="space-y-4 p-6 border rounded-xl shadow-sm bg-card">
-                        <h3 className="text-lg font-medium">Settings</h3>
-                        <div className="space-y-4">
-                          <div className="flex justify-between items-center">
-                            <div>
-                              <h4 className="font-medium">Notifications</h4>
-                              <p className="text-sm text-muted-foreground">
-                                Receive email notifications
-                              </p>
-                            </div>
-                            <Badge
-                              variant={
-                                company.notifications_enabled
-                                  ? "success"
-                                  : "outline"
-                              }
-                            >
-                              {company.notifications_enabled
-                                ? "Enabled"
-                                : "Disabled"}
-                            </Badge>
-                          </div>
-                          <Separator />
-                          <div className="flex justify-between items-center">
-                            <div>
-                              <h4 className="font-medium">Auto Invoice</h4>
-                              <p className="text-sm text-muted-foreground">
-                                Generate invoices automatically
-                              </p>
-                            </div>
-                            <Badge
-                              variant={
-                                company.auto_invoice ? "success" : "outline"
-                              }
-                            >
-                              {company.auto_invoice ? "Enabled" : "Disabled"}
-                            </Badge>
-                          </div>
-                        </div>
-                      </div>
+                      {/* Add any additional details sections here */}
                     </div>
                   )}
                 </TabsContent>
 
-                <TabsContent value="users" className="p-6 h-full" tabIndex={-1}>
+                {/* Users Tab */}
+                <TabsContent value="users" className="p-6" tabIndex={-1}>
                   <CompanyUsers company={company} />
                 </TabsContent>
 
-                <TabsContent
-                  value="drivers"
-                  className="p-6 h-full"
-                  tabIndex={-1}
-                >
+                {/* Drivers Tab */}
+                <TabsContent value="drivers" className="p-6" tabIndex={-1}>
                   <CompanyDrivers company={company} />
                 </TabsContent>
 
-                <TabsContent
-                  value="billing"
-                  className="px-4 py-2 h-full"
-                  tabIndex={-1}
-                >
-                  {isDialogContentLoading ? (
+                {/* Billing Tab */}
+                <TabsContent value="billing" className="p-6" tabIndex={-1}>
+                  {isLoadingStripe ? (
                     <LoadingSpinner />
                   ) : company.stripe_customer_id ? (
-                    <>
-                      <StripeTabs
-                        company={company}
-                        preloadedData={stripeData}
-                        isLoading={isLoadingStripe}
-                        defaultTab="subscription"
-                      />
-                    </>
+                    <StripeTabs
+                      company={company}
+                      preloadedData={stripeData}
+                      isLoading={isLoadingStripe}
+                    />
                   ) : (
-                    <div className="flex flex-col items-center justify-center p-10 space-y-4 min-h-[400px] border rounded-xl shadow-sm">
-                      <div className="w-20 h-20 rounded-full bg-muted/50 flex items-center justify-center">
-                        <CreditCard className="h-10 w-10 text-muted-foreground" />
-                      </div>
-                      <div className="text-center space-y-2">
-                        <h3 className="text-xl font-medium">
-                          No Billing Setup
-                        </h3>
-                        <p className="text-sm text-muted-foreground max-w-md">
-                          This company hasn't been connected to Stripe yet.
-                          Connect to enable billing features.
-                        </p>
-                      </div>
+                    <div className="text-center py-12">
+                      <CreditCard className="mx-auto h-12 w-12 text-gray-400" />
+                      <h3 className="mt-2 text-lg font-medium">
+                        No Stripe Integration
+                      </h3>
+                      <p className="mt-1 text-sm text-gray-500 max-w-md mx-auto">
+                        This company is not yet connected to Stripe. Connect to
+                        Stripe to manage billing and subscriptions.
+                      </p>
                       <Button
                         onClick={handleConnectStripe}
                         className="mt-4"
-                        size="lg"
+                        disabled={isLoadingStripe}
                       >
-                        <CreditCard className="mr-2 h-4 w-4" />
-                        Connect to Stripe
+                        {isLoadingStripe ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Connecting...
+                          </>
+                        ) : (
+                          <>
+                            <CreditCard className="mr-2 h-4 w-4" />
+                            Connect to Stripe
+                          </>
+                        )}
                       </Button>
                     </div>
                   )}
                 </TabsContent>
 
-                <TabsContent
-                  value="settings"
-                  className="p-6 h-full"
-                  tabIndex={-1}
-                >
+                {/* Settings Tab */}
+                <TabsContent value="settings" className="p-6" tabIndex={-1}>
                   <CompanySettings
                     company={company}
                     onUpdate={handleUpdateCompany}
