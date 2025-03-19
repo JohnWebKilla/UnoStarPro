@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -56,6 +56,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { format } from "date-fns";
+import { getCompanyUsersAction } from "../server-actions";
 
 const userFormSchema = z.object({
   email: z.string().email("Invalid email address"),
@@ -71,6 +72,9 @@ interface CompanyUser {
   email: string;
   role: "admin" | "manager" | "user";
   created_at: string;
+  first_name: string;
+  last_name: string;
+  status: string;
 }
 
 interface CompanyUsersProps {
@@ -78,27 +82,8 @@ interface CompanyUsersProps {
 }
 
 export function CompanyUsers({ company }: CompanyUsersProps) {
-  const [users, setUsers] = useState<CompanyUser[]>([
-    {
-      id: "1",
-      email: "admin@example.com",
-      role: "admin",
-      created_at: new Date().toISOString(),
-    },
-    {
-      id: "2",
-      email: "manager@example.com",
-      role: "manager",
-      created_at: new Date().toISOString(),
-    },
-    {
-      id: "3",
-      email: "user@example.com",
-      role: "user",
-      created_at: new Date().toISOString(),
-    },
-  ]);
-  const [loading, setLoading] = useState(false);
+  const [users, setUsers] = useState<CompanyUser[]>([]);
+  const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -109,6 +94,23 @@ export function CompanyUsers({ company }: CompanyUsersProps) {
       role: "user",
     },
   });
+
+  useEffect(() => {
+    const fetchUsers = async () => {
+      try {
+        setLoading(true);
+        const companyUsers = await getCompanyUsersAction(company.id);
+        setUsers(companyUsers);
+      } catch (error) {
+        console.error("Error fetching company users:", error);
+        // You might want to show a toast notification here
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchUsers();
+  }, [company.id]);
 
   const onSubmit = async (data: UserFormValues) => {
     try {
@@ -122,6 +124,9 @@ export function CompanyUsers({ company }: CompanyUsersProps) {
         email: data.email,
         role: data.role,
         created_at: new Date().toISOString(),
+        first_name: "",
+        last_name: "",
+        status: "active",
       };
 
       setUsers([...users, newUser]);
@@ -184,7 +189,7 @@ export function CompanyUsers({ company }: CompanyUsersProps) {
           <div>
             <h3 className="text-xl font-semibold">Company Users</h3>
             <p className="text-sm text-muted-foreground">
-              Manage users associated with this company
+              Manage users associated with {company.name}
             </p>
           </div>
         </div>
@@ -283,7 +288,14 @@ export function CompanyUsers({ company }: CompanyUsersProps) {
         </CardHeader>
         <CardContent>
           <ScrollArea className="h-[400px] pr-4">
-            {filteredUsers.length > 0 ? (
+            {loading ? (
+              <div className="flex flex-col items-center justify-center py-10 text-center">
+                <div className="rounded-full bg-muted/50 p-3 mb-4">
+                  <Loader2 className="h-6 w-6 text-muted-foreground animate-spin" />
+                </div>
+                <h3 className="text-lg font-medium mb-1">Loading users...</h3>
+              </div>
+            ) : filteredUsers.length > 0 ? (
               <Table>
                 <TableHeader className="bg-muted/50 sticky top-0">
                   <TableRow>

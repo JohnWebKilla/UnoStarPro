@@ -170,3 +170,47 @@ export async function deleteCompanyAction(id: number): Promise<void> {
     );
   }
 }
+
+export async function getCompanyUsersAction(companyId: number) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    throw new Error("Not authenticated");
+  }
+
+  // Get users through the junction table
+  const { data: users, error } = await supabase
+    .from("user_companies")
+    .select(
+      `
+      users (
+        id,
+        email,
+        role,
+        created_at,
+        first_name,
+        last_name,
+        status
+      )
+    `
+    )
+    .eq("company_id", companyId);
+
+  if (error) throw error;
+
+  // Transform the data to match the CompanyUser interface
+  const transformedUsers = users.map((item: any) => ({
+    id: item.users.id,
+    email: item.users.email,
+    role: item.users.role,
+    created_at: item.users.created_at,
+    first_name: item.users.first_name,
+    last_name: item.users.last_name,
+    status: item.users.status,
+  }));
+
+  return transformedUsers;
+}
