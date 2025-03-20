@@ -14,32 +14,30 @@ console.log("Environment Check:", {
   stripeKeyLength: process.env.STRIPE_SECRET_KEY?.length,
 });
 
-if (!process.env.STRIPE_SECRET_KEY) {
-  throw new Error("STRIPE_SECRET_KEY is not set");
+// Initialize Stripe only if API key is available
+let stripe: Stripe | null = null;
+if (process.env.STRIPE_SECRET_KEY) {
+  stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+    apiVersion: "2024-06-20",
+  });
 }
-
-if (!process.env.STRIPE_WEBHOOK_SECRET) {
-  throw new Error("STRIPE_WEBHOOK_SECRET is not set");
-}
-
-// Initialize Stripe with API key
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2024-06-20",
-});
 
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
 // Initialize Supabase admin client without cookie handling
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  }
-);
+const supabaseAdmin =
+  process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY
+    ? createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL,
+        process.env.SUPABASE_SERVICE_ROLE_KEY,
+        {
+          auth: {
+            autoRefreshToken: false,
+            persistSession: false,
+          },
+        }
+      )
+    : null;
 
 interface WebhookError extends Error {
   type?: string;
@@ -51,6 +49,22 @@ interface WebhookError extends Error {
 // This route will handle both /webhook and /api/webhooks/stripe paths
 export async function POST(req: Request) {
   console.log("Webhook request received");
+
+  // Check if Stripe is initialized
+  if (!stripe) {
+    console.error("Stripe API key is not configured");
+    return new NextResponse("Stripe API key is not configured", {
+      status: 500,
+    });
+  }
+
+  // Check if webhook secret is initialized
+  if (!webhookSecret) {
+    console.error("Stripe webhook secret is not configured");
+    return new NextResponse("Stripe webhook secret is not configured", {
+      status: 500,
+    });
+  }
 
   try {
     // Verify Stripe API key is working
@@ -275,7 +289,7 @@ export async function POST(req: Request) {
 
         // Get company ID from customer ID
         const { data: company } = await supabaseAdmin
-          .from("companies")
+          ?.from("companies")
           .select("id")
           .eq("stripe_customer_id", customerId)
           .single();
@@ -324,7 +338,7 @@ export async function POST(req: Request) {
 
 async function handleCustomerUpdate(
   customer: Stripe.Customer,
-  stripeInstance: Stripe
+  stripeInstance: Stripe | null
 ) {
   console.log("Starting handleCustomerUpdate for customer:", {
     customerId: customer.id,
@@ -337,7 +351,7 @@ async function handleCustomerUpdate(
 
   try {
     // First, get the latest customer data from Stripe
-    const stripeCustomer = await stripeInstance.customers.retrieve(
+    const stripeCustomer = await stripeInstance?.customers.retrieve(
       customer.id,
       {
         expand: ["subscriptions", "invoice_settings.default_payment_method"],
@@ -361,7 +375,7 @@ async function handleCustomerUpdate(
 
     // First, try to find ALL companies that might match this customer
     const { data: possibleMatches, error: searchError } = await supabaseAdmin
-      .from("companies")
+      ?.from("companies")
       .select()
       .or(
         `stripe_customer_id.eq.${stripeCustomer.id},contact_email.eq.${stripeCustomer.email}${stripeCustomer.name ? `,name.eq.${stripeCustomer.name}` : ""}`
@@ -447,7 +461,7 @@ async function handleCustomerUpdate(
       };
 
       const { error: updateError } = await supabaseAdmin
-        .from("companies")
+        ?.from("companies")
         .update(updateData)
         .eq("id", company.id);
 
@@ -480,7 +494,7 @@ async function handleCustomerUpdate(
     const lastName = nameParts.slice(1).join(" ") || "";
 
     const { data: newCompany, error: createError } = await supabaseAdmin
-      .from("companies")
+      ?.from("companies")
       .insert({
         name: stripeCustomer.name || "Unknown Company",
         contact_first_name: firstName,
@@ -534,7 +548,7 @@ async function handleCustomerUpdate(
 
 async function handleSubscriptionUpdate(
   subscription: Stripe.Subscription,
-  stripeInstance: Stripe
+  stripeInstance: Stripe | null
 ) {
   console.log("Starting handleSubscriptionUpdate for subscription:", {
     subscriptionId: subscription.id,
@@ -544,7 +558,7 @@ async function handleSubscriptionUpdate(
   try {
     // Find company by customer ID
     const { data: company, error: findError } = await supabaseAdmin
-      .from("companies")
+      ?.from("companies")
       .select()
       .eq("stripe_customer_id", subscription.customer)
       .maybeSingle();
@@ -567,7 +581,7 @@ async function handleSubscriptionUpdate(
 
     // Update subscription details
     const { error: updateError } = await supabaseAdmin
-      .from("companies")
+      ?.from("companies")
       .update({
         stripe_subscription_id: subscription.id,
         subscription_amount: subscription.items.data.reduce(
@@ -594,7 +608,7 @@ async function handleSubscriptionUpdate(
       subscription.status === "unpaid"
     ) {
       const { error: invoiceUpdateError } = await supabaseAdmin
-        .from("companies")
+        ?.from("companies")
         .update({
           last_invoice_status: "void",
           last_synced_at: new Date().toISOString(),
@@ -627,7 +641,7 @@ async function handleSubscriptionUpdate(
 
 async function handlePaymentMethodUpdate(
   paymentMethod: Stripe.PaymentMethod,
-  stripeInstance: Stripe
+  stripeInstance: Stripe | null
 ) {
   if (!paymentMethod.customer) {
     console.log(
@@ -645,7 +659,7 @@ async function handlePaymentMethodUpdate(
   try {
     // Find company by customer ID
     const { data: company, error: findError } = await supabaseAdmin
-      .from("companies")
+      ?.from("companies")
       .select()
       .eq("stripe_customer_id", paymentMethod.customer)
       .maybeSingle();
@@ -666,7 +680,7 @@ async function handlePaymentMethodUpdate(
     });
 
     // Check if this is the default payment method
-    const customer = await stripeInstance.customers.retrieve(
+    const customer = await stripeInstance?.customers.retrieve(
       paymentMethod.customer as string,
       {
         expand: ["invoice_settings.default_payment_method"],
@@ -686,7 +700,7 @@ async function handlePaymentMethodUpdate(
       if (isDefault) {
         // Update company's default payment method
         const { error: updateError } = await supabaseAdmin
-          .from("companies")
+          ?.from("companies")
           .update({
             stripe_payment_method_id: paymentMethod.id,
             last_synced_at: new Date().toISOString(),
@@ -720,7 +734,7 @@ async function handlePaymentMethodUpdate(
 
 async function handleInvoiceUpdate(
   invoice: Stripe.Invoice,
-  stripeInstance: Stripe
+  stripeInstance: Stripe | null
 ) {
   console.log("Starting handleInvoiceUpdate for invoice:", {
     invoiceId: invoice.id,
@@ -731,7 +745,7 @@ async function handleInvoiceUpdate(
   try {
     // Find company by customer ID
     const { data: company, error: findError } = await supabaseAdmin
-      .from("companies")
+      ?.from("companies")
       .select()
       .eq("stripe_customer_id", invoice.customer)
       .maybeSingle();
@@ -778,7 +792,7 @@ async function handleInvoiceUpdate(
     }
 
     const { error: updateError } = await supabaseAdmin
-      .from("companies")
+      ?.from("companies")
       .update(updateData)
       .eq("id", company.id);
 
@@ -809,6 +823,22 @@ async function handleInvoiceUpdate(
 // Add new function to connect individual company to Stripe
 export async function connectCompanyToStripe(companyId: number) {
   console.log("Starting company connection to Stripe:", { companyId });
+
+  // Check if Stripe is initialized
+  if (!stripe) {
+    return {
+      success: false,
+      message: "Stripe API key is not configured",
+    };
+  }
+
+  // Check if Supabase is initialized
+  if (!supabaseAdmin) {
+    return {
+      success: false,
+      message: "Supabase configuration is missing",
+    };
+  }
 
   try {
     // Get company details
@@ -887,6 +917,10 @@ export async function connectCompanyToStripe(companyId: number) {
       companyId,
       stack: error instanceof Error ? error.stack : undefined,
     });
-    throw error;
+    return {
+      success: false,
+      message:
+        error instanceof Error ? error.message : "Unknown error occurred",
+    };
   }
 }

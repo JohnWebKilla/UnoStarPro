@@ -3,12 +3,23 @@ import Stripe from "stripe";
 import JSZip from "jszip";
 import { createClient } from "@/utils/supabase/server";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2024-06-20",
-});
+// Initialize Stripe only if API key is available
+const stripe = process.env.STRIPE_SECRET_KEY
+  ? new Stripe(process.env.STRIPE_SECRET_KEY, {
+      apiVersion: "2024-06-20",
+    })
+  : null;
 
 export async function POST(request: Request) {
   try {
+    // Check if Stripe is initialized
+    if (!stripe) {
+      return NextResponse.json(
+        { error: "Stripe API is not configured" },
+        { status: 500 }
+      );
+    }
+
     let companyId: number | string;
 
     // Check content type to handle both JSON and form data
