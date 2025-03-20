@@ -392,16 +392,19 @@ async function handleCustomerUpdate(
     });
 
     // First, try to find ALL companies that might match this customer
-    const { data: possibleMatches, error: searchError } = await supabaseAdmin
+    const possibleMatchesResponse = await supabaseAdmin
       ?.from("companies")
       .select()
       .or(
         `stripe_customer_id.eq.${stripeCustomer.id},contact_email.eq.${stripeCustomer.email}${stripeCustomer.name ? `,name.eq.${stripeCustomer.name}` : ""}`
       );
 
+    const possibleMatches = possibleMatchesResponse?.data || [];
+    const searchError = possibleMatchesResponse?.error;
+
     console.log("Found possible matching companies:", {
-      count: possibleMatches?.length || 0,
-      matches: possibleMatches?.map((c) => ({
+      count: possibleMatches.length || 0,
+      matches: possibleMatches.map((c) => ({
         id: c.id,
         name: c.name,
         email: c.contact_email,
@@ -412,7 +415,7 @@ async function handleCustomerUpdate(
     let company = null;
 
     // If we found any matches, determine the best one
-    if (possibleMatches?.length) {
+    if (possibleMatches.length) {
       // First priority: exact Stripe customer ID match
       company = possibleMatches.find(
         (c) => c.stripe_customer_id === stripeCustomer.id
