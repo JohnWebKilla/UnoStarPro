@@ -583,11 +583,14 @@ async function handleSubscriptionUpdate(
 
   try {
     // Find company by customer ID
-    const { data: company, error: findError } = await supabaseAdmin
+    const companyResponse = await supabaseAdmin
       ?.from("companies")
       .select()
       .eq("stripe_customer_id", subscription.customer)
       .maybeSingle();
+
+    const company = companyResponse?.data;
+    const findError = companyResponse?.error;
 
     if (findError) {
       console.error("Error finding company for subscription:", findError);
@@ -606,7 +609,7 @@ async function handleSubscriptionUpdate(
     });
 
     // Update subscription details
-    const { error: updateError } = await supabaseAdmin
+    const updateResult = await supabaseAdmin
       ?.from("companies")
       .update({
         stripe_subscription_id: subscription.id,
@@ -623,6 +626,8 @@ async function handleSubscriptionUpdate(
       })
       .eq("id", company.id);
 
+    const updateError = updateResult?.error;
+
     if (updateError) {
       console.error("Error updating subscription:", updateError);
       throw updateError;
@@ -633,13 +638,15 @@ async function handleSubscriptionUpdate(
       subscription.status === "canceled" ||
       subscription.status === "unpaid"
     ) {
-      const { error: invoiceUpdateError } = await supabaseAdmin
+      const invoiceUpdateResult = await supabaseAdmin
         ?.from("companies")
         .update({
           last_invoice_status: "void",
           last_synced_at: new Date().toISOString(),
         })
         .eq("id", company.id);
+
+      const invoiceUpdateError = invoiceUpdateResult?.error;
 
       if (invoiceUpdateError) {
         console.error("Error updating invoice status:", invoiceUpdateError);
