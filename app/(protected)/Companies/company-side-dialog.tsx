@@ -971,33 +971,25 @@ export function CompanySideDialog({
                             <h4 className="text-sm font-medium text-muted-foreground">
                               Street
                             </h4>
-                            <p className="text-base">
-                              {company.address_street || "—"}
-                            </p>
+                            <p className="text-base">{company.street || "—"}</p>
                           </div>
                           <div className="space-y-1">
                             <h4 className="text-sm font-medium text-muted-foreground">
                               City
                             </h4>
-                            <p className="text-base">
-                              {company.address_city || "—"}
-                            </p>
+                            <p className="text-base">{company.city || "—"}</p>
                           </div>
                           <div className="space-y-1">
                             <h4 className="text-sm font-medium text-muted-foreground">
                               State
                             </h4>
-                            <p className="text-base">
-                              {company.address_state || "—"}
-                            </p>
+                            <p className="text-base">{company.state || "—"}</p>
                           </div>
                           <div className="space-y-1">
                             <h4 className="text-sm font-medium text-muted-foreground">
                               Zip Code
                             </h4>
-                            <p className="text-base">
-                              {company.address_zip || "—"}
-                            </p>
+                            <p className="text-base">{company.zip || "—"}</p>
                           </div>
                         </div>
                       </div>
