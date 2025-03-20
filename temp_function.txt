@@ -1,4 +1,0 @@
-const handleCompanyUpdateSuccess = async (selectedCompanyIds: number[], isAllAccess: boolean) => {
-  if (!userForCompanies) return;
-  
-  try {
