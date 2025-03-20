@@ -691,11 +691,14 @@ async function handlePaymentMethodUpdate(
 
   try {
     // Find company by customer ID
-    const { data: company, error: findError } = await supabaseAdmin
+    const companyResponse = await supabaseAdmin
       ?.from("companies")
       .select()
       .eq("stripe_customer_id", paymentMethod.customer)
       .maybeSingle();
+
+    const company = companyResponse?.data;
+    const findError = companyResponse?.error;
 
     if (findError) {
       console.error("Error finding company for payment method:", findError);
@@ -732,13 +735,15 @@ async function handlePaymentMethodUpdate(
 
       if (isDefault) {
         // Update company's default payment method
-        const { error: updateError } = await supabaseAdmin
+        const updateResult = await supabaseAdmin
           ?.from("companies")
           .update({
             stripe_payment_method_id: paymentMethod.id,
             last_synced_at: new Date().toISOString(),
           })
           .eq("id", company.id);
+
+        const updateError = updateResult?.error;
 
         if (updateError) {
           console.error("Error updating payment method:", updateError);
