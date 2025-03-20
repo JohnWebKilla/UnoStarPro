@@ -10,7 +10,7 @@ export async function POST(request: Request) {
   try {
     const { companyId } = await request.json();
 
-    // Get company's Stripe customer ID
+    // Get company's Stripe customers ID
     const supabase = await createClient();
     const { data: company, error } = await supabase
       .from("companies")
