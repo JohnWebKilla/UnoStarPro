@@ -782,11 +782,14 @@ async function handleInvoiceUpdate(
 
   try {
     // Find company by customer ID
-    const { data: company, error: findError } = await supabaseAdmin
+    const companyResponse = await supabaseAdmin
       ?.from("companies")
       .select()
       .eq("stripe_customer_id", invoice.customer)
       .maybeSingle();
+
+    const company = companyResponse?.data;
+    const findError = companyResponse?.error;
 
     if (findError) {
       console.error("Error finding company for invoice:", findError);
@@ -829,10 +832,12 @@ async function handleInvoiceUpdate(
       updateData.subscription_status = "past_due";
     }
 
-    const { error: updateError } = await supabaseAdmin
+    const updateResult = await supabaseAdmin
       ?.from("companies")
       .update(updateData)
       .eq("id", company.id);
+
+    const updateError = updateResult?.error;
 
     if (updateError) {
       console.error("Error updating invoice:", updateError);
@@ -880,11 +885,14 @@ export async function connectCompanyToStripe(companyId: number) {
 
   try {
     // Get company details
-    const { data: company, error: findError } = await supabaseAdmin
+    const companyResponse = await supabaseAdmin
       .from("companies")
       .select()
       .eq("id", companyId)
       .single();
+
+    const company = companyResponse?.data;
+    const findError = companyResponse?.error;
 
     if (findError) {
       console.error("Error finding company:", findError);
@@ -931,13 +939,15 @@ export async function connectCompanyToStripe(companyId: number) {
     });
 
     // Update company with Stripe customer ID
-    const { error: updateError } = await supabaseAdmin
+    const updateResult = await supabaseAdmin
       .from("companies")
       .update({
         stripe_customer_id: customer.id,
         last_synced_at: new Date().toISOString(),
       })
       .eq("id", company.id);
+
+    const updateError = updateResult?.error;
 
     if (updateError) {
       console.error("Error updating company with Stripe ID:", updateError);
