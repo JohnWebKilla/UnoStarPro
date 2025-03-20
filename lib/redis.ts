@@ -233,7 +233,7 @@ const createDummyClient = () => {
     srem: async () => 1,
     smembers: async () => [],
     info: async () => "dummy_version:1.0.0",
-    on: (event: string, callback: Function) => null,
+    on: (event: string, callback: (arg: unknown) => void) => null,
     status: "ready", // Add status property for compatibility
     options: {
       host: "dummy",

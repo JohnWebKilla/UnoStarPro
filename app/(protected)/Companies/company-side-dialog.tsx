@@ -149,7 +149,62 @@ export function CompanySideDialog({
   const [isEditMode, setIsEditMode] = useState(initialEditMode || false);
   const [stripeError, setStripeError] = useState<string | null>(null);
 
-  // Early return if no initialCompany is provided
+  // Move both useEffect hooks before the early return
+  // First useEffect from line 158
+  useEffect(() => {
+    if (open) {
+      // Set edit mode from prop if provided
+      setIsEditMode(initialEditMode || false);
+
+      // Update local state when dialog opens
+      setActiveTab("overview");
+
+      // Always use the latest company data from props
+      if (initialCompany) {
+        setCompany(initialCompany);
+      }
+
+      // Start fetching Stripe data in the background immediately when dialog opens
+      if (initialCompany?.stripe_customer_id) {
+        loadStripeData();
+        loadAvailablePlans();
+      }
+    }
+  }, [open, initialCompany, initialEditMode]);
+
+  // Second useEffect from line 767
+  useEffect(() => {
+    const fetchStripeData = async () => {
+      try {
+        setIsLoadingStripe(true);
+        // Add a small delay to allow UI to render first
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        console.log(`Fetching Stripe data for company ${company.id}...`);
+        const startTime = performance.now();
+
+        const stripeDetails = await getStripeSubscriptionDetails(company.id);
+
+        const endTime = performance.now();
+        console.log(
+          `Stripe data loaded in ${Math.round(endTime - startTime)}ms`
+        );
+
+        setStripeData(stripeDetails);
+      } catch (error) {
+        console.error("Error fetching Stripe data:", error);
+        setStripeError("Failed to load Stripe subscription details");
+      } finally {
+        setIsLoadingStripe(false);
+      }
+    };
+
+    if (company?.stripe_customer_id && activeTab === "billing") {
+      fetchStripeData();
+    }
+  }, [company, activeTab]);
+
+  // Now place the early return after all hooks are defined
   if (!initialCompany) {
     return null;
   }
@@ -164,7 +219,9 @@ export function CompanySideDialog({
       setActiveTab("overview");
 
       // Always use the latest company data from props
-      setCompany(initialCompany);
+      if (initialCompany) {
+        setCompany(initialCompany);
+      }
 
       // Start fetching Stripe data in the background immediately when dialog opens
       if (initialCompany?.stripe_customer_id) {
@@ -763,39 +820,6 @@ export function CompanySideDialog({
   const handleCancelEdit = () => {
     setIsEditMode(false);
   };
-
-  useEffect(() => {
-    const fetchStripeData = async () => {
-      try {
-        setIsLoadingStripe(true);
-        // Add a small delay to allow UI to render first
-        await new Promise((resolve) => setTimeout(resolve, 100));
-
-        console.log(`Fetching Stripe data for company ${company.id}...`);
-        const startTime = performance.now();
-
-        const stripeDetails = await getStripeSubscriptionDetails(company.id);
-
-        const endTime = performance.now();
-        console.log(
-          `Stripe data loaded in ${Math.round(endTime - startTime)}ms`
-        );
-
-        setStripeData(stripeDetails);
-      } catch (error) {
-        console.error("Error fetching Stripe data:", error);
-        setStripeError("Failed to load Stripe subscription details");
-      } finally {
-        setIsLoadingStripe(false);
-      }
-    };
-
-    if (company.stripe_customer_id) {
-      fetchStripeData();
-    } else {
-      setIsLoadingStripe(false);
-    }
-  }, [company]);
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
