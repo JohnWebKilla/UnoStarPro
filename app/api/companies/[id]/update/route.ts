@@ -7,7 +7,7 @@ export async function POST(
   context: { params: { id: string } }
 ) {
   try {
-    const { params } = context;
+    const params = context.params;
     const companyId = parseInt(params.id, 10);
 
     if (isNaN(companyId)) {
@@ -19,6 +19,12 @@ export async function POST(
 
     // Get the update data from the request body
     const updateData = await request.json();
+
+    // Fix column names to match database schema
+    if (updateData.stripe_subscription_amount !== undefined) {
+      updateData.subscription_amount = updateData.stripe_subscription_amount;
+      delete updateData.stripe_subscription_amount;
+    }
 
     console.log(`Updating company ${companyId} with data:`, updateData);
 
@@ -55,15 +61,21 @@ export async function POST(
     }
 
     // Log the update for debugging
-    if (updateData.stripe_subscription_amount !== undefined) {
+    if (updateData.subscription_amount !== undefined) {
       console.log(
-        `Updated company ${companyId} subscription amount to: ${updateData.stripe_subscription_amount}`
+        `Updated company ${companyId} subscription amount to: ${updateData.subscription_amount}`
       );
     }
 
     if (updateData.stripe_subscription_id !== undefined) {
       console.log(
         `Updated company ${companyId} subscription ID to: ${updateData.stripe_subscription_id}`
+      );
+    }
+
+    if (updateData.subscription_status !== undefined) {
+      console.log(
+        `Updated company ${companyId} subscription status to: ${updateData.subscription_status}`
       );
     }
 
@@ -74,6 +86,7 @@ export async function POST(
       success: true,
       message: "Company updated successfully",
       company: updatedCompany,
+      updated_values: updateData,
     });
   } catch (error: any) {
     console.error("Error updating company:", error);

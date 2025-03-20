@@ -36,6 +36,8 @@ import {
   Shield,
   CalendarClock,
   Search,
+  AlertTriangle,
+  RefreshCw,
 } from "lucide-react";
 import {
   Table,
@@ -56,7 +58,24 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { format } from "date-fns";
-import { getCompanyUsersAction } from "../server-actions";
+import {
+  getCompanyUsersAction,
+  getCompanyUsersOptimized,
+  clearCompanyUsersCache,
+} from "../server-actions";
+
+// Prefetch cache for users
+const usersPrefetchCache = new Map<number, boolean>();
+
+// Client-side cache for users to prevent expensive reloads
+interface UserCache {
+  users: CompanyUser[];
+  timestamp: number;
+  loadTime: number;
+}
+
+const userCache = new Map<number, UserCache>();
+const CACHE_TTL = 1000 * 60 * 60; // 1 hour cache TTL
 
 const userFormSchema = z.object({
   email: z.string().email("Invalid email address"),
@@ -84,8 +103,11 @@ interface CompanyUsersProps {
 export function CompanyUsers({ company }: CompanyUsersProps) {
   const [users, setUsers] = useState<CompanyUser[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingError, setLoadingError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [loadTime, setLoadTime] = useState<number | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const form = useForm<UserFormValues>({
     resolver: zodResolver(userFormSchema),
@@ -95,20 +117,69 @@ export function CompanyUsers({ company }: CompanyUsersProps) {
     },
   });
 
-  useEffect(() => {
-    const fetchUsers = async () => {
-      try {
+  const fetchUsers = async (showLoading = true) => {
+    try {
+      // Check client-side cache first
+      const now = Date.now();
+      const cachedData = userCache.get(company.id);
+
+      // Use cache if it's valid and not explicitly refreshing
+      if (cachedData && now - cachedData.timestamp < CACHE_TTL && !refreshing) {
+        console.log(
+          `Using client-side cached users for company ${company.id} (${cachedData.users.length} users)`
+        );
+        setUsers(cachedData.users);
+        setLoadTime(cachedData.loadTime);
+        setLoading(false);
+        return;
+      }
+
+      if (showLoading) {
         setLoading(true);
-        const companyUsers = await getCompanyUsersAction(company.id);
-        setUsers(companyUsers);
-      } catch (error) {
-        console.error("Error fetching company users:", error);
-        // You might want to show a toast notification here
-      } finally {
+        setLoadingError(null);
+      }
+
+      const startTime = performance.now();
+
+      // Use the optimized function instead of the original
+      const companyUsers = await getCompanyUsersOptimized(company.id);
+
+      const endTime = performance.now();
+      const actualLoadTime = Math.round(endTime - startTime);
+
+      if (showLoading) {
+        setLoadTime(actualLoadTime);
+      }
+
+      setUsers(companyUsers);
+
+      // Save to client-side cache
+      userCache.set(company.id, {
+        users: companyUsers,
+        timestamp: now,
+        loadTime: actualLoadTime,
+      });
+    } catch (error) {
+      console.error("Error fetching company users:", error);
+      if (showLoading) {
+        setLoadingError("Failed to load users. Please try again later.");
+      }
+    } finally {
+      if (showLoading) {
         setLoading(false);
       }
-    };
+      setRefreshing(false);
+    }
+  };
 
+  useEffect(() => {
+    // Mark as prefetched
+    if (usersPrefetchCache.has(company.id)) {
+      console.log(`Company ${company.id} users were prefetched`);
+    }
+
+    // Set a flag to prevent duplicate loads
+    usersPrefetchCache.set(company.id, true);
     fetchUsers();
   }, [company.id]);
 
@@ -179,6 +250,16 @@ export function CompanyUsers({ company }: CompanyUsersProps) {
     }
   };
 
+  // Function to refresh users and invalidate cache
+  const handleRefresh = async () => {
+    try {
+      setRefreshing(true);
+      await fetchUsers(true);
+    } catch (error) {
+      console.error("Error refreshing users:", error);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -193,76 +274,88 @@ export function CompanyUsers({ company }: CompanyUsersProps) {
             </p>
           </div>
         </div>
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <UserPlus className="h-4 w-4 mr-2" />
-              Add User
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Add New User</DialogTitle>
-            </DialogHeader>
-            <Form {...form}>
-              <form
-                onSubmit={form.handleSubmit(onSubmit)}
-                className="space-y-4"
-              >
-                <FormField
-                  control={form.control}
-                  name="email"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Email</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="email"
-                          placeholder="user@example.com"
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="role"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Role</FormLabel>
-                      <Select
-                        onValueChange={field.onChange}
-                        defaultValue={field.value}
-                      >
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={handleRefresh}
+            disabled={loading || refreshing}
+          >
+            <RefreshCw
+              className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
+            />
+          </Button>
+          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+            <DialogTrigger asChild>
+              <Button>
+                <UserPlus className="h-4 w-4 mr-2" />
+                Add User
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Add New User</DialogTitle>
+              </DialogHeader>
+              <Form {...form}>
+                <form
+                  onSubmit={form.handleSubmit(onSubmit)}
+                  className="space-y-4"
+                >
+                  <FormField
+                    control={form.control}
+                    name="email"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Email</FormLabel>
                         <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select role" />
-                          </SelectTrigger>
+                          <Input
+                            type="email"
+                            placeholder="user@example.com"
+                            {...field}
+                          />
                         </FormControl>
-                        <SelectContent>
-                          <SelectItem value="admin">Admin</SelectItem>
-                          <SelectItem value="manager">Manager</SelectItem>
-                          <SelectItem value="user">User</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <DialogFooter className="mt-6">
-                  <Button type="submit" disabled={loading}>
-                    {loading && (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        <FormMessage />
+                      </FormItem>
                     )}
-                    Add User
-                  </Button>
-                </DialogFooter>
-              </form>
-            </Form>
-          </DialogContent>
-        </Dialog>
+                  />
+                  <FormField
+                    control={form.control}
+                    name="role"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Role</FormLabel>
+                        <Select
+                          onValueChange={field.onChange}
+                          defaultValue={field.value}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select role" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="admin">Admin</SelectItem>
+                            <SelectItem value="manager">Manager</SelectItem>
+                            <SelectItem value="user">User</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <DialogFooter className="mt-6">
+                    <Button type="submit" disabled={loading}>
+                      {loading && (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      )}
+                      Add User
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </Form>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
 
       <Card className="border shadow-sm">
@@ -277,6 +370,7 @@ export function CompanyUsers({ company }: CompanyUsersProps) {
                 className="w-full pl-8"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                disabled={loading}
               />
             </div>
           </div>
@@ -284,6 +378,11 @@ export function CompanyUsers({ company }: CompanyUsersProps) {
             {filteredUsers.length}{" "}
             {filteredUsers.length === 1 ? "user" : "users"} associated with{" "}
             {company.name}
+            {loadTime && !loading && (
+              <span className="ml-2 text-xs text-muted-foreground">
+                (loaded in {loadTime}ms)
+              </span>
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -294,6 +393,28 @@ export function CompanyUsers({ company }: CompanyUsersProps) {
                   <Loader2 className="h-6 w-6 text-muted-foreground animate-spin" />
                 </div>
                 <h3 className="text-lg font-medium mb-1">Loading users...</h3>
+                <p className="text-sm text-muted-foreground">
+                  This may take a moment
+                </p>
+              </div>
+            ) : loadingError ? (
+              <div className="flex flex-col items-center justify-center py-10 text-center">
+                <div className="rounded-full bg-destructive/10 p-3 mb-4">
+                  <AlertTriangle className="h-6 w-6 text-destructive" />
+                </div>
+                <h3 className="text-lg font-medium mb-1">
+                  Error loading users
+                </h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  {loadingError}
+                </p>
+                <Button
+                  onClick={() => window.location.reload()}
+                  variant="outline"
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Retry
+                </Button>
               </div>
             ) : filteredUsers.length > 0 ? (
               <Table>
@@ -368,4 +489,19 @@ export function CompanyUsers({ company }: CompanyUsersProps) {
       </Card>
     </div>
   );
+}
+
+// Add a prefetch function that can be exported and used by other components
+export function prefetchCompanyUsers(companyId: number) {
+  if (usersPrefetchCache.has(companyId)) return;
+
+  // Mark as being prefetched to avoid duplicate requests
+  usersPrefetchCache.set(companyId, true);
+
+  // Start fetching in the background
+  getCompanyUsersAction(companyId).catch((error) => {
+    console.error("Error prefetching company users:", error);
+    // Remove from cache on error to allow retry
+    usersPrefetchCache.delete(companyId);
+  });
 }

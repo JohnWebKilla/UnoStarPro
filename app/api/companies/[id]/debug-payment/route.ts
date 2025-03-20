@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { debugPaymentMethods } from "@/app/(protected)/Companies/debug-payment-methods";
 
+// Using the same structure as other working dynamic routes
 export async function GET(
-  request: NextRequest,
+  req: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {

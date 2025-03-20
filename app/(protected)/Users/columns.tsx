@@ -29,7 +29,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { User, UserRole } from "./types";
-import { useState } from "react";
 
 interface Company {
   id: number;
@@ -235,8 +234,6 @@ export const columns: ColumnDef<User>[] = [
       const meta = table.options.meta as TableMeta;
 
       const CompanyCell = () => {
-        const [isOpen, setIsOpen] = useState(false);
-
         const getCompanyText = () => {
           if (user.has_all_access) return "All Companies";
           if (user.companies && user.companies.length > 0) {
@@ -270,15 +267,15 @@ export const columns: ColumnDef<User>[] = [
     cell: ({ row, table }) => {
       const user = row.original;
       const meta = table.options.meta as TableMeta;
-      const [open, setOpen] = useState(false);
+      let dropdownOpen = false;
 
       const handleAction = (action: () => void) => {
-        setOpen(false); // Close dropdown before executing action
+        dropdownOpen = false; // Close dropdown before executing action
         action();
       };
 
       return (
-        <DropdownMenu open={open} onOpenChange={setOpen}>
+        <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" className="h-8 w-8 p-0">
               <MoreHorizontal className="h-4 w-4" />

@@ -24,6 +24,7 @@ import {
   Plus,
   Search,
   Trash2,
+  RefreshCw,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -74,7 +75,11 @@ import {
 } from "@/components/ui/select";
 import { StripeTabs } from "./components/stripe-tabs";
 import { toast } from "sonner";
-import { subscriptionDetailsCache, CACHE_TTL } from "./cache";
+import {
+  subscriptionDetailsCache,
+  CACHE_TTL,
+  clearSubscriptionCache,
+} from "./cache";
 import { CompanyEditForm } from "./components/company-edit-form";
 
 interface CompanySideDialogProps {
@@ -117,7 +122,7 @@ export function CompanySideDialog({
 }: CompanySideDialogProps) {
   const [isUpdating, setIsUpdating] = useState(false);
   const [stripeData, setStripeData] = useState<any>(null);
-  const [isLoadingStripe, setIsLoadingStripe] = useState(false);
+  const [isLoadingStripe, setIsLoadingStripe] = useState(true);
   const [availablePlans, setAvailablePlans] = useState<any[]>([]);
   const [editingItem, setEditingItem] = useState<any>(null);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -141,7 +146,8 @@ export function CompanySideDialog({
   const [activeTab, setActiveTab] = useState<string>("details");
   const [company, setCompany] = useState<Company>(initialCompany as Company);
   const [isDialogContentLoading, setIsDialogContentLoading] = useState(false);
-  const [isEditMode, setIsEditMode] = useState(false);
+  const [isEditMode, setIsEditMode] = useState(initialEditMode || false);
+  const [stripeError, setStripeError] = useState<string | null>(null);
 
   // Early return if no initialCompany is provided
   if (!initialCompany) {
@@ -197,7 +203,7 @@ export function CompanySideDialog({
         }
       }
     }
-  }, [open, initialEditMode, initialCompany]);
+  }, [open, initialEditMode, initialCompany, availablePlans]);
 
   // Add a specific effect for company updates from Settings tab
   const LoadingSpinner = () => (
@@ -209,7 +215,7 @@ export function CompanySideDialog({
     </div>
   );
 
-  const loadStripeData = async (showLoadingUI = true) => {
+  const loadStripeData = async (showLoadingUI = true, forceRefresh = false) => {
     if (!company) return;
 
     if (showLoadingUI) {
@@ -217,8 +223,8 @@ export function CompanySideDialog({
     }
 
     try {
-      // First check if we have cached data
-      const cached = subscriptionDetailsCache.get(company.id);
+      // First check if we have cached data and force refresh is not requested
+      const cached = !forceRefresh && subscriptionDetailsCache.get(company.id);
       if (
         cached &&
         cached.timestamp &&
@@ -231,17 +237,30 @@ export function CompanySideDialog({
         return;
       }
 
-      // No cache or expired, load from API
-      console.log("Loading Stripe data from API");
+      // No cache, expired, or force refresh - load from API
+      console.log(`Loading Stripe data from API for company ${company.id}`);
       setIsLoadingStripe(true);
-      const data = await getStripeSubscriptionDetails(company.id);
-      setStripeData(data);
 
-      // Update the cache
-      subscriptionDetailsCache.set(company.id, {
-        data: data,
-        timestamp: Date.now(),
-      });
+      try {
+        const data = await getStripeSubscriptionDetails(company.id);
+        console.log("Stripe data loaded successfully:", {
+          customerId: data?.customer?.id,
+          subscriptionId: data?.subscription?.id,
+          subscriptionStatus: data?.subscription?.status,
+        });
+
+        setStripeData(data);
+
+        // Update the cache
+        subscriptionDetailsCache.set(company.id, {
+          data: data,
+          timestamp: Date.now(),
+        });
+        console.log(`Updated client-side cache for company ${company.id}`);
+      } catch (apiError) {
+        console.error("API error loading Stripe data:", apiError);
+        throw apiError;
+      }
     } catch (error) {
       console.error("Error loading Stripe data:", error);
       toast({
@@ -279,25 +298,57 @@ export function CompanySideDialog({
   const handleUpdateSubscription = async () => {
     try {
       setIsUpdating(true);
+      console.log("Starting subscription update process...");
+
+      if (!stripeData?.subscription?.id) {
+        console.error("No subscription ID found in stripeData", stripeData);
+        toast({
+          title: "Error",
+          description: "No subscription found to update",
+          variant: "destructive",
+        });
+        return;
+      }
 
       if (editingItem.price.id !== selectedPlanId) {
         // Change plan
+        console.log(
+          `Changing plan from ${editingItem.price.id} to ${selectedPlanId}`
+        );
+
         await changeSubscriptionPlan({
           subscriptionId: stripeData.subscription.id,
           itemId: editingItem.id,
           newPriceId: selectedPlanId,
         });
+
+        console.log("Plan change successful");
       } else if (editingItem.quantity !== newQuantity) {
         // Update quantity
+        console.log(
+          `Updating quantity from ${editingItem.quantity} to ${newQuantity}`
+        );
+
         await updateSubscriptionQuantity({
           subscriptionId: stripeData.subscription.id,
           itemId: editingItem.id,
           quantity: newQuantity,
         });
+
+        console.log("Quantity update successful");
+      } else {
+        console.log("No changes detected in plan or quantity");
       }
 
-      // Refresh subscription data
-      await loadStripeData();
+      // Clear client-side cache for this company
+      if (company?.id) {
+        clearSubscriptionCache(company.id);
+      }
+
+      console.log("Refreshing subscription data...");
+      // Refresh subscription data with force reload (bypass cache)
+      await loadStripeData(true);
+
       setEditDialogOpen(false);
       toast({
         title: "Success",
@@ -307,7 +358,8 @@ export function CompanySideDialog({
       console.error("Error updating subscription:", error);
       toast({
         title: "Error",
-        description: "Failed to update subscription",
+        description:
+          "Failed to update subscription. Please check console logs for details.",
         variant: "destructive",
       });
     } finally {
@@ -712,6 +764,39 @@ export function CompanySideDialog({
     setIsEditMode(false);
   };
 
+  useEffect(() => {
+    const fetchStripeData = async () => {
+      try {
+        setIsLoadingStripe(true);
+        // Add a small delay to allow UI to render first
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        console.log(`Fetching Stripe data for company ${company.id}...`);
+        const startTime = performance.now();
+
+        const stripeDetails = await getStripeSubscriptionDetails(company.id);
+
+        const endTime = performance.now();
+        console.log(
+          `Stripe data loaded in ${Math.round(endTime - startTime)}ms`
+        );
+
+        setStripeData(stripeDetails);
+      } catch (error) {
+        console.error("Error fetching Stripe data:", error);
+        setStripeError("Failed to load Stripe subscription details");
+      } finally {
+        setIsLoadingStripe(false);
+      }
+    };
+
+    if (company.stripe_customer_id) {
+      fetchStripeData();
+    } else {
+      setIsLoadingStripe(false);
+    }
+  }, [company]);
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <style jsx global>{`
@@ -907,11 +992,69 @@ export function CompanySideDialog({
                   {isLoadingStripe ? (
                     <LoadingSpinner />
                   ) : company.stripe_customer_id ? (
-                    <StripeTabs
-                      company={company}
-                      preloadedData={stripeData}
-                      isLoading={isLoadingStripe}
-                    />
+                    <>
+                      <div className="flex justify-between items-center mb-4">
+                        <div>
+                          <h3 className="text-lg font-medium">
+                            Billing & Subscriptions
+                          </h3>
+                          <p className="text-sm text-muted-foreground">
+                            Manage subscriptions, payment methods and invoices
+                          </p>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={async () => {
+                            try {
+                              setIsLoadingStripe(true);
+
+                              // Clear the cache first
+                              clearSubscriptionCache(company.id);
+
+                              // Force refresh from Stripe with no cache
+                              await loadStripeData(true, true);
+
+                              toast({
+                                title: "Success",
+                                description:
+                                  "Stripe data refreshed successfully",
+                              });
+                            } catch (error) {
+                              console.error(
+                                "Error refreshing Stripe data:",
+                                error
+                              );
+                              toast({
+                                title: "Error",
+                                description: "Failed to refresh Stripe data",
+                                variant: "destructive",
+                              });
+                            } finally {
+                              setIsLoadingStripe(false);
+                            }
+                          }}
+                          disabled={isLoadingStripe}
+                        >
+                          {isLoadingStripe ? (
+                            <>
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                              Refreshing...
+                            </>
+                          ) : (
+                            <>
+                              <RefreshCw className="h-4 w-4 mr-2" />
+                              Refresh Stripe Data
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                      <StripeTabs
+                        company={company}
+                        preloadedData={stripeData}
+                        isLoading={isLoadingStripe}
+                      />
+                    </>
                   ) : (
                     <div className="text-center py-12">
                       <CreditCard className="mx-auto h-12 w-12 text-gray-400" />

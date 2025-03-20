@@ -59,6 +59,7 @@ import {
   Eye,
   CalendarClock,
   AlertTriangle,
+  Pause,
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -1950,18 +1951,11 @@ export function StripeTabs({
                 <Receipt className="h-4 w-4 text-muted-foreground" />
                 <span>
                   Next invoice $
-                  {(
-                    (subscriptionDetails?.upcoming_invoice?.amount_due ??
-                      (Array.isArray(subscriptionDetails?.subscription?.items)
-                        ? subscriptionDetails.subscription.items.reduce(
-                            (sum: number, item: any) =>
-                              sum +
-                              (item.price?.unit_amount ?? 0) *
-                                (item.quantity ?? 1),
-                            0
-                          )
-                        : 0)) / 100
-                  ).toFixed(2)}{" "}
+                  {subscriptionDetails?.upcoming_invoice?.amount_due
+                    ? (
+                        subscriptionDetails.upcoming_invoice.amount_due / 100
+                      ).toFixed(2)
+                    : "calculating..."}{" "}
                   on{" "}
                   {new Date(
                     subscription.current_period_end * 1000
@@ -1985,7 +1979,7 @@ export function StripeTabs({
                   {isProcessing ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
-                    <Repeat className="h-4 w-4" />
+                    <Pause className="h-4 w-4" />
                   )}
                   Pause Collection
                 </Button>

@@ -32,6 +32,9 @@ export default function CompaniesPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [loadingRows, setLoadingRows] = useState<Record<number, boolean>>({});
+  const [syncingRowIds, setSyncingRowIds] = useState<Record<number, number>>(
+    {}
+  );
   const [error, setError] = useState<string | undefined>();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [stripeDialogOpen, setStripeDialogOpen] = useState(false);
@@ -306,9 +309,29 @@ export default function CompaniesPage() {
 
   const handleSyncStripe = async (company: Company) => {
     try {
+      // Check if this company was synced recently (within 10 seconds)
+      const lastSyncTime = syncingRowIds[company.id];
+      const currentTime = Date.now();
+
+      if (lastSyncTime && currentTime - lastSyncTime < 10000) {
+        console.log(
+          `Skipping sync for ${company.name} - already synced recently`
+        );
+        toast({
+          title: "Info",
+          description:
+            "This company was synced recently. Please wait a moment before syncing again.",
+        });
+        return;
+      }
+
+      // Record sync time and set loading state
+      setSyncingRowIds((prev) => ({ ...prev, [company.id]: currentTime }));
       setLoadingRows((prev) => ({ ...prev, [company.id]: true }));
+
       const result = await syncStripeCustomer(company.id);
       await fetchCompanies(true);
+
       toast({
         title: "Success",
         description: "Company synced with Stripe successfully",
@@ -325,6 +348,15 @@ export default function CompaniesPage() {
       });
     } finally {
       setLoadingRows((prev) => ({ ...prev, [company.id]: false }));
+
+      // After 10 seconds, remove the company from the syncing list
+      setTimeout(() => {
+        setSyncingRowIds((prev) => {
+          const newState = { ...prev };
+          delete newState[company.id];
+          return newState;
+        });
+      }, 10000);
     }
   };
 

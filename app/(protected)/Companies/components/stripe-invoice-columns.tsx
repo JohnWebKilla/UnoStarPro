@@ -81,9 +81,9 @@ export const invoiceColumns: ColumnDef<Company>[] = [
     },
     cell: ({ row }) => {
       // These fields might not exist yet in the database
-      // @ts-ignore - We'll handle undefined/null values gracefully
+      // @ts-expect-error - We'll handle undefined/null values gracefully
       const lastInvoiceDate = row.original.last_invoice_date;
-      // @ts-ignore - We'll handle undefined/null values gracefully
+      // @ts-expect-error - We'll handle undefined/null values gracefully
       const lastInvoiceStatus = row.original.last_invoice_status;
       const hasStripeCustomer = !!row.original.stripe_customer_id;
 
