@@ -3,11 +3,11 @@ import { debugPaymentMethods } from "@/app/(protected)/Companies/debug-payment-m
 
 // Using the same structure as other working dynamic routes
 export async function GET(
-  req: NextRequest,
-  { params }: { params: { id: string } }
+  request: NextRequest,
+  context: { params: { id: string } }
 ) {
   try {
-    const companyId = parseInt(params.id, 10);
+    const companyId = parseInt(context.params.id, 10);
 
     if (isNaN(companyId)) {
       return NextResponse.json(
