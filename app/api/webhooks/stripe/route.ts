@@ -481,10 +481,12 @@ async function handleCustomerUpdate(
         last_synced_at: new Date().toISOString(),
       };
 
-      const { error: updateError } = await supabaseAdmin
+      const updateResult = await supabaseAdmin
         ?.from("companies")
         .update(updateData)
         .eq("id", company.id);
+
+      const updateError = updateResult?.error;
 
       if (updateError) {
         console.error("Error updating company:", updateError);
@@ -514,7 +516,7 @@ async function handleCustomerUpdate(
     const firstName = nameParts[0] || "";
     const lastName = nameParts.slice(1).join(" ") || "";
 
-    const { data: newCompany, error: createError } = await supabaseAdmin
+    const insertResult = await supabaseAdmin
       ?.from("companies")
       .insert({
         name: stripeCustomer.name || "Unknown Company",
@@ -539,6 +541,9 @@ async function handleCustomerUpdate(
       })
       .select()
       .maybeSingle();
+
+    const newCompany = insertResult?.data;
+    const createError = insertResult?.error;
 
     if (createError) {
       console.error("Error creating new company:", createError);
