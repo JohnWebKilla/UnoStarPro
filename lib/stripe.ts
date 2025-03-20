@@ -17,10 +17,11 @@ export const stripe = (() => {
   }
 })();
 
-// Helper function to check if Stripe is initialized
+// Helper function to get Stripe instance or return null
 export function getStripe() {
   if (!stripe) {
-    throw new Error("Stripe is not properly initialized");
+    console.warn("Stripe is not properly initialized");
+    return null;
   }
   return stripe;
 }

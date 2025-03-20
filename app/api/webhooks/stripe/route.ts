@@ -288,15 +288,28 @@ export async function POST(req: Request) {
         }
 
         // Get company ID from customer ID
-        const { data: company } = await supabaseAdmin
-          ?.from("companies")
-          .select("id")
-          .eq("stripe_customer_id", customerId)
-          .single();
+        if (supabaseAdmin) {
+          try {
+            const companyResponse = await supabaseAdmin
+              .from("companies")
+              .select("id")
+              .eq("stripe_customer_id", customerId)
+              .single();
 
-        if (company) {
-          // Invalidate the cache for this company
-          await invalidatePaymentMethodsCache(company.id);
+            if (companyResponse?.data) {
+              // Invalidate the cache for this company
+              await invalidatePaymentMethodsCache(companyResponse.data.id);
+            }
+          } catch (error) {
+            console.error(
+              "Error retrieving company for cache invalidation:",
+              error
+            );
+          }
+        } else {
+          console.warn(
+            "Supabase admin client not initialized, skipping cache invalidation"
+          );
         }
       }
 
@@ -358,7 +371,12 @@ async function handleCustomerUpdate(
       }
     );
 
-    if (stripeCustomer.deleted) {
+    if (!stripeCustomer) {
+      console.log("Failed to retrieve customer from Stripe:", customer.id);
+      return;
+    }
+
+    if ("deleted" in stripeCustomer && stripeCustomer.deleted) {
       console.log("Customer was deleted in Stripe:", customer.id);
       return;
     }
