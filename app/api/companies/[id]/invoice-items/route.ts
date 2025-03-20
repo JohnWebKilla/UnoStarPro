@@ -3,22 +3,22 @@ import { createClient } from "@/utils/supabase/server";
 import Stripe from "stripe";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2025-02-24.acacia",
+  apiVersion: "2024-06-20",
 });
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: { id: string } }
 ) {
   try {
-    const resolvedParams = await params;
+    const companyId = params.id;
     const supabase = await createClient();
 
     // Get company details
     const { data: company, error: companyError } = await supabase
       .from("companies")
       .select("*")
-      .eq("id", resolvedParams.id)
+      .eq("id", companyId)
       .single();
 
     if (companyError || !company) {
