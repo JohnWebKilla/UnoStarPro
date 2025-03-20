@@ -26,6 +26,7 @@ interface SystemIssue {
   files: {
     name: string;
     url: string;
+    type: string;
   }[];
 }
 
@@ -147,10 +148,12 @@ export const mockIssues: SystemIssue[] = [
       {
         name: "crash_log.txt",
         url: "/path/to/crash_log.txt",
+        type: "text/plain",
       },
       {
         name: "screenshot.png",
         url: "/path/to/screenshot.png",
+        type: "image/png",
       },
     ],
   },
@@ -166,6 +169,7 @@ export const mockIssues: SystemIssue[] = [
       {
         name: "debug_log.txt",
         url: "/path/to/debug_log.txt",
+        type: "text/plain",
       },
     ],
   },
@@ -194,6 +198,7 @@ export const mockIssues: SystemIssue[] = [
       {
         name: "notification_log.txt",
         url: "/path/to/notification_log.txt",
+        type: "text/plain",
       },
     ],
   },
@@ -209,6 +214,7 @@ export const mockIssues: SystemIssue[] = [
       {
         name: "freeze_screenshot.png",
         url: "/path/to/freeze_screenshot.png",
+        type: "image/png",
       },
     ],
   },
@@ -227,6 +233,7 @@ export const mockIssues: SystemIssue[] = [
       {
         name: "error_report.pdf",
         url: "/path/to/error_report.pdf",
+        type: "application/pdf",
       },
     ],
   },
@@ -242,11 +249,12 @@ export const mockIssues: SystemIssue[] = [
       {
         name: "battery_stats.txt",
         url: "/path/to/battery_stats.txt",
+        type: "text/plain",
       },
     ],
   },
 ];
 
 export function IssuesTable({ issues }: IssuesTableProps) {
-  return <DataTable columns={columns} data={issues} type="issues" />;
+  return <DataTable columns={columns} data={issues as any} type="issues" />;
 }
