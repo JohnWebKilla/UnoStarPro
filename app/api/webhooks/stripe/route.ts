@@ -22,23 +22,10 @@ if (!process.env.STRIPE_WEBHOOK_SECRET) {
   throw new Error("STRIPE_WEBHOOK_SECRET is not set");
 }
 
-// Initialize Stripe with proper error handling
-let stripe: Stripe;
-try {
-  console.log("Initializing Stripe with key:", {
-    keyPrefix: process.env.STRIPE_SECRET_KEY?.substring(0, 7),
-    keyLength: process.env.STRIPE_SECRET_KEY?.length,
-  });
-
-  stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-    apiVersion: "2025-02-24.acacia",
-    typescript: true,
-    telemetry: false,
-  });
-} catch (error) {
-  console.error("Failed to initialize Stripe:", error);
-  throw new Error("Failed to initialize Stripe client");
-}
+// Initialize Stripe with API key
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: "2024-06-20",
+});
 
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 

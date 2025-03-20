@@ -1,12 +1,11 @@
 import { Company } from "@/app/(protected)/Companies/types";
 import Stripe from "stripe";
-import { createClient } from "./supabase/server";
+import { createClient } from "@/utils/supabase/server";
 
-const stripe = process.env.STRIPE_SECRET_KEY
-  ? new Stripe(process.env.STRIPE_SECRET_KEY, {
-      apiVersion: "2025-02-24.acacia",
-    })
-  : null;
+// Initialize Stripe with your API key
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: "2024-06-20",
+});
 
 export async function updateCompanyInStripe(company: Company) {
   if (!stripe) {
