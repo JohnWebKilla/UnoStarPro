@@ -10,7 +10,7 @@ export async function debugPaymentMethods(companyId: number) {
   try {
     // 1. Initialize Stripe with your API key
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-      apiVersion: "2025-02-24.acacia",
+      apiVersion: "2024-06-20",
     });
 
     // 2. Connect to Supabase
