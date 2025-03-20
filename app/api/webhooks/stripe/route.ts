@@ -724,7 +724,7 @@ async function handlePaymentMethodUpdate(
     );
 
     // Type guard to ensure we have a full customer object
-    if ("invoice_settings" in customer) {
+    if (customer && "invoice_settings" in customer) {
       const isDefault =
         customer.invoice_settings?.default_payment_method === paymentMethod.id;
 
