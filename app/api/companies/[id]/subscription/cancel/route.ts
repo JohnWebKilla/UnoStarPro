@@ -5,10 +5,9 @@ import { revalidatePath } from "next/cache";
 
 export async function POST(
   request: NextRequest,
-  context: { params: { id: string } }
+  { params }: { params: { id: string } }
 ) {
   try {
-    const { params } = context;
     const companyId = parseInt(params.id, 10);
 
     if (isNaN(companyId)) {
