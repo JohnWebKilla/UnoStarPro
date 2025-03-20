@@ -942,6 +942,63 @@ export function CompanySideDialog({
                               )}
                             </p>
                           </div>
+                          <div className="space-y-1">
+                            <h4 className="text-sm font-medium text-muted-foreground">
+                              Phone
+                            </h4>
+                            <p className="text-base">
+                              {company.contact_phone ? (
+                                <a
+                                  href={`tel:${company.contact_phone}`}
+                                  className="text-primary hover:underline"
+                                >
+                                  {company.contact_phone}
+                                </a>
+                              ) : (
+                                "—"
+                              )}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-4 p-6 border rounded-xl shadow-sm bg-card">
+                        <h3 className="text-lg font-medium">
+                          Address Information
+                        </h3>
+                        <div className="grid grid-cols-2 gap-6">
+                          <div className="space-y-1">
+                            <h4 className="text-sm font-medium text-muted-foreground">
+                              Street
+                            </h4>
+                            <p className="text-base">
+                              {company.address_street || "—"}
+                            </p>
+                          </div>
+                          <div className="space-y-1">
+                            <h4 className="text-sm font-medium text-muted-foreground">
+                              City
+                            </h4>
+                            <p className="text-base">
+                              {company.address_city || "—"}
+                            </p>
+                          </div>
+                          <div className="space-y-1">
+                            <h4 className="text-sm font-medium text-muted-foreground">
+                              State
+                            </h4>
+                            <p className="text-base">
+                              {company.address_state || "—"}
+                            </p>
+                          </div>
+                          <div className="space-y-1">
+                            <h4 className="text-sm font-medium text-muted-foreground">
+                              Zip Code
+                            </h4>
+                            <p className="text-base">
+                              {company.address_zip || "—"}
+                            </p>
+                          </div>
                         </div>
                       </div>
 
