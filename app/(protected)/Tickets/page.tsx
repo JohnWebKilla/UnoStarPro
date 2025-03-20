@@ -488,6 +488,7 @@ export default function TicketsPage() {
                         files: issue.files.map((file) => ({
                           name: file.name,
                           url: URL.createObjectURL(file),
+                          type: file.type || "application/octet-stream",
                         })),
                       };
                       setIssues((prev) => [newIssue, ...prev]);
