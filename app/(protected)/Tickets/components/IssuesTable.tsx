@@ -103,7 +103,11 @@ const columns: ColumnDef<SystemIssue>[] = [
     accessorKey: "files",
     header: "Files",
     cell: ({ row }) => {
-      const files = row.getValue("files") as { name: string; url: string }[];
+      const files = row.getValue("files") as {
+        name: string;
+        url: string;
+        type: string;
+      }[];
       return files?.length ? (
         <div className="flex items-center gap-1">
           <Paperclip className="h-4 w-4" />
@@ -256,5 +260,15 @@ export const mockIssues: SystemIssue[] = [
 ];
 
 export function IssuesTable({ issues }: IssuesTableProps) {
-  return <DataTable columns={columns} data={issues as any} type="issues" />;
+  // Map incoming issues to ensure they have the correct structure
+  const processedIssues = issues.map((issue) => ({
+    ...issue,
+    files: issue.files.map((file) => ({
+      ...file,
+      // Add a default type if it doesn't exist
+      type: (file as any).type || "application/octet-stream",
+    })),
+  }));
+
+  return <DataTable columns={columns} data={processedIssues} type="issues" />;
 }

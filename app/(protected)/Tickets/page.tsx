@@ -62,9 +62,12 @@ interface SystemIssue {
   systemType: "android" | "ios" | "web";
   description: string;
   status: "open" | "in progress" | "resolved";
+  solution?: string;
+  resolvedAt?: Date;
   files: {
     name: string;
     url: string;
+    type: string;
   }[];
 }
 
