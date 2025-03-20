@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { connectCompanyToStripe } from "@/app/api/webhooks/stripe/route";
 
 export async function POST(
-  request: NextRequest,
+  request: Request,
   { params }: { params: { id: string } }
 ) {
   try {

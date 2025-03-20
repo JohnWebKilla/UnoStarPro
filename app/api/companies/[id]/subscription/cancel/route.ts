@@ -4,7 +4,7 @@ import { cancelSubscription } from "@/app/(protected)/Companies/stripe-actions";
 import { revalidatePath } from "next/cache";
 
 export async function POST(
-  request: NextRequest,
+  request: Request,
   { params }: { params: { id: string } }
 ) {
   try {
