@@ -9,12 +9,11 @@ interface SubscriptionItem {
   quantity: number;
 }
 
-export async function POST(
-  request: Request,
-  { params }: { params: { id: string } }
-) {
+export async function POST(request: Request) {
   try {
-    const id = params.id;
+    // Extract ID from URL path
+    const pathParts = new URL(request.url).pathname.split("/");
+    const id = pathParts[pathParts.indexOf("subscriptions") + 2];
 
     const { items } = (await request.json()) as { items: SubscriptionItem[] };
 

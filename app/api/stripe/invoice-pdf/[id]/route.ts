@@ -5,12 +5,11 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: "2024-06-20",
 });
 
-export async function GET(
-  request: Request,
-  { params }: { params: { id: string } }
-) {
+export async function GET(request: Request) {
   try {
-    const invoiceId = params.id;
+    // Extract ID from URL path
+    const pathParts = new URL(request.url).pathname.split("/");
+    const invoiceId = pathParts[pathParts.length - 1];
 
     if (!invoiceId) {
       return NextResponse.json(

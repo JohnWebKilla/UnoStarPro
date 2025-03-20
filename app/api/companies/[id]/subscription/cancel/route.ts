@@ -3,12 +3,12 @@ import { createClient } from "@/utils/supabase/server";
 import { cancelSubscription } from "@/app/(protected)/Companies/stripe-actions";
 import { revalidatePath } from "next/cache";
 
-export async function POST(
-  request: Request,
-  { params }: { params: { id: string } }
-) {
+export async function POST(request: Request) {
   try {
-    const companyId = parseInt(params.id, 10);
+    // Extract ID from URL path
+    const pathParts = new URL(request.url).pathname.split("/");
+    const id = pathParts[pathParts.indexOf("companies") + 2];
+    const companyId = parseInt(id, 10);
 
     if (isNaN(companyId)) {
       return NextResponse.json(

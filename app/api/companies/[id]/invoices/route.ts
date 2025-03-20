@@ -6,12 +6,11 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: "2024-06-20",
 });
 
-export async function POST(
-  request: Request,
-  { params }: { params: { id: string } }
-) {
+export async function POST(request: Request) {
   try {
-    const companyId = params.id;
+    // Extract ID from URL path
+    const pathParts = new URL(request.url).pathname.split("/");
+    const companyId = pathParts[pathParts.indexOf("companies") + 2];
     const supabase = await createClient();
 
     // Get company details
