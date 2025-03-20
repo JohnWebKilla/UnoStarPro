@@ -149,15 +149,17 @@ export function CompanySideDialog({
   const [isEditMode, setIsEditMode] = useState(initialEditMode || false);
   const [stripeError, setStripeError] = useState<string | null>(null);
 
-  // Move both useEffect hooks before the early return
-  // First useEffect from line 158
+  // This useEffect runs when the dialog opens/closes or the company changes
   useEffect(() => {
     if (open) {
       // Set edit mode from prop if provided
       setIsEditMode(initialEditMode || false);
 
-      // Update local state when dialog opens
-      setActiveTab("overview");
+      // Only set activeTab to overview when initially opening the dialog
+      // Don't reset it if already open (which causes tab switching issues)
+      if (!company) {
+        setActiveTab("overview");
+      }
 
       // Always use the latest company data from props
       if (initialCompany) {
@@ -172,7 +174,7 @@ export function CompanySideDialog({
     }
   }, [open, initialCompany, initialEditMode]);
 
-  // Second useEffect from line 767
+  // This useEffect watches for tab changes to load Stripe data
   useEffect(() => {
     const fetchStripeData = async () => {
       try {
@@ -204,63 +206,10 @@ export function CompanySideDialog({
     }
   }, [company, activeTab]);
 
-  // Now place the early return after all hooks are defined
+  // Early return if no company is provided
   if (!initialCompany) {
     return null;
   }
-
-  // Fix the useEffect for initial load
-  useEffect(() => {
-    if (open) {
-      // Set edit mode from prop if provided
-      setIsEditMode(initialEditMode || false);
-
-      // Update local state when dialog opens
-      setActiveTab("overview");
-
-      // Always use the latest company data from props
-      if (initialCompany) {
-        setCompany(initialCompany);
-      }
-
-      // Start fetching Stripe data in the background immediately when dialog opens
-      if (initialCompany?.stripe_customer_id) {
-        // Check for cached data first
-        const cachedData = subscriptionDetailsCache.get(initialCompany.id);
-        const now = Date.now();
-
-        if (cachedData && now - cachedData.timestamp < CACHE_TTL) {
-          // Use cached data if it's less than 5 minutes old
-          setStripeData(cachedData.data);
-          setIsLoadingStripe(false);
-          console.log("Using cached Stripe data");
-        } else {
-          // Set loading state but don't block the UI
-          setIsLoadingStripe(true);
-
-          // Start loading data in the background
-          console.log("Loading fresh Stripe data in background");
-
-          // Use setTimeout to defer the loading to the next tick
-          setTimeout(() => {
-            loadStripeData(false)
-              .then(() => {
-                setIsLoadingStripe(false);
-              })
-              .catch((error) => {
-                console.error("Error loading Stripe data:", error);
-                setIsLoadingStripe(false);
-              });
-          }, 0);
-        }
-
-        // Only load plans if we don't have them yet
-        if (!availablePlans.length) {
-          loadAvailablePlans();
-        }
-      }
-    }
-  }, [open, initialEditMode, initialCompany, availablePlans]);
 
   // Add a specific effect for company updates from Settings tab
   const LoadingSpinner = () => (
