@@ -45,8 +45,6 @@ interface NotificationProviderProps {
   initialSettings?: Partial<NotificationSettings>;
 }
 
-const DISMISSED_NOTIFICATIONS_KEY = "dismissed_notifications";
-
 export const NotificationProvider = ({
   children,
   initialSettings,
@@ -72,14 +70,6 @@ export const NotificationProvider = ({
         : "en",
   });
   const { toast } = useToast();
-
-  // Load dismissed notifications from localStorage on mount
-  useEffect(() => {
-    const dismissed = localStorage.getItem(DISMISSED_NOTIFICATIONS_KEY);
-    if (dismissed) {
-      setDismissedNotifications(JSON.parse(dismissed));
-    }
-  }, []);
 
   const transformNotification = (
     n: NotificationRecord
@@ -113,12 +103,7 @@ export const NotificationProvider = ({
         return;
       }
 
-      // Filter out dismissed notifications
-      const filteredNotifications = notifications.filter(
-        (n) => !dismissedNotifications.includes(n.id)
-      );
-
-      setActiveNotifications(filteredNotifications.map(transformNotification));
+      setActiveNotifications(notifications.map(transformNotification));
     } catch (error) {
       console.error("Error loading notifications:", error);
       toast({
@@ -153,12 +138,10 @@ export const NotificationProvider = ({
             // Handle different types of changes
             if (payload.eventType === "INSERT") {
               const newNotification = payload.new;
-              if (!dismissedNotifications.includes(newNotification.id)) {
-                setActiveNotifications((prev) => [
-                  transformNotification(newNotification),
-                  ...prev,
-                ]);
-              }
+              setActiveNotifications((prev) => [
+                transformNotification(newNotification),
+                ...prev,
+              ]);
             } else if (payload.eventType === "DELETE") {
               setActiveNotifications((prev) =>
                 prev.filter((n) => n.id !== payload.old.id)
@@ -217,40 +200,18 @@ export const NotificationProvider = ({
 
   const hideNotification = async (id: string) => {
     try {
-      const { success, error } = await deleteNotificationAction(id);
-      if (error) {
-        toast({
-          title: "Error",
-          description: error,
-          variant: "destructive",
-        });
-        return;
-      }
+      // Add to dismissed notifications (in-memory only)
+      setDismissedNotifications((prev) => [...prev, id]);
 
-      if (success) {
-        // Add to dismissed notifications
-        const newDismissed = [...dismissedNotifications, id];
-        setDismissedNotifications(newDismissed);
-        localStorage.setItem(
-          DISMISSED_NOTIFICATIONS_KEY,
-          JSON.stringify(newDismissed)
-        );
-
-        // Remove from active notifications immediately
-        setActiveNotifications((prev) =>
-          prev.filter((notification) => notification.id !== id)
-        );
-
-        toast({
-          title: "Success",
-          description: "Notification deleted successfully",
-        });
-      }
+      toast({
+        title: "Success",
+        description: "Notification hidden successfully",
+      });
     } catch (error) {
-      console.error("Error deleting notification:", error);
+      console.error("Error hiding notification:", error);
       toast({
         title: "Error",
-        description: "Failed to delete notification",
+        description: "Failed to hide notification",
         variant: "destructive",
       });
     }

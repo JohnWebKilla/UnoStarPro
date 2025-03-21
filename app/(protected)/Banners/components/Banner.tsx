@@ -40,13 +40,14 @@ export const Banner = ({
   totalBanners,
   currentIndex,
 }: BannerProps) => {
-  const [isVisible, setIsVisible] = useState(true);
   const [progress, setProgress] = useState(0);
   const [selectedLanguage, setSelectedLanguage] =
     useState<keyof typeof LANGUAGES>("en");
 
   // Reset and start progress when message changes
   useEffect(() => {
+    if (!message) return; // Don't start the timer if there's no message
+
     setProgress(0);
     const startTime = Date.now();
     const interval = setInterval(() => {
@@ -58,7 +59,10 @@ export const Banner = ({
     }, 10);
 
     return () => clearInterval(interval);
-  }, [message.id]);
+  }, [message?.id]); // Use optional chaining
+
+  // Don't render anything if there's no message
+  if (!message) return null;
 
   // Prepare translations including the default English content
   const translations = [
@@ -113,10 +117,6 @@ export const Banner = ({
     }
   };
 
-  const handleDismiss = () => {
-    setIsVisible(false);
-  };
-
   const slideVariants = {
     enter: (direction: number) => ({
       x: direction > 0 ? 100 : -100,
@@ -136,113 +136,109 @@ export const Banner = ({
 
   return (
     <AnimatePresence initial={false} mode="wait" custom={currentIndex}>
-      {isVisible && (
-        <motion.div
-          key={message.id}
-          custom={currentIndex}
-          variants={slideVariants}
-          initial="enter"
-          animate="center"
-          exit="exit"
-          transition={{
-            x: { type: "spring", stiffness: 300, damping: 30 },
-            opacity: { duration: 0.2 },
-          }}
-          className="relative w-full"
+      <motion.div
+        key={message.id}
+        custom={currentIndex}
+        variants={slideVariants}
+        initial="enter"
+        animate="center"
+        exit="exit"
+        transition={{
+          x: { type: "spring", stiffness: 300, damping: 30 },
+          opacity: { duration: 0.2 },
+        }}
+        className="relative w-full"
+      >
+        <div
+          className={cn(
+            getBannerColor(),
+            "border-b px-4 h-14 flex items-center justify-between shadow-sm relative overflow-hidden"
+          )}
         >
-          <div
-            className={cn(
-              getBannerColor(),
-              "border-b px-4 h-14 flex items-center justify-between shadow-sm relative overflow-hidden"
-            )}
-          >
-            {/* Progress bar */}
+          {/* Progress bar */}
+          {totalBanners > 1 && (
+            <div className="absolute bottom-0 left-0 h-0.5 w-full bg-gray-200 dark:bg-gray-700">
+              <motion.div
+                className={cn("h-full", getProgressColor())}
+                initial={{ width: "0%" }}
+                animate={{ width: `${progress}%` }}
+                transition={{ duration: 0.1, ease: "linear" }}
+              />
+            </div>
+          )}
+
+          <div className="flex items-center space-x-3 flex-grow min-w-0">
+            <div className="flex-shrink-0">{getIcon()}</div>
+            <motion.div
+              key={selectedLanguage}
+              initial={{ opacity: 0, x: 10 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -10 }}
+              className="flex items-center gap-3 min-w-0"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <p className="font-medium truncate">{currentContent.title}</p>
+                <span className="text-current opacity-40 flex-shrink-0">•</span>
+                <p className="text-sm truncate">{currentContent.content}</p>
+              </div>
+              {availableLanguages.length > 1 && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0 flex-shrink-0"
+                    >
+                      <Globe className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {availableLanguages.map((lang) => (
+                      <DropdownMenuItem
+                        key={lang}
+                        onClick={() =>
+                          setSelectedLanguage(lang as keyof typeof LANGUAGES)
+                        }
+                        className={cn(
+                          "text-sm",
+                          selectedLanguage === lang && "font-medium bg-accent"
+                        )}
+                      >
+                        {LANGUAGES[lang as keyof typeof LANGUAGES]}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </motion.div>
+          </div>
+          <div className="flex items-center gap-3 flex-shrink-0">
             {totalBanners > 1 && (
-              <div className="absolute bottom-0 left-0 h-0.5 w-full bg-gray-200 dark:bg-gray-700">
-                <motion.div
-                  className={cn("h-full", getProgressColor())}
-                  initial={{ width: "0%" }}
-                  animate={{ width: `${progress}%` }}
-                  transition={{ duration: 0.1, ease: "linear" }}
-                />
+              <div className="flex gap-1">
+                {Array.from({ length: totalBanners }).map((_, index) => (
+                  <div
+                    key={index}
+                    className={cn(
+                      "w-1.5 h-1.5 rounded-full transition-all duration-300",
+                      index === currentIndex ? "bg-current" : "bg-current/20"
+                    )}
+                  />
+                ))}
               </div>
             )}
-
-            <div className="flex items-center space-x-3 flex-grow min-w-0">
-              <div className="flex-shrink-0">{getIcon()}</div>
-              <motion.div
-                key={selectedLanguage}
-                initial={{ opacity: 0, x: 10 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -10 }}
-                className="flex items-center gap-3 min-w-0"
+            {message.dismissible && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onDismiss(message.id)}
+                className="h-7 w-7 p-0 flex-shrink-0 hover:bg-gray-200 dark:hover:bg-gray-700"
               >
-                <div className="flex items-center gap-2 min-w-0">
-                  <p className="font-medium truncate">{currentContent.title}</p>
-                  <span className="text-current opacity-40 flex-shrink-0">
-                    •
-                  </span>
-                  <p className="text-sm truncate">{currentContent.content}</p>
-                </div>
-                {availableLanguages.length > 1 && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 w-7 p-0 flex-shrink-0"
-                      >
-                        <Globe className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      {availableLanguages.map((lang) => (
-                        <DropdownMenuItem
-                          key={lang}
-                          onClick={() =>
-                            setSelectedLanguage(lang as keyof typeof LANGUAGES)
-                          }
-                          className={cn(
-                            "text-sm",
-                            selectedLanguage === lang && "font-medium bg-accent"
-                          )}
-                        >
-                          {LANGUAGES[lang as keyof typeof LANGUAGES]}
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
-              </motion.div>
-            </div>
-            <div className="flex items-center gap-3 flex-shrink-0">
-              {totalBanners > 1 && (
-                <div className="flex gap-1">
-                  {Array.from({ length: totalBanners }).map((_, index) => (
-                    <div
-                      key={index}
-                      className={cn(
-                        "w-1.5 h-1.5 rounded-full transition-all duration-300",
-                        index === currentIndex ? "bg-current" : "bg-current/20"
-                      )}
-                    />
-                  ))}
-                </div>
-              )}
-              {message.dismissible && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleDismiss}
-                  className="h-7 w-7 p-0 flex-shrink-0 hover:bg-gray-200 dark:hover:bg-gray-700"
-                >
-                  <MinusCircle className="h-4 w-4" />
-                </Button>
-              )}
-            </div>
+                <MinusCircle className="h-4 w-4" />
+              </Button>
+            )}
           </div>
-        </motion.div>
-      )}
+        </div>
+      </motion.div>
     </AnimatePresence>
   );
 };

@@ -246,12 +246,6 @@ export default function NotificationsPage() {
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle>All Notifications</CardTitle>
-          <CardDescription>
-            List of all notifications (both active and scheduled)
-          </CardDescription>
-        </CardHeader>
         <CardContent>
           {isLoading ? (
             <div className="flex justify-center items-center h-32">

@@ -15,13 +15,16 @@ interface Driver {
   truck_number: string;
   solo_or_team: string;
   status: string;
+  driver_licenses: Document[];
+  medical_cards: Document[];
+  mvr_files: Document[];
+  company_id: number;
+  subscription_amount: number;
+  stripe_product_id: string | null;
   hire_date: string;
   terminated_date: string | null;
   created_at: string;
   updated_at: string;
-  driver_licenses: Document[];
-  medical_cards: Document[];
-  mvr_files: Document[];
 }
 
 interface DriversContextType {

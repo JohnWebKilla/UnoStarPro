@@ -9,72 +9,75 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Trash2 } from "lucide-react";
+import { Trash, Loader2 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 
 interface DeleteDriverDialogProps {
   driverId: number;
   driverName: string;
-  onDriverDeleted: () => void;
+  onDriverDeleted: () => Promise<void>;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 export function DeleteDriverDialog({
   driverId,
   driverName,
   onDriverDeleted,
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
 }: DeleteDriverDialogProps) {
-  const [open, setOpen] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const onOpenChange = controlledOnOpenChange ?? setInternalOpen;
+  const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
 
   const handleDelete = async () => {
-    setIsDeleting(true);
     try {
-      // Use the API endpoint to delete the driver
+      setIsLoading(true);
+
       const response = await fetch(`/api/drivers/${driverId}`, {
         method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
       });
 
-      const data = await response.json();
-
       if (!response.ok) {
-        console.error("Error deleting driver:", data.error);
-        toast({
-          variant: "destructive",
-          title: "Error",
-          description: data.error || "Failed to delete driver",
-        });
-        return;
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      // Success notification
       toast({
-        title: "Success",
-        description: "Driver deleted successfully",
+        title: "Driver deleted",
+        description: `${driverName} has been deleted successfully.`,
       });
 
       // Close dialog and refresh drivers list
-      setOpen(false);
-      onDriverDeleted();
+      setInternalOpen(false);
+      await onDriverDeleted();
     } catch (err) {
       console.error("Error:", err);
       toast({
-        variant: "destructive",
         title: "Error",
-        description: "An unexpected error occurred",
+        description: "Failed to delete driver. Please try again.",
+        variant: "destructive",
       });
     } finally {
-      setIsDeleting(false);
+      setIsLoading(false);
     }
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button variant="ghost" size="sm" className="text-red-600">
-          <Trash2 className="h-4 w-4" />
-        </Button>
-      </DialogTrigger>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      {!controlledOpen && (
+        <DialogTrigger asChild>
+          <Button variant="ghost" size="sm">
+            <Trash className="h-4 w-4" />
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Delete Driver</DialogTitle>
@@ -83,16 +86,27 @@ export function DeleteDriverDialog({
             undone.
           </DialogDescription>
         </DialogHeader>
-        <DialogFooter className="gap-2 sm:gap-0">
-          <Button variant="outline" onClick={() => setOpen(false)}>
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={isLoading}
+          >
             Cancel
           </Button>
           <Button
             variant="destructive"
             onClick={handleDelete}
-            disabled={isDeleting}
+            disabled={isLoading}
           >
-            {isDeleting ? "Deleting..." : "Delete Driver"}
+            {isLoading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Deleting...
+              </>
+            ) : (
+              "Delete"
+            )}
           </Button>
         </DialogFooter>
       </DialogContent>
