@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import {
   Dialog,
   DialogContent,
@@ -49,6 +49,8 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { uploadNotificationImage } from "../utils/storage";
+import { Label } from "@/components/ui/label";
 
 const languageEnum = z.enum(["en", "uz", "ru"] as const);
 
@@ -85,7 +87,11 @@ export const CreateNotificationDialog = ({
   onSubmit,
 }: CreateNotificationDialogProps) => {
   const [isTranslating, setIsTranslating] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadedImageUrl, setUploadedImageUrl] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+
   const form = useForm<NotificationForm>({
     resolver: zodResolver(notificationSchema),
     defaultValues: {
@@ -97,20 +103,41 @@ export const CreateNotificationDialog = ({
       dismissible: true,
       showFrom: "",
       showUntil: "",
-      image: "",
-      translateTo: [] as LanguageCode[],
-      uzTitle: "",
-      uzContent: "",
-      ruTitle: "",
-      ruContent: "",
+      translateTo: [],
       autoTranslate: true,
-      sourceLanguage: "en" as LanguageCode,
+      sourceLanguage: "en",
     },
   });
 
   // Watch for changes in translateTo and autoTranslate
   const translateTo = form.watch("translateTo") || [];
   const autoTranslate = form.watch("autoTranslate");
+
+  const handleImageUpload = async (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setIsUploading(true);
+      const imageUrl = await uploadNotificationImage(file);
+      setUploadedImageUrl(imageUrl);
+      toast({
+        title: "Success",
+        description: "Image uploaded successfully",
+      });
+    } catch (error) {
+      console.error("Error uploading image:", error);
+      toast({
+        title: "Error",
+        description: "Failed to upload image",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   const handleSubmit = async (data: NotificationForm) => {
     setIsTranslating(true);
@@ -179,6 +206,7 @@ export const CreateNotificationDialog = ({
         showUntil: data.showUntil ? new Date(data.showUntil) : undefined,
         translations,
         translateTo: Array.isArray(data.translateTo) ? data.translateTo : [],
+        image: uploadedImageUrl || undefined,
       };
 
       await onSubmit(notification);
@@ -188,6 +216,11 @@ export const CreateNotificationDialog = ({
         description: "Notification created successfully with translations.",
       });
 
+      // Reset the form and uploaded image
+      setUploadedImageUrl(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
       handleOpenChange(false);
     } catch (error) {
       console.error("Error creating notification:", error);
@@ -337,22 +370,30 @@ export const CreateNotificationDialog = ({
               />
             </div>
 
-            <FormField
-              control={form.control}
-              name="image"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel className="text-sm">Image URL</FormLabel>
-                  <FormControl>
-                    <Input {...field} placeholder="https://..." />
-                  </FormControl>
-                  <FormDescription className="text-xs">
-                    Optional: Add an image to your notification
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
+            <div className="space-y-2">
+              {form.watch("displayType") === "dialog" && (
+                <>
+                  <Label htmlFor="image">Image (optional)</Label>
+                  <Input
+                    id="image"
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImageUpload}
+                    ref={fileInputRef}
+                    disabled={isUploading}
+                  />
+                  {uploadedImageUrl && (
+                    <div className="mt-2">
+                      <img
+                        src={uploadedImageUrl}
+                        alt="Uploaded preview"
+                        className="max-h-32 rounded-md"
+                      />
+                    </div>
+                  )}
+                </>
               )}
-            />
+            </div>
 
             <div className="space-y-3 pt-2">
               <div className="flex items-center justify-between">
@@ -572,12 +613,16 @@ export const CreateNotificationDialog = ({
             </div>
 
             <DialogFooter className="pt-4">
-              <Button type="submit" disabled={isTranslating}>
-                {isTranslating ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Translating...
-                  </>
+              <Button
+                type="submit"
+                disabled={isTranslating || isUploading}
+                className="w-full sm:w-auto"
+              >
+                {isTranslating || isUploading ? (
+                  <div className="flex items-center gap-2">
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                    {isUploading ? "Uploading..." : "Creating..."}
+                  </div>
                 ) : (
                   "Create Notification"
                 )}

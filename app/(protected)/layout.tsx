@@ -4,6 +4,7 @@ import { TopNav } from "@/components/Nav/topNav";
 import { useUser } from "@/contexts/UserContext";
 import { useRouter } from "next/navigation";
 import { BirthdayCheck } from "@/components/birthday-check";
+import { NotificationProvider } from "@/app/(protected)/Banners/components/NotificationProvider";
 
 export default function ProtectedLayout({
   children,
@@ -15,9 +16,11 @@ export default function ProtectedLayout({
 
   return (
     <div className="min-h-screen relative">
-      <TopNav userRole={userRole} userName={userName} userEmail={userEmail} />
-      <main className="px-4 py-4">{children}</main>
-      <BirthdayCheck />
+      <NotificationProvider>
+        <TopNav userRole={userRole} userName={userName} userEmail={userEmail} />
+        <main className="px-4 py-4">{children}</main>
+        <BirthdayCheck />
+      </NotificationProvider>
     </div>
   );
 }

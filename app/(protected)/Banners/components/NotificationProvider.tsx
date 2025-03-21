@@ -28,6 +28,8 @@ const NotificationContext = createContext<NotificationContextType | undefined>(
   undefined
 );
 
+const ROTATION_INTERVAL = 5000; // 5 seconds per banner
+
 export const useNotifications = () => {
   const context = useContext(NotificationContext);
   if (!context) {
@@ -52,6 +54,7 @@ export const NotificationProvider = ({
   const [activeNotifications, setActiveNotifications] = useState<
     NotificationMessage[]
   >([]);
+  const [currentBannerIndex, setCurrentBannerIndex] = useState(0);
   const [dismissedNotifications, setDismissedNotifications] = useState<
     string[]
   >([]);
@@ -60,9 +63,8 @@ export const NotificationProvider = ({
     defaultPosition: "top",
     defaultDuration: 5000,
     defaultDismissible: true,
-    autoTranslate: false,
-    supportedLanguages: ["en"],
-    ...initialSettings,
+    autoTranslate: true,
+    supportedLanguages: ["en", "uz", "ru"],
     defaultLanguage:
       initialSettings?.defaultLanguage &&
       ["en", "uz", "ru"].includes(initialSettings.defaultLanguage)
@@ -87,7 +89,7 @@ export const NotificationProvider = ({
     content: n.content,
     type: n.type,
     displayType: n.display_type,
-    image: n.image_url,
+    image: n.display_type === "dialog" ? n.image_url : undefined,
     translateTo: n.translate_to,
     autoShow: n.auto_show,
     showFrom: n.show_from ? new Date(n.show_from) : undefined,
@@ -258,6 +260,31 @@ export const NotificationProvider = ({
     setSettings(newSettings);
   };
 
+  // Function to get active banner notifications
+  const getActiveBanners = () =>
+    activeNotifications.filter(
+      (notification) =>
+        notification.displayType === "banner" &&
+        notification.active &&
+        (!notification.showFrom ||
+          new Date(notification.showFrom) <= new Date()) &&
+        (!notification.showUntil ||
+          new Date(notification.showUntil) >= new Date()) &&
+        !dismissedNotifications.includes(notification.id)
+    );
+
+  // Rotate banners
+  useEffect(() => {
+    const activeBanners = getActiveBanners();
+    if (activeBanners.length <= 1) return;
+
+    const intervalId = setInterval(() => {
+      setCurrentBannerIndex((current) => (current + 1) % activeBanners.length);
+    }, ROTATION_INTERVAL);
+
+    return () => clearInterval(intervalId);
+  }, [activeNotifications, dismissedNotifications]);
+
   return (
     <NotificationContext.Provider
       value={{
@@ -269,23 +296,15 @@ export const NotificationProvider = ({
     >
       <div className="flex flex-col min-h-screen">
         <div className="sticky top-0 z-50">
-          {activeNotifications
-            .filter(
-              (notification) =>
-                notification.displayType === "banner" &&
-                notification.active &&
-                (!notification.showFrom ||
-                  new Date(notification.showFrom) <= new Date()) &&
-                (!notification.showUntil ||
-                  new Date(notification.showUntil) >= new Date())
-            )
-            .map((notification) => (
-              <Banner
-                key={notification.id}
-                message={notification}
-                onDismiss={hideNotification}
-              />
-            ))}
+          {getActiveBanners().length > 0 && (
+            <Banner
+              key={getActiveBanners()[currentBannerIndex]?.id}
+              message={getActiveBanners()[currentBannerIndex]}
+              onDismiss={hideNotification}
+              totalBanners={getActiveBanners().length}
+              currentIndex={currentBannerIndex}
+            />
+          )}
         </div>
 
         <div className="flex-grow">{children}</div>

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { NotificationMessage } from "../types";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -8,9 +8,9 @@ import {
   AlertTriangle,
   Info,
   Globe,
+  MinusCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import Image from "next/image";
 import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
@@ -22,6 +22,8 @@ import {
 interface BannerProps {
   message: NotificationMessage;
   onDismiss: (id: string) => void;
+  totalBanners: number;
+  currentIndex: number;
 }
 
 const LANGUAGES = {
@@ -30,10 +32,33 @@ const LANGUAGES = {
   ru: "Русский",
 } as const;
 
-export const Banner = ({ message, onDismiss }: BannerProps) => {
+const ROTATION_INTERVAL = 5000; // Should match the interval in NotificationProvider
+
+export const Banner = ({
+  message,
+  onDismiss,
+  totalBanners,
+  currentIndex,
+}: BannerProps) => {
   const [isVisible, setIsVisible] = useState(true);
+  const [progress, setProgress] = useState(0);
   const [selectedLanguage, setSelectedLanguage] =
     useState<keyof typeof LANGUAGES>("en");
+
+  // Reset and start progress when message changes
+  useEffect(() => {
+    setProgress(0);
+    const startTime = Date.now();
+    const interval = setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      const newProgress = (elapsed / ROTATION_INTERVAL) * 100;
+      if (newProgress <= 100) {
+        setProgress(newProgress);
+      }
+    }, 10);
+
+    return () => clearInterval(interval);
+  }, [message.id]);
 
   // Prepare translations including the default English content
   const translations = [
@@ -61,6 +86,19 @@ export const Banner = ({ message, onDismiss }: BannerProps) => {
     }
   };
 
+  const getProgressColor = () => {
+    switch (message.type) {
+      case "success":
+        return "bg-green-500 dark:bg-green-400";
+      case "error":
+        return "bg-red-500 dark:bg-red-400";
+      case "warning":
+        return "bg-yellow-500 dark:bg-yellow-400";
+      default:
+        return "bg-blue-500 dark:bg-blue-400";
+    }
+  };
+
   const getIcon = () => {
     const className = "h-5 w-5";
     switch (message.type) {
@@ -77,53 +115,83 @@ export const Banner = ({ message, onDismiss }: BannerProps) => {
 
   const handleDismiss = () => {
     setIsVisible(false);
-    onDismiss(message.id);
+  };
+
+  const slideVariants = {
+    enter: (direction: number) => ({
+      x: direction > 0 ? 100 : -100,
+      opacity: 0,
+    }),
+    center: {
+      zIndex: 1,
+      x: 0,
+      opacity: 1,
+    },
+    exit: (direction: number) => ({
+      zIndex: 0,
+      x: direction < 0 ? 100 : -100,
+      opacity: 0,
+    }),
   };
 
   return (
-    <AnimatePresence>
+    <AnimatePresence initial={false} mode="wait" custom={currentIndex}>
       {isVisible && (
         <motion.div
-          initial={{ opacity: 0, height: 0 }}
-          animate={{ opacity: 1, height: "auto" }}
-          exit={{ opacity: 0, height: 0 }}
+          key={message.id}
+          custom={currentIndex}
+          variants={slideVariants}
+          initial="enter"
+          animate="center"
+          exit="exit"
+          transition={{
+            x: { type: "spring", stiffness: 300, damping: 30 },
+            opacity: { duration: 0.2 },
+          }}
           className="relative w-full"
         >
           <div
             className={cn(
               getBannerColor(),
-              "border-b px-4 py-2.5 flex items-center justify-between shadow-sm"
+              "border-b px-4 h-14 flex items-center justify-between shadow-sm relative overflow-hidden"
             )}
           >
-            <div className="flex items-center space-x-3 flex-grow">
-              <div className="flex-shrink-0">
-                {message.image ? (
-                  <Image
-                    src={message.image}
-                    alt=""
-                    width={24}
-                    height={24}
-                    className="rounded"
-                  />
-                ) : (
-                  getIcon()
-                )}
+            {/* Progress bar */}
+            {totalBanners > 1 && (
+              <div className="absolute bottom-0 left-0 h-0.5 w-full bg-gray-200 dark:bg-gray-700">
+                <motion.div
+                  className={cn("h-full", getProgressColor())}
+                  initial={{ width: "0%" }}
+                  animate={{ width: `${progress}%` }}
+                  transition={{ duration: 0.1, ease: "linear" }}
+                />
               </div>
+            )}
+
+            <div className="flex items-center space-x-3 flex-grow min-w-0">
+              <div className="flex-shrink-0">{getIcon()}</div>
               <motion.div
                 key={selectedLanguage}
                 initial={{ opacity: 0, x: 10 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -10 }}
-                className="flex items-center gap-3"
+                className="flex items-center gap-3 min-w-0"
               >
-                <div className="flex flex-col">
-                  <p className="font-medium">{currentContent.title}</p>
-                  <p className="text-sm">{currentContent.content}</p>
+                <div className="flex items-center gap-2 min-w-0">
+                  <p className="font-medium truncate">{currentContent.title}</p>
+                  <span className="text-current opacity-40 flex-shrink-0">
+                    •
+                  </span>
+                  <p className="text-sm truncate">{currentContent.content}</p>
                 </div>
                 {availableLanguages.length > 1 && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 p-0 flex-shrink-0"
+                      >
                         <Globe className="h-4 w-4" />
                       </Button>
                     </DropdownMenuTrigger>
@@ -147,16 +215,31 @@ export const Banner = ({ message, onDismiss }: BannerProps) => {
                 )}
               </motion.div>
             </div>
-            {message.dismissible && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleDismiss}
-                className="h-7 w-7 p-0 flex-shrink-0 hover:bg-gray-200 dark:hover:bg-gray-700"
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            )}
+            <div className="flex items-center gap-3 flex-shrink-0">
+              {totalBanners > 1 && (
+                <div className="flex gap-1">
+                  {Array.from({ length: totalBanners }).map((_, index) => (
+                    <div
+                      key={index}
+                      className={cn(
+                        "w-1.5 h-1.5 rounded-full transition-all duration-300",
+                        index === currentIndex ? "bg-current" : "bg-current/20"
+                      )}
+                    />
+                  ))}
+                </div>
+              )}
+              {message.dismissible && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleDismiss}
+                  className="h-7 w-7 p-0 flex-shrink-0 hover:bg-gray-200 dark:hover:bg-gray-700"
+                >
+                  <MinusCircle className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
           </div>
         </motion.div>
       )}

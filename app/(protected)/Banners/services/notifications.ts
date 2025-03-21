@@ -394,7 +394,7 @@ export async function deleteNotification(id: string): Promise<boolean> {
 
     return true;
   } catch (error) {
-    console.error("Unexpected error in deleteNotification:", error);
+    console.error("Error deleting notification:", error);
     return false;
   }
 }
