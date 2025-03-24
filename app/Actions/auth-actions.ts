@@ -7,6 +7,8 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getDashboardForRole } from "@/utils/protected";
 import type { Role } from "@/types/role";
+import { ClientCacheManager } from "@/lib/client-cache-manager";
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
 export async function signUpAction(formData: FormData) {
   const supabase = await createClient();
@@ -92,71 +94,124 @@ type SignInResult =
   | { error: string; success?: never }
   | undefined;
 
-export const signInAction = async (
-  formData: FormData
-): Promise<SignInResult> => {
-  const email = formData.get("email") as string;
-  const password = formData.get("password") as string;
-  const supabase = await createClient();
+export async function signIn(email: string, password: string) {
+  console.log("Attempting sign in for email:", email);
 
   try {
-    console.log("Attempting sign in for email:", email);
-    const { data: authData, error: authError } =
-      await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+    const supabase = await createClient();
+    const {
+      data: { user },
+      error: signInError,
+    } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
 
-    if (authError || !authData.user || !authData.user.email) {
-      console.error("Auth error:", authError);
-      return { error: authError?.message || "Authentication failed" };
-    }
+    if (signInError) throw signInError;
+    if (!user) throw new Error("No user returned from sign in");
 
-    console.log("Auth successful, user ID:", authData.user.id);
+    console.log("Auth successful, user ID:", user.id);
 
-    // Now we know authData.user.email is defined
-    const userEmail = authData.user.email;
-
-    // Fetch complete user data including role
-    const { data: userData, error: userError } = await supabase
+    // Get user data including role
+    let { data: userData, error: userError } = await supabase
       .from("users")
-      .select("role, first_name, last_name")
-      .eq("id", authData.user.id)
+      .select("*")
+      .eq("id", user.id)
       .single();
 
-    console.log("User data query result:", { userData, userError });
+    // If user data doesn't exist, create it
+    if (userError?.code === "PGRST116") {
+      console.log("User record not found, creating one...");
 
-    if (userError || !userData) {
-      console.error("User data error:", userError);
-      return { error: "Failed to fetch user data" };
+      // Extract name parts from email or user metadata
+      const nameParts = user.user_metadata?.full_name?.split(" ") ||
+        email.split("@")[0].split(".") || ["User", user.id.slice(0, 8)];
+
+      const first_name = nameParts[0] || "User";
+      const last_name = nameParts[1] || user.id.slice(0, 8);
+
+      const newUserData = {
+        id: user.id,
+        email: user.email,
+        first_name,
+        last_name,
+        role: "customer", // Default role
+        status: "active",
+        created_at: new Date().toISOString(),
+        has_all_access: false,
+        payment_frequency: "monthly",
+        department: "general",
+        company_id: 1, // Default company ID
+      };
+
+      const { data: newUser, error: insertError } = await supabase
+        .from("users")
+        .insert(newUserData)
+        .select()
+        .single();
+
+      if (insertError) {
+        console.error("Error creating user record:", insertError);
+        throw insertError;
+      }
+
+      userData = newUser;
+    } else if (userError) {
+      console.error("Error fetching user data:", userError);
+      throw userError;
     }
 
-    // Get the appropriate dashboard URL based on role
+    if (!userData) throw new Error("No user data found");
+
+    // Initialize cache manager with user's role
+    const cacheManager = new ClientCacheManager(userData.role);
+
+    // Get dashboard URL based on role
     const dashboardUrl = getDashboardForRole(userData.role as Role);
     console.log("Dashboard URL for role:", {
       role: userData.role,
       dashboardUrl,
     });
 
-    if (dashboardUrl === "/unauthorized") {
-      return { error: "Invalid user role or permissions" };
-    }
+    try {
+      // Start prefetching all data
+      await cacheManager.prefetchAllData();
 
-    return {
-      success: true,
-      role: userData.role,
-      dashboardUrl,
-      user: {
-        name: `${userData.first_name} ${userData.last_name}`,
-        role: userData.role,
-        email: userEmail,
-      },
-    };
+      return {
+        success: true,
+        dashboardUrl,
+        userData: {
+          role: userData.role,
+          first_name: userData.first_name,
+          last_name: userData.last_name,
+          email: userData.email,
+          status: userData.status,
+        },
+      };
+    } catch (error) {
+      console.error("Cache prefetch error:", error);
+      // Continue with login even if prefetch fails
+      return {
+        success: true,
+        dashboardUrl,
+        userData: {
+          role: userData.role,
+          first_name: userData.first_name,
+          last_name: userData.last_name,
+          email: userData.email,
+          status: userData.status,
+        },
+      };
+    }
   } catch (error) {
-    console.error("Sign-in error:", error);
-    return { error: "An unexpected error occurred" };
+    console.error("Sign in error:", error);
+    return {
+      success: false,
+      error:
+        error instanceof Error ? error.message : "An unknown error occurred",
+    };
   }
-};
+}
 
 export const forgotPasswordAction = async (formData: FormData) => {
   const email = formData.get("email")?.toString();
@@ -208,8 +263,38 @@ export const resetPasswordAction = async (formData: FormData) => {
   return { success: true };
 };
 
-export const signOutAction = async () => {
+export async function signOutAction() {
   const supabase = await createClient();
-  await supabase.auth.signOut();
-  return redirect("/sign-in");
-};
+
+  try {
+    // Sign out from Supabase
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      console.error("Sign-out error:", error);
+      throw error;
+    }
+
+    // Clear all cached data
+    if (typeof window !== "undefined") {
+      // Clear localStorage
+      const keys = Object.keys(localStorage);
+      const cacheKeys = keys.filter(
+        (key) =>
+          key.startsWith("page_data:") ||
+          key === "userData" ||
+          key.includes("supabase") ||
+          key.includes("auth")
+      );
+      cacheKeys.forEach((key) => localStorage.removeItem(key));
+
+      // Clear sessionStorage
+      sessionStorage.clear();
+    }
+
+    // Redirect to sign-in page
+    return redirect("/sign-in");
+  } catch (error) {
+    console.error("Sign-out error:", error);
+    throw error;
+  }
+}

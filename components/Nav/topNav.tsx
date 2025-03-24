@@ -35,6 +35,7 @@ import type { Role } from "@/types/role";
 import { useMemo, useState } from "react";
 import { useBirthdayCheck } from "@/hooks/useBirthdayCheck";
 import { motion } from "framer-motion";
+import { useRouter } from "next/navigation";
 
 type NavItem = {
   path: string;
@@ -117,14 +118,20 @@ export function TopNav({ userRole, userName, userEmail }: TopNavProps) {
   const pathname = usePathname();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const isBirthday = useBirthdayCheck();
+  const router = useRouter();
 
   const visibleNavItems = useMemo(() => {
     if (!userRole) return [];
     return NAV_ITEMS.filter((item) => item.roles.includes(userRole));
   }, [userRole]);
 
-  const handleLogout = () => {
-    signOutAction();
+  const handleLogout = async () => {
+    try {
+      await signOutAction();
+      router.replace("/sign-in");
+    } catch (error) {
+      console.error("Logout error:", error);
+    }
   };
 
   return (

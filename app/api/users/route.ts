@@ -1,5 +1,7 @@
 import { NextRequest } from "next/server";
 import { createClient } from "@/utils/supabase/server";
+import { NextResponse } from "next/server";
+import { getCache, setCache } from "@/lib/redis";
 
 // GET - fetch users (with optional userId filter)
 export async function GET(request: NextRequest): Promise<Response> {
@@ -376,5 +378,70 @@ export async function DELETE(request: NextRequest): Promise<Response> {
   } catch (error) {
     console.error("Error deleting user:", error);
     return Response.json({ error: "Failed to delete user" }, { status: 500 });
+  }
+}
+
+export async function GETUsers() {
+  try {
+    const supabase = await createClient();
+
+    // Get current user's session
+    const {
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession();
+    if (sessionError || !session) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // Get user's role
+    const { data: userData, error: userError } = await supabase
+      .from("users")
+      .select("role")
+      .eq("id", session.user.id)
+      .single();
+
+    if (userError || !userData) {
+      return NextResponse.json(
+        { error: "Failed to fetch user data" },
+        { status: 500 }
+      );
+    }
+
+    // Only admin and superadmin can access users data
+    if (!["admin", "superadmin"].includes(userData.role)) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    }
+
+    // Try to get data from cache first
+    const cacheKey = `users:${session.user.id}`;
+    const cachedData = await getCache(cacheKey);
+    if (cachedData) {
+      return NextResponse.json({ users: cachedData });
+    }
+
+    // Fetch all users
+    const { data: users, error: usersError } = await supabase
+      .from("users")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (usersError) {
+      return NextResponse.json(
+        { error: "Failed to fetch users" },
+        { status: 500 }
+      );
+    }
+
+    // Cache the data for 5 minutes
+    await setCache(cacheKey, users, 300);
+
+    return NextResponse.json({ users });
+  } catch (error) {
+    console.error("Users API error:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
   }
 }
