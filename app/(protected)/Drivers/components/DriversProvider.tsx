@@ -2,36 +2,24 @@
 
 import React, { createContext, useContext, useState, useEffect } from "react";
 import { toast } from "@/components/ui/use-toast";
-
-interface Document {
-  id: number;
-  expiration_date: string;
-}
-
-interface Driver {
-  id: number;
-  name: string;
-  phone_number: string;
-  truck_number: string;
-  solo_or_team: string;
-  status: string;
-  driver_licenses: Document[];
-  medical_cards: Document[];
-  mvr_files: Document[];
-  company_id: number;
-  subscription_amount: number;
-  stripe_product_id: string | null;
-  hire_date: string;
-  terminated_date: string | null;
-  created_at: string;
-  updated_at: string;
-}
+import { getDrivers, clearDriverCaches } from "../actions";
+import { Driver, CacheResponse } from "../types";
+import { deleteClientCache } from "@/utils/client-cache";
+import { DRIVER_LIST_KEY } from "../redis-client";
 
 interface DriversContextType {
   drivers: Driver[];
   loading: boolean;
   error: string | null;
-  refreshDrivers: () => Promise<void>;
+  dataSource: string;
+  companies: Array<{ id: number; name: string }>;
+  timingInfo: {
+    total: number;
+    database?: number;
+    source?: string;
+  } | null;
+  refreshDrivers: (skipCache?: boolean) => Promise<void>;
+  clearCache: () => Promise<void>;
 }
 
 const DriversContext = createContext<DriversContextType | undefined>(undefined);
@@ -40,40 +28,63 @@ export function DriversProvider({ children }: { children: React.ReactNode }) {
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [dataSource, setDataSource] = useState<string>("loading");
+  const [companies, setCompanies] = useState<
+    Array<{ id: number; name: string }>
+  >([]);
+  const [timingInfo, setTimingInfo] = useState<{
+    total: number;
+    database?: number;
+    source?: string;
+  } | null>(null);
 
-  const fetchDrivers = async () => {
+  const fetchCompanies = async () => {
+    try {
+      const response = await fetch("/api/companies");
+      if (!response.ok) {
+        throw new Error("Failed to fetch companies");
+      }
+      const data = await response.json();
+      setCompanies(data || []);
+    } catch (error) {
+      console.error("Error fetching companies:", error);
+      toast({
+        title: "Error",
+        description: "Failed to load companies",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const fetchDrivers = async (skipCache: boolean = false) => {
     try {
       setLoading(true);
       setError(null);
+      setDataSource("loading");
 
-      const response = await fetch("/api/drivers", {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: "include",
-        cache: "no-store",
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        const errorMessage =
-          errorData.error || `HTTP error! status: ${response.status}`;
-        throw new Error(errorMessage);
+      // If skipCache is true, clear all caches first
+      if (skipCache) {
+        await clearDriverCaches();
       }
 
-      const data = await response.json();
+      // Use the new action with Redis cache
+      const result = await getDrivers(skipCache);
 
-      if (!Array.isArray(data)) {
-        throw new Error("Invalid data format received from server");
-      }
-
-      setDrivers(data);
+      setDrivers(result.data);
+      setDataSource(
+        result.source === "cache"
+          ? result.timing.source === "client-cache"
+            ? "Client Cache"
+            : "Redis Cache"
+          : "Database"
+      );
+      setTimingInfo(result.timing);
     } catch (err) {
       console.error("Error fetching drivers:", err);
       const errorMessage =
         err instanceof Error ? err.message : "An unexpected error occurred";
       setError(errorMessage);
+      setDataSource("error");
 
       if (
         errorMessage.includes("401") ||
@@ -98,7 +109,30 @@ export function DriversProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const clearCache = async () => {
+    try {
+      // Clear both client and server caches
+      await clearDriverCaches();
+
+      toast({
+        title: "Cache Cleared",
+        description: "Driver cache has been cleared successfully.",
+      });
+
+      // Refresh drivers with skipCache=true to force a database fetch
+      await fetchDrivers(true);
+    } catch (error) {
+      console.error("Error clearing cache:", error);
+      toast({
+        title: "Error",
+        description: "Failed to clear cache. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
   useEffect(() => {
+    fetchCompanies();
     fetchDrivers();
   }, []);
 
@@ -108,7 +142,11 @@ export function DriversProvider({ children }: { children: React.ReactNode }) {
         drivers,
         loading,
         error,
+        dataSource,
+        companies,
+        timingInfo,
         refreshDrivers: fetchDrivers,
+        clearCache,
       }}
     >
       {children}

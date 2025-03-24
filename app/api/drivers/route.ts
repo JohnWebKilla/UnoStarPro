@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { cookies } from "next/headers";
+import { getCache, setCache } from "@/lib/redis";
+import {
+  DRIVER_LIST_KEY,
+  CACHE_EXPIRATION,
+} from "@/app/(protected)/Drivers/cache";
 
 export async function GET(request: NextRequest) {
   try {
@@ -14,6 +19,13 @@ export async function GET(request: NextRequest) {
 
     if (userError || !user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // Try to get from cache first
+    const cachedDrivers = await getCache(DRIVER_LIST_KEY);
+    if (cachedDrivers) {
+      console.log("Using cached drivers from Redis in API");
+      return NextResponse.json(cachedDrivers);
     }
 
     // First, get the basic driver data without company filtering
@@ -80,10 +92,17 @@ export async function GET(request: NextRequest) {
         })
       );
 
+      // Cache the result
+      await setCache(DRIVER_LIST_KEY, driversWithDocs, CACHE_EXPIRATION);
+
       return NextResponse.json(driversWithDocs);
     }
 
-    return NextResponse.json(drivers || []);
+    // Cache empty array if no drivers found
+    const emptyResult = drivers || [];
+    await setCache(DRIVER_LIST_KEY, emptyResult, CACHE_EXPIRATION);
+
+    return NextResponse.json(emptyResult);
   } catch (error) {
     console.error("Error in drivers API:", error);
     return NextResponse.json(

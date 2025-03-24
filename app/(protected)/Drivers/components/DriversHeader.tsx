@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import {
   Card,
   CardContent,
@@ -8,35 +8,46 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Loader2, Users, UserCheck, AlertTriangle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Loader2,
+  Users,
+  UserCheck,
+  AlertTriangle,
+  RefreshCw,
+  Database,
+  Trash,
+} from "lucide-react";
 import { AddDriverDialog } from "./AddDriverDialog";
 import { useDrivers } from "./DriversProvider";
-
-interface Document {
-  id: number;
-  expiration_date: string;
-}
-
-interface Driver {
-  id: number;
-  name: string;
-  phone_number: string;
-  truck_number: string;
-  solo_or_team: string;
-  status: string;
-  driver_licenses: Document[];
-  medical_cards: Document[];
-  mvr_files: Document[];
-}
+import { Badge } from "@/components/ui/badge";
+import { Driver } from "../types";
 
 export function DriversHeader() {
-  const { drivers, loading, refreshDrivers } = useDrivers();
+  const {
+    drivers,
+    loading,
+    refreshDrivers,
+    dataSource,
+    timingInfo,
+    clearCache,
+  } = useDrivers();
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefresh = async (useCache: boolean = true) => {
+    setRefreshing(true);
+    try {
+      await refreshDrivers(!useCache); // if useCache is false, pass true to skipCache
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const hasExpiringDocuments = (driver: Driver) => {
     const thirtyDaysFromNow = new Date();
     thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
 
-    const checkExpiration = (docs: Document[]) => {
+    const checkExpiration = (docs: any[]) => {
       return docs.some((doc) => {
         const expirationDate = new Date(doc.expiration_date);
         return expirationDate <= thirtyDaysFromNow;
@@ -53,16 +64,66 @@ export function DriversHeader() {
   const activeDrivers = drivers.filter((d) => d.status === "Active");
   const expiringDocsCount = drivers.filter(hasExpiringDocuments).length;
 
+  const getDataSourceColor = () => {
+    if (dataSource === "Database")
+      return "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300";
+    if (dataSource === "Redis Cache")
+      return "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300";
+    if (dataSource === "Client Cache")
+      return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300";
+    return "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300";
+  };
+
   return (
     <>
       <div className="flex justify-between items-center mb-6">
         <div className="space-y-1">
           <h1 className="text-3xl font-bold tracking-tight">Drivers</h1>
-          <p className="text-muted-foreground">
-            Manage your drivers and their documents
-          </p>
+          <div className="flex items-center gap-2">
+            <p className="text-muted-foreground">
+              Manage your drivers and their documents
+            </p>
+            {!loading && (
+              <Badge
+                variant="outline"
+                className={`${getDataSourceColor()} flex items-center gap-1`}
+              >
+                <Database className="h-3 w-3" />
+                {dataSource}
+                {timingInfo && (
+                  <span className="ml-1 text-xs">
+                    ({(timingInfo.total / 1000).toFixed(2)}s)
+                  </span>
+                )}
+              </Badge>
+            )}
+          </div>
         </div>
-        <AddDriverDialog onDriverAdded={refreshDrivers} />
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handleRefresh(true)}
+            disabled={loading || refreshing}
+            className="flex items-center gap-1"
+          >
+            <RefreshCw
+              className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
+            />
+            Refresh
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => clearCache()}
+            disabled={loading || refreshing}
+            className="flex items-center gap-1 text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
+          >
+            <Trash className="h-4 w-4" />
+            Clear Cache
+          </Button>
+          <AddDriverDialog onDriverAdded={() => refreshDrivers(true)} />
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -74,7 +135,7 @@ export function DriversHeader() {
           <CardContent>
             <div className="flex items-center justify-between">
               <div className="text-2xl font-bold">
-                {loading ? (
+                {loading || refreshing ? (
                   <Loader2 className="h-6 w-6 animate-spin" />
                 ) : (
                   drivers.length
@@ -84,7 +145,7 @@ export function DriversHeader() {
                 <Users className="h-4 w-4" />
               </div>
             </div>
-            {!loading && drivers.length > 0 && (
+            {!loading && !refreshing && drivers.length > 0 && (
               <div className="absolute bottom-0 left-0 right-0 h-1 bg-primary/10">
                 <div
                   className="h-full bg-primary transition-all duration-500"
@@ -105,7 +166,7 @@ export function DriversHeader() {
           <CardContent>
             <div className="flex items-center justify-between">
               <div className="text-2xl font-bold">
-                {loading ? (
+                {loading || refreshing ? (
                   <Loader2 className="h-6 w-6 animate-spin" />
                 ) : (
                   activeDrivers.length
@@ -115,7 +176,7 @@ export function DriversHeader() {
                 <UserCheck className="h-4 w-4" />
               </div>
             </div>
-            {!loading && drivers.length > 0 && (
+            {!loading && !refreshing && drivers.length > 0 && (
               <div className="absolute bottom-0 left-0 right-0 h-1 bg-green-100 dark:bg-green-900">
                 <div
                   className="h-full bg-green-600 transition-all duration-500"
@@ -138,7 +199,7 @@ export function DriversHeader() {
           <CardContent>
             <div className="flex items-center justify-between">
               <div className="text-2xl font-bold text-yellow-600">
-                {loading ? (
+                {loading || refreshing ? (
                   <Loader2 className="h-6 w-6 animate-spin" />
                 ) : (
                   expiringDocsCount
@@ -148,7 +209,7 @@ export function DriversHeader() {
                 <AlertTriangle className="h-4 w-4" />
               </div>
             </div>
-            {!loading && drivers.length > 0 && (
+            {!loading && !refreshing && drivers.length > 0 && (
               <div className="absolute bottom-0 left-0 right-0 h-1 bg-yellow-100 dark:bg-yellow-900">
                 <div
                   className="h-full bg-yellow-600 transition-all duration-500"

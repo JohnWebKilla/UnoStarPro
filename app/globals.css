@@ -98,3 +98,16 @@
 .dark .animate-highlight {
   --highlight-color: 96, 165, 250;
 }
+
+/* Dialog backdrop blur */
+[data-dialog-backdrop] {
+  @apply backdrop-blur-xl bg-black/30;
+}
+
+/* Dialog backdrop styles */
+.DialogOverlay {
+  background-color: rgba(28, 33, 39, 0.8);
+  backdrop-filter: blur(8px);
+  position: fixed;
+  inset: 0;
+}

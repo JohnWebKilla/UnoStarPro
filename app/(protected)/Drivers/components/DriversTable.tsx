@@ -27,6 +27,7 @@ import {
   Pencil,
   Trash,
   Upload,
+  Phone,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EditDriverDialog } from "./EditDriverDialog";
@@ -54,10 +55,17 @@ import { useToast } from "@/components/ui/use-toast";
 
 interface Document {
   id: number;
+  driver_id: number;
   expiration_date: string;
   license_file_url?: string;
   file_link?: string;
   mvr_file_url?: string;
+  created_at: string;
+  updated_at: string;
+  status?: string;
+  file_name?: string;
+  file_url?: string;
+  url?: string;
 }
 
 interface Driver {
@@ -77,6 +85,7 @@ interface Driver {
   terminated_date: string | null;
   created_at: string;
   updated_at: string;
+  company_name?: string;
 }
 
 interface DocumentWithType extends Document {
@@ -90,7 +99,6 @@ export function DriversTable() {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [editingDriver, setEditingDriver] = useState<Driver | null>(null);
-  const [deletingDriver, setDeletingDriver] = useState<Driver | null>(null);
   const [viewingDocuments, setViewingDocuments] = useState<Driver | null>(null);
   const [uploadingDocument, setUploadingDocument] = useState<{
     driver: Driver;
@@ -198,7 +206,7 @@ export function DriversTable() {
             <div className="text-destructive text-lg font-medium">
               Error: {error}
             </div>
-            <Button onClick={refreshDrivers} variant="outline">
+            <Button onClick={() => refreshDrivers()} variant="outline">
               Retry
             </Button>
           </div>
@@ -253,158 +261,106 @@ export function DriversTable() {
         </div>
       </CardHeader>
       <CardContent>
-        <ScrollArea className="h-[600px] pr-4">
+        <ScrollArea className="rounded-md border">
           <Table>
-            <TableHeader className="bg-muted/50 sticky top-0 z-10">
+            <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>
+                <TableHead>Company</TableHead>
+                <TableHead>Phone</TableHead>
                 <TableHead>Truck #</TableHead>
                 <TableHead>Type</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Documents</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead>Edit</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredDrivers.length === 0 ? (
+              {loading ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="h-32 text-center">
-                    <div className="flex flex-col items-center justify-center text-muted-foreground">
-                      <Search className="h-8 w-8 mb-3" />
-                      <p className="text-sm">
-                        {searchTerm
-                          ? `No drivers found matching "${searchTerm}"`
-                          : "No drivers available"}
-                      </p>
-                    </div>
+                  <TableCell colSpan={7} className="text-center py-8">
+                    Loading drivers...
+                  </TableCell>
+                </TableRow>
+              ) : filteredDrivers.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center py-8">
+                    No drivers found.
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredDrivers.map((driver) => (
-                  <TableRow
-                    key={driver.id}
-                    className={cn(
-                      "group transition-colors hover:bg-muted/50",
-                      driver.status !== "Active" && "opacity-75"
-                    )}
-                  >
-                    <TableCell>
-                      <div>
-                        <div className="font-medium">{driver.name}</div>
-                        <div className="text-sm text-muted-foreground">
+                filteredDrivers.map((driver) => {
+                  const expiringDocs = getExpiringDocuments(driver);
+                  return (
+                    <TableRow key={driver.id}>
+                      <TableCell>{driver.name}</TableCell>
+                      <TableCell>{driver.company_name}</TableCell>
+                      <TableCell>
+                        <a
+                          href={`tel:${driver.phone_number}`}
+                          className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
+                        >
+                          <Phone className="h-3.5 w-3.5" />
                           {driver.phone_number}
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>{driver.truck_number}</TableCell>
-                    <TableCell>
-                      {driver.solo_or_team.charAt(0).toUpperCase() +
-                        driver.solo_or_team.slice(1)}
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant={
-                          driver.status === "Active" ? "success" : "secondary"
-                        }
-                        className="transition-colors"
-                      >
-                        {driver.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
+                        </a>
+                      </TableCell>
+                      <TableCell>{driver.truck_number}</TableCell>
+                      <TableCell className="capitalize">
+                        {driver.solo_or_team}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={
+                            driver.status === "Active" ? "default" : "secondary"
+                          }
+                        >
+                          {driver.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
                         <Button
                           variant="ghost"
-                          size="icon"
-                          className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                          size="sm"
+                          className="flex items-center gap-2"
                           onClick={() => setViewingDocuments(driver)}
                         >
                           <FileText className="h-4 w-4" />
+                          View
+                          {expiringDocs.length > 0 && (
+                            <Badge variant="destructive" className="ml-2">
+                              {expiringDocs.length}
+                            </Badge>
+                          )}
                         </Button>
-                        {getExpiringDocuments(driver).length > 0 && (
-                          <div className="flex items-center gap-1.5">
-                            <div className="text-yellow-600 animate-pulse">
-                              <AlertTriangle className="h-4 w-4" />
-                            </div>
-                            <span className="text-xs text-yellow-600 font-medium">
-                              {getExpiringDocuments(driver).length} expiring
-                              soon
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon">
-                              <MoreVertical className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              onClick={() => setEditingDriver(driver as Driver)}
-                            >
-                              <Pencil className="mr-2 h-4 w-4" />
-                              <span>Edit Driver</span>
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() =>
-                                setDeletingDriver(driver as Driver)
-                              }
-                              className="text-destructive"
-                            >
-                              <Trash className="mr-2 h-4 w-4" />
-                              <span>Delete Driver</span>
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() =>
-                                setViewingDocuments(driver as Driver)
-                              }
-                            >
-                              <FileText className="mr-2 h-4 w-4" />
-                              <span>View Documents</span>
-                              {getExpiringDocuments(driver).length > 0 && (
-                                <Badge variant="warning" className="ml-2">
-                                  {getExpiringDocuments(driver).length}
-                                </Badge>
-                              )}
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setEditingDriver(driver)}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
               )}
             </TableBody>
           </Table>
         </ScrollArea>
       </CardContent>
+
+      {/* Dialogs */}
       {editingDriver && (
         <EditDriverDialog
           driver={editingDriver}
-          onDriverUpdated={async () => {
-            setEditingDriver(null);
-            await refreshDrivers();
-          }}
-          open={true}
-          onOpenChange={(open: boolean) => !open && setEditingDriver(null)}
+          open={!!editingDriver}
+          onOpenChange={(open) => !open && setEditingDriver(null)}
+          onDriverUpdated={refreshDrivers}
         />
       )}
-      {deletingDriver && (
-        <DeleteDriverDialog
-          driverId={deletingDriver.id}
-          driverName={deletingDriver.name}
-          onDriverDeleted={async () => {
-            setDeletingDriver(null);
-            await refreshDrivers();
-          }}
-          open={true}
-          onOpenChange={(open: boolean) => !open && setDeletingDriver(null)}
-        />
-      )}
+
       {viewingDocuments && (
         <Dialog
           key={`view-dialog-${dialogKey}`}

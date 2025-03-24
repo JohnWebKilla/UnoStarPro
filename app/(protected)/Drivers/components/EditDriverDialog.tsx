@@ -1,4 +1,6 @@
-import { useState, useEffect } from "react";
+"use client";
+
+import React, { useState, useEffect, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -9,6 +11,8 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  DialogClose,
+  DialogOverlay,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,12 +31,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Pencil, FileText, Loader2, Upload, Eye, Trash2 } from "lucide-react";
+import { Pencil } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Calendar } from "@/components/ui/calendar";
 import { CalendarIcon } from "lucide-react";
-import { Label } from "@/components/ui/label";
 import {
   Popover,
   PopoverContent,
@@ -40,11 +42,10 @@ import {
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
-import { FileIcon } from "lucide-react";
+import { Driver } from "../types";
+import { useDrivers } from "./DriversProvider";
+import { clearDriverCaches } from "../actions";
 
-// Matches the schema in AddDriverDialog
 const driverFormSchema = z.object({
   name: z
     .string()
@@ -72,31 +73,9 @@ const driverFormSchema = z.object({
   hire_date: z.date({
     required_error: "Hire date is required",
   }),
-  // Document related fields - not required by default
-  license_number: z.string().optional(),
-  license_state: z.string().optional(),
-  license_expiration: z.date().optional(),
-  mvr_expiration: z.date().optional(),
-  medical_card_expiration: z.date().optional(),
 });
 
 type DriverFormValues = z.infer<typeof driverFormSchema>;
-
-interface Driver {
-  id: number;
-  name: string;
-  phone_number: string;
-  truck_number: string;
-  solo_or_team: string;
-  company_id: number;
-  subscription_amount: number;
-  status: string;
-  hire_date: string;
-  terminated_date: string | null;
-  created_at: string;
-  updated_at: string;
-  stripe_product_id: string | null;
-}
 
 interface EditDriverDialogProps {
   driver: Driver;
@@ -104,69 +83,6 @@ interface EditDriverDialogProps {
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }
-
-// Add a component for displaying existing documents
-const ExistingDocuments = ({
-  documents,
-  type,
-  onDelete,
-  onView,
-}: {
-  documents: Array<{
-    id: number;
-    url: string;
-    name: string;
-    expiration_date: string;
-  }>;
-  type: string;
-  onDelete: (type: string, id: number) => Promise<void>;
-  onView: (url: string) => void;
-}) => {
-  if (documents.length === 0) {
-    return (
-      <div className="text-sm text-muted-foreground mt-2">
-        No documents uploaded yet
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-2 mt-4 border-t pt-4">
-      <Label className="font-medium">Existing Documents</Label>
-      <div className="space-y-2">
-        {documents.map((doc) => (
-          <div
-            key={doc.id}
-            className="flex items-center justify-between p-2 bg-muted/50 rounded-md"
-          >
-            <div className="flex flex-col">
-              <span className="font-medium text-sm">{doc.name}</span>
-              <span className="text-xs text-muted-foreground">
-                Expires: {new Date(doc.expiration_date).toLocaleDateString()}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => onView(doc.url)}
-              >
-                <Eye className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => onDelete(type, doc.id)}
-              >
-                <Trash2 className="h-4 w-4 text-destructive" />
-              </Button>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
 
 export function EditDriverDialog({
   driver,
@@ -176,90 +92,19 @@ export function EditDriverDialog({
 }: EditDriverDialogProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen ?? internalOpen;
-  const onOpenChange = controlledOnOpenChange ?? setInternalOpen;
   const [isLoading, setIsLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState("details");
-  const [companies, setCompanies] = useState<
-    Array<{ id: number; name: string }>
-  >([]);
+  const { companies, refreshDrivers } = useDrivers();
   const { toast } = useToast();
-  const [fileUploads, setFileUploads] = useState({
-    license: null as File | null,
-    medical_card: null as File | null,
-    mvr: null as File | null,
-  });
-  const [uploadingType, setUploadingType] = useState<string | null>(null);
-  const [uploadSuccess, setUploadSuccess] = useState<Record<string, boolean>>(
-    {}
-  );
-  const [existingDocuments, setExistingDocuments] = useState<{
-    driver_licenses: any[];
-    medical_cards: any[];
-    mvr_files: any[];
-  }>({
-    driver_licenses: [],
-    medical_cards: [],
-    mvr_files: [],
-  });
-  const [uploadProgress, setUploadProgress] = useState({
-    license: 0,
-    medical: 0,
-    mvr: 0,
-  });
-
-  // Fetch companies on dialog open
-  useEffect(() => {
-    const fetchCompanies = async () => {
-      setIsLoading(true);
-      try {
-        // Fetch companies via API
-        const response = await fetch("/api/companies");
-
-        if (!response.ok) {
-          throw new Error("Failed to fetch companies");
-        }
-
-        const data = await response.json();
-        setCompanies(data || []);
-      } catch (error) {
-        console.error("Error fetching companies:", error);
-        toast({
-          variant: "destructive",
-          title: "Error",
-          description: "Failed to load companies",
-        });
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    if (open) {
-      fetchCompanies();
-    }
-  }, [open, toast]);
-
-  // Add initial loading of any existing documents
-  useEffect(() => {
-    if (open) {
-      // Reset upload success state when dialog opens
-      setUploadSuccess({});
-      // Reset file uploads when dialog opens
-      setFileUploads({
-        license: null,
-        medical_card: null,
-        mvr: null,
-      });
-      // Fetch existing documents
-      fetchDriverDocuments();
-    }
-  }, [open, driver.id]);
+  const [showCalendar, setShowCalendar] = useState(false);
 
   // Format hire_date from ISO string to Date object
-  const hireDate = driver.hire_date ? new Date(driver.hire_date) : new Date();
+  const hireDate = useMemo(
+    () => (driver.hire_date ? new Date(driver.hire_date) : new Date()),
+    [driver.hire_date]
+  );
 
-  const form = useForm<DriverFormValues>({
-    resolver: zodResolver(driverFormSchema),
-    defaultValues: {
+  const defaultValues = useMemo(
+    () => ({
       name: driver.name,
       phone_number: driver.phone_number,
       truck_number: driver.truck_number,
@@ -268,16 +113,56 @@ export function EditDriverDialog({
       subscription_amount: driver.subscription_amount,
       company_id: driver.company_id,
       hire_date: hireDate,
-      license_number: "",
-      license_state: "",
-    },
+    }),
+    [driver, hireDate]
+  );
+
+  const form = useForm<DriverFormValues>({
+    resolver: zodResolver(driverFormSchema),
+    defaultValues,
   });
 
-  // Handle form submission
+  // Reset form when dialog opens
+  useEffect(() => {
+    if (open) {
+      form.reset(defaultValues);
+    }
+  }, [open, defaultValues, form]);
+
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && open) {
+        handleOpenChange(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [open]);
+
+  const handleOpenChange = (newOpen: boolean) => {
+    if (!newOpen) {
+      setShowCalendar(false);
+      setIsLoading(false);
+      if (controlledOnOpenChange) {
+        controlledOnOpenChange(false);
+      } else {
+        setInternalOpen(false);
+      }
+    } else {
+      if (controlledOnOpenChange) {
+        controlledOnOpenChange(true);
+      } else {
+        setInternalOpen(true);
+      }
+    }
+  };
+
   const onSubmit = async (data: DriverFormValues) => {
+    if (isLoading) return;
+
     setIsLoading(true);
     try {
-      // Prepare the driver data for update
       const driverData = {
         name: data.name.trim(),
         phone_number: data.phone_number.trim(),
@@ -289,9 +174,6 @@ export function EditDriverDialog({
         hire_date: data.hire_date.toISOString(),
       };
 
-      console.log("Updating driver with data:", driverData);
-
-      // Use the API endpoint to update the driver
       const response = await fetch(`/api/drivers/${driver.id}`, {
         method: "PATCH",
         headers: {
@@ -303,634 +185,401 @@ export function EditDriverDialog({
       const result = await response.json();
 
       if (!response.ok) {
-        console.error("Error updating driver:", result.error);
-        toast({
-          variant: "destructive",
-          title: "Error updating driver",
-          description: result.error || "Failed to update driver",
-        });
-        return;
+        throw new Error(result.error || "Failed to update driver");
       }
 
-      // Update success
+      // Clear both client and server caches
+      await clearDriverCaches();
+
+      // Refresh the drivers list with fresh data
+      await refreshDrivers(true);
+
       toast({
         title: "Success",
         description: "Driver updated successfully",
       });
 
-      setInternalOpen(false);
-      await onDriverUpdated();
-    } catch (err) {
-      console.error("Error:", err);
+      handleOpenChange(false);
+    } catch (error) {
+      console.error("Error:", error);
       toast({
         variant: "destructive",
         title: "Error",
-        description: "An unexpected error occurred",
+        description:
+          error instanceof Error
+            ? error.message
+            : "An unexpected error occurred",
       });
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Update the fetchDriverDocuments function with better error handling
-  const fetchDriverDocuments = async () => {
-    try {
-      // Use the existing driver API that already fetches the documents
-      const response = await fetch(`/api/drivers/${driver.id}`);
-
-      let errorMessage = "Failed to fetch driver documents";
-
-      if (!response.ok) {
-        try {
-          const errorData = await response.json();
-          errorMessage = errorData.error || errorMessage;
-        } catch (e) {
-          // Keep default error message if JSON parsing fails
-        }
-        throw new Error(errorMessage);
-      }
-
-      const driverData = await response.json();
-
-      // Format the data to match our expected structure
-      setExistingDocuments({
-        driver_licenses: driverData.driver_licenses || [],
-        medical_cards: driverData.medical_cards || [],
-        mvr_files: driverData.mvr_records || [],
-      });
-    } catch (error) {
-      console.error("Error fetching driver documents:", error);
-      toast({
-        title: "Error",
-        description:
-          error instanceof Error
-            ? error.message
-            : "Failed to fetch driver documents",
-        variant: "destructive",
-      });
-    }
-  };
-
-  // Add a function to handle document deletion
-  const handleDeleteDocument = async (type: string, id: number) => {
-    if (!confirm("Are you sure you want to delete this document?")) {
-      return;
-    }
-
-    try {
-      const response = await fetch(`/api/documents/delete`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          type,
-          id,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to delete document");
-      }
-
-      toast({
-        title: "Document deleted",
-        description: "The document has been deleted successfully",
-      });
-
-      // Refresh driver data and documents
-      await onDriverUpdated();
-      fetchDriverDocuments();
-    } catch (error) {
-      console.error("Error deleting document:", error);
-      toast({
-        variant: "destructive",
-        title: "Error",
-        description: "Failed to delete document",
-      });
-    }
-  };
-
-  // Add handleFileUpload function
-  const handleFileUpload = async (
-    e: React.ChangeEvent<HTMLInputElement>,
-    docType: "license" | "medical" | "mvr"
-  ) => {
-    const file = e.target.files?.[0];
-    if (!file || !driver.id) return;
-
-    // Update the progress state for the specific document type
-    setUploadProgress((prev) => ({ ...prev, [docType]: 1 }));
-
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("driver_id", driver.id.toString());
-      formData.append("type", docType);
-
-      const response = await fetch("/api/documents/upload", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to upload document");
-      }
-
-      // Set progress to 100% on success
-      setUploadProgress((prev) => ({ ...prev, [docType]: 100 }));
-
-      // Fetch updated documents
-      fetchDriverDocuments();
-
-      // Reset progress after a delay
-      setTimeout(() => {
-        setUploadProgress((prev) => ({ ...prev, [docType]: 0 }));
-      }, 2000);
-
-      toast({
-        title: "Success",
-        description: `${docType} document uploaded successfully`,
-      });
-
-      // Update driver data
-      if (onDriverUpdated) {
-        setTimeout(() => {
-          onDriverUpdated();
-        }, 500);
-      }
-    } catch (error) {
-      console.error(`Error uploading ${docType} document:`, error);
-      setUploadProgress((prev) => ({ ...prev, [docType]: 0 }));
-      toast({
-        title: "Error",
-        description: `Failed to upload ${docType} document`,
-        variant: "destructive",
-      });
-    }
-  };
-
-  // Add fetchDriverDocuments to useEffect
-  useEffect(() => {
-    if (driver && driver.id) {
-      fetchDriverDocuments();
-    }
-  }, [driver]);
-
-  // Add viewDocument function inside the component
-  const viewDocument = (url: string) => {
-    if (!url) {
-      toast({
-        title: "Error",
-        description: "Document URL not available",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    window.open(url, "_blank");
-  };
-
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      {!controlledOpen && (
-        <DialogTrigger asChild>
-          <Button variant="ghost" size="sm">
-            <Pencil className="h-4 w-4" />
-          </Button>
-        </DialogTrigger>
-      )}
-      <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+    <Dialog open={open} onOpenChange={handleOpenChange} modal={true}>
+      <DialogContent
+        className="
+        fixed
+        left-[50%]
+        top-[50%]
+        translate-x-[-50%]
+        translate-y-[-50%]
+        sm:max-w-[700px] 
+        max-h-[90vh] 
+        w-[95vw]
+        overflow-y-auto 
+        bg-white
+        shadow-lg
+        transition-all 
+        duration-200 
+        data-[state=open]:animate-in 
+        data-[state=closed]:animate-out 
+        data-[state=closed]:fade-out-0 
+        data-[state=open]:fade-in-0 
+        data-[state=closed]:zoom-out-95 
+        data-[state=open]:zoom-in-95
+        border-0
+        rounded-lg
+      "
+      >
+        {isLoading && (
+          <div className="absolute inset-0 z-50 bg-black/10 backdrop-blur-[2px] flex items-center justify-center">
+            <div className="bg-white/80 backdrop-blur-xl rounded-lg p-4 shadow-lg flex flex-col items-center gap-3">
+              <svg
+                className="animate-spin h-6 w-6 text-blue-500"
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                ></circle>
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                ></path>
+              </svg>
+              <span className="text-sm font-medium text-gray-900">
+                Updating driver...
+              </span>
+            </div>
+          </div>
+        )}
         <DialogHeader>
           <DialogTitle>Edit Driver: {driver.name}</DialogTitle>
         </DialogHeader>
 
-        <Tabs
-          defaultValue="details"
-          value={activeTab}
-          onValueChange={setActiveTab}
-        >
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="details">Driver Details</TabsTrigger>
-            <TabsTrigger value="documents">Documents</TabsTrigger>
-          </TabsList>
-
-          <Form {...form}>
-            <form
-              onSubmit={form.handleSubmit(onSubmit)}
-              className="space-y-4 py-4"
-            >
-              <TabsContent value="details" className="space-y-4">
-                <FormField
-                  control={form.control}
-                  name="name"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Full name</FormLabel>
-                      <FormControl>
-                        <Input placeholder="John Doe" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="phone_number"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Phone</FormLabel>
-                      <FormControl>
-                        <Input placeholder="(xxx)-xxx-xxxx" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="solo_or_team"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Solo / Team</FormLabel>
-                      <Select
-                        onValueChange={field.onChange}
-                        defaultValue={field.value}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select type" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="solo">SOLO</SelectItem>
-                          <SelectItem value="team">TEAM</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="truck_number"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Truck #</FormLabel>
-                      <FormControl>
-                        <Input placeholder="101" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="subscription_amount"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>PPD (weekly)</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          placeholder="250"
-                          onChange={(e) => {
-                            const value =
-                              e.target.value === ""
-                                ? 0
-                                : parseFloat(e.target.value);
-                            field.onChange(!isNaN(value) ? value : 0);
-                          }}
-                          value={field.value || ""}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                      <p className="text-sm text-muted-foreground">
-                        Weekly subscription amount per driver
-                      </p>
-                    </FormItem>
-                  )}
-                />
-
-                <div className="grid grid-cols-2 gap-4">
-                  <FormField
-                    control={form.control}
-                    name="status"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Status</FormLabel>
-                        <Select
-                          onValueChange={field.onChange}
-                          defaultValue={field.value}
-                        >
-                          <FormControl>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select status" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            <SelectItem value="active">Active</SelectItem>
-                            <SelectItem value="inactive">Inactive</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name="hire_date"
-                    render={({ field }) => (
-                      <FormItem className="flex flex-col">
-                        <FormLabel>Hire Date</FormLabel>
-                        <Popover>
-                          <PopoverTrigger asChild>
-                            <FormControl>
-                              <Button
-                                variant={"outline"}
-                                className={cn(
-                                  "w-full pl-3 text-left font-normal",
-                                  !field.value && "text-muted-foreground"
-                                )}
-                              >
-                                {field.value ? (
-                                  format(field.value, "MM/dd/yyyy")
-                                ) : (
-                                  <span>Pick a date</span>
-                                )}
-                                <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                              </Button>
-                            </FormControl>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-auto p-0" align="start">
-                            <Calendar
-                              mode="single"
-                              selected={field.value}
-                              onSelect={field.onChange}
-                              initialFocus
-                            />
-                          </PopoverContent>
-                        </Popover>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
-
-                <FormField
-                  control={form.control}
-                  name="company_id"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Company</FormLabel>
-                      <Select
-                        onValueChange={(value) =>
-                          field.onChange(parseInt(value, 10))
-                        }
-                        value={field.value?.toString()}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select company" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {companies.map((company) => (
-                            <SelectItem
-                              key={company.id}
-                              value={company.id.toString()}
-                            >
-                              {company.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </TabsContent>
-
-              <TabsContent value="documents" className="space-y-6">
-                {/* Add Tabs Component for Documents */}
-                <Tabs defaultValue="license" className="mt-6">
-                  <TabsList className="grid w-full grid-cols-3">
-                    <TabsTrigger value="license">License</TabsTrigger>
-                    <TabsTrigger value="medical">Medical Card</TabsTrigger>
-                    <TabsTrigger value="mvr">MVR</TabsTrigger>
-                  </TabsList>
-
-                  <TabsContent value="license" className="space-y-4 mt-4">
-                    {/* Display existing license documents */}
-                    {existingDocuments.driver_licenses &&
-                      existingDocuments.driver_licenses.length > 0 && (
-                        <div className="space-y-2 mb-4">
-                          <h3 className="text-sm font-medium">
-                            Existing License Documents
-                          </h3>
-                          <div className="space-y-2">
-                            {existingDocuments.driver_licenses.map(
-                              (doc, index) => (
-                                <div
-                                  key={`license-${doc.id || index}`}
-                                  className="flex items-center justify-between p-2 border rounded-md bg-muted/20"
-                                >
-                                  <div className="flex items-center space-x-2">
-                                    <FileIcon className="h-4 w-4" />
-                                    <span className="text-sm">
-                                      {doc.file_name || "License Document"}
-                                    </span>
-                                  </div>
-                                  <div className="flex items-center space-x-2">
-                                    <Badge variant="outline">
-                                      {doc.status || "Uploaded"}
-                                    </Badge>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() =>
-                                        viewDocument(doc.url || doc.file_url)
-                                      }
-                                    >
-                                      View
-                                    </Button>
-                                  </div>
-                                </div>
-                              )
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                    <div className="space-y-2">
-                      <Label htmlFor="licenseFile">Upload New License</Label>
-                      <Input
-                        id="licenseFile"
-                        type="file"
-                        accept=".pdf,.jpg,.jpeg,.png"
-                        onChange={(e) => handleFileUpload(e, "license")}
-                      />
-                    </div>
-                    {uploadProgress.license > 0 &&
-                      uploadProgress.license < 100 && (
-                        <Progress
-                          value={uploadProgress.license}
-                          className="h-2"
-                        />
-                      )}
-                  </TabsContent>
-
-                  <TabsContent value="medical" className="space-y-4 mt-4">
-                    {/* Display existing medical card documents */}
-                    {existingDocuments.medical_cards &&
-                      existingDocuments.medical_cards.length > 0 && (
-                        <div className="space-y-2 mb-4">
-                          <h3 className="text-sm font-medium">
-                            Existing Medical Card Documents
-                          </h3>
-                          <div className="space-y-2">
-                            {existingDocuments.medical_cards.map(
-                              (doc, index) => (
-                                <div
-                                  key={`medical-${doc.id || index}`}
-                                  className="flex items-center justify-between p-2 border rounded-md bg-muted/20"
-                                >
-                                  <div className="flex items-center space-x-2">
-                                    <FileIcon className="h-4 w-4" />
-                                    <span className="text-sm">
-                                      {doc.file_name || "Medical Card Document"}
-                                    </span>
-                                  </div>
-                                  <div className="flex items-center space-x-2">
-                                    <Badge variant="outline">
-                                      {doc.status || "Uploaded"}
-                                    </Badge>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() =>
-                                        viewDocument(doc.url || doc.file_url)
-                                      }
-                                    >
-                                      View
-                                    </Button>
-                                  </div>
-                                </div>
-                              )
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                    <div className="space-y-2">
-                      <Label htmlFor="medicalFile">
-                        Upload New Medical Card
-                      </Label>
-                      <Input
-                        id="medicalFile"
-                        type="file"
-                        accept=".pdf,.jpg,.jpeg,.png"
-                        onChange={(e) => handleFileUpload(e, "medical")}
-                      />
-                    </div>
-                    {uploadProgress.medical > 0 &&
-                      uploadProgress.medical < 100 && (
-                        <Progress
-                          value={uploadProgress.medical}
-                          className="h-2"
-                        />
-                      )}
-                  </TabsContent>
-
-                  <TabsContent value="mvr" className="space-y-4 mt-4">
-                    {/* Display existing MVR documents */}
-                    {existingDocuments.mvr_files &&
-                      existingDocuments.mvr_files.length > 0 && (
-                        <div className="space-y-2 mb-4">
-                          <h3 className="text-sm font-medium">
-                            Existing MVR Documents
-                          </h3>
-                          <div className="space-y-2">
-                            {existingDocuments.mvr_files.map((doc, index) => (
-                              <div
-                                key={`mvr-${doc.id || index}`}
-                                className="flex items-center justify-between p-2 border rounded-md bg-muted/20"
-                              >
-                                <div className="flex items-center space-x-2">
-                                  <FileIcon className="h-4 w-4" />
-                                  <span className="text-sm">
-                                    {doc.file_name || "MVR Document"}
-                                  </span>
-                                </div>
-                                <div className="flex items-center space-x-2">
-                                  <Badge variant="outline">
-                                    {doc.status || "Uploaded"}
-                                  </Badge>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() =>
-                                      viewDocument(doc.url || doc.file_url)
-                                    }
-                                  >
-                                    View
-                                  </Button>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                    <div className="space-y-2">
-                      <Label htmlFor="mvrFile">Upload New MVR</Label>
-                      <Input
-                        id="mvrFile"
-                        type="file"
-                        accept=".pdf,.jpg,.jpeg,.png"
-                        onChange={(e) => handleFileUpload(e, "mvr")}
-                      />
-                    </div>
-                    {uploadProgress.mvr > 0 && uploadProgress.mvr < 100 && (
-                      <Progress value={uploadProgress.mvr} className="h-2" />
-                    )}
-                  </TabsContent>
-                </Tabs>
-              </TabsContent>
-
-              <DialogFooter className="pt-6">
-                {activeTab === "details" ? (
-                  <Button
-                    type="button"
-                    onClick={() => setActiveTab("documents")}
-                  >
-                    Next: Documents
-                  </Button>
-                ) : (
-                  <div className="flex w-full justify-between">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => setActiveTab("details")}
+        <Form {...form}>
+          <form
+            onSubmit={form.handleSubmit(onSubmit)}
+            className="space-y-6 py-6"
+          >
+            <div className="grid grid-cols-2 gap-6">
+              <FormField
+                control={form.control}
+                name="company_id"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Company</FormLabel>
+                    <Select
+                      onValueChange={(value) =>
+                        field.onChange(parseInt(value, 10))
+                      }
+                      value={field.value?.toString()}
+                      disabled={isLoading}
                     >
-                      Back to Details
-                    </Button>
-                    <Button type="submit" disabled={isLoading}>
-                      {isLoading ? "Updating..." : "Update Driver"}
-                    </Button>
+                      <FormControl>
+                        <SelectTrigger
+                          className="
+                          transition-colors
+                          hover:bg-gray-50
+                        "
+                        >
+                          <SelectValue placeholder="Select company" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {companies.map((company) => (
+                          <SelectItem
+                            key={company.id}
+                            value={company.id.toString()}
+                          >
+                            {company.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Full name</FormLabel>
+                    <FormControl>
+                      <Input
+                        className="
+                          transition-colors
+                          focus:ring-2 
+                          focus:ring-offset-2 
+                          focus:ring-blue-500
+                          hover:bg-gray-50
+                        "
+                        placeholder="John Doe"
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="phone_number"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Phone</FormLabel>
+                    <FormControl>
+                      <Input
+                        className="
+                          transition-colors
+                          focus:ring-2 
+                          focus:ring-offset-2 
+                          focus:ring-blue-500
+                          hover:bg-gray-50
+                        "
+                        placeholder="(xxx)-xxx-xxxx"
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="solo_or_team"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Solo / Team</FormLabel>
+                    <Select
+                      onValueChange={field.onChange}
+                      defaultValue={field.value}
+                    >
+                      <FormControl>
+                        <SelectTrigger
+                          className="
+                          transition-colors
+                          hover:bg-gray-50
+                        "
+                        >
+                          <SelectValue placeholder="Select type" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="solo">SOLO</SelectItem>
+                        <SelectItem value="team">TEAM</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="truck_number"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Truck #</FormLabel>
+                    <FormControl>
+                      <Input
+                        className="
+                          transition-colors
+                          focus:ring-2 
+                          focus:ring-offset-2 
+                          focus:ring-blue-500
+                          hover:bg-gray-50
+                        "
+                        placeholder="101"
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="subscription_amount"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>PPD (weekly)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        placeholder="250"
+                        onChange={(e) => {
+                          const value =
+                            e.target.value === ""
+                              ? 0
+                              : parseFloat(e.target.value);
+                          field.onChange(!isNaN(value) ? value : 0);
+                        }}
+                        value={field.value || ""}
+                        className="
+                          transition-colors
+                          focus:ring-2 
+                          focus:ring-offset-2 
+                          focus:ring-blue-500
+                          hover:bg-gray-50
+                        "
+                      />
+                    </FormControl>
+                    <FormMessage />
+                    <p className="text-sm text-gray-400">
+                      Weekly subscription amount per driver
+                    </p>
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="status"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Status</FormLabel>
+                    <Select
+                      onValueChange={field.onChange}
+                      defaultValue={field.value}
+                    >
+                      <FormControl>
+                        <SelectTrigger
+                          className="
+                          transition-colors
+                          hover:bg-gray-50
+                        "
+                        >
+                          <SelectValue placeholder="Select status" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="active">Active</SelectItem>
+                        <SelectItem value="inactive">Inactive</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="hire_date"
+                render={({ field }) => (
+                  <FormItem className="flex flex-col">
+                    <FormLabel>Hire Date</FormLabel>
+                    <div className="relative">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className={cn(
+                          "w-full pl-3 text-left font-normal",
+                          !field.value && "text-gray-500"
+                        )}
+                        onClick={() => setShowCalendar(!showCalendar)}
+                      >
+                        {field.value ? (
+                          format(field.value, "MM/dd/yyyy")
+                        ) : (
+                          <span>Pick a date</span>
+                        )}
+                        <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                      </Button>
+                      {showCalendar && (
+                        <div className="absolute bottom-[100%] z-50 mb-2 rounded-md border-0 bg-white p-0 text-black shadow-md outline-none">
+                          <Calendar
+                            mode="single"
+                            selected={field.value}
+                            onSelect={(date) => {
+                              field.onChange(date);
+                              setShowCalendar(false);
+                            }}
+                            disabled={isLoading}
+                            initialFocus={false}
+                            className="bg-white text-black"
+                          />
+                        </div>
+                      )}
+                    </div>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            <DialogFooter className="pt-6 gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => handleOpenChange(false)}
+                disabled={isLoading}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={isLoading}
+                className={cn(
+                  "min-w-[120px] relative",
+                  isLoading && "text-transparent hover:text-transparent"
+                )}
+              >
+                Update Driver
+                {isLoading && (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <svg
+                      className="animate-spin h-5 w-5 text-white"
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      ></circle>
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      ></path>
+                    </svg>
                   </div>
                 )}
-              </DialogFooter>
-            </form>
-          </Form>
-        </Tabs>
+              </Button>
+            </DialogFooter>
+          </form>
+        </Form>
       </DialogContent>
     </Dialog>
   );

@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
-import { SupabaseClient } from "@supabase/supabase-js";
-import { Session } from "@supabase/supabase-js";
-import { Database } from "@/types/supabase";
+import {
+  clearDriverCache,
+  clearDriverListCache,
+} from "@/app/(protected)/Drivers/cache";
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: { id: string } }
 ) {
-  const id = params.id;
-
   try {
     const supabase = await createClient();
 
@@ -26,28 +25,46 @@ export async function GET(
       );
     }
 
-    // Fetch the driver with associated documents
+    // Properly await the params object
+    const id = context.params.id;
+
+    // Fetch the driver with associated documents and company information
     const { data, error } = await supabase
       .from("drivers")
       .select(
         `
         *,
+        companies:company_id (
+          id,
+          name
+        ),
         driver_licenses(*),
         medical_cards(*),
-        mvr_records(*)
-        `
+        mvr_files(*)
+      `
       )
       .eq("id", id)
       .single();
 
     if (error) {
+      console.error("Error fetching driver:", error);
       return NextResponse.json(
-        { error: `Error fetching driver: ${error.message}` },
+        { error: "Failed to fetch driver" },
         { status: 500 }
       );
     }
 
-    return NextResponse.json(data);
+    if (!data) {
+      return NextResponse.json({ error: "Driver not found" }, { status: 404 });
+    }
+
+    // Transform the response to include company_name
+    const transformedData = {
+      ...data,
+      company_name: data.companies?.name || "N/A",
+    };
+
+    return NextResponse.json(transformedData);
   } catch (error) {
     console.error("Error in driver GET route:", error);
     return NextResponse.json(
@@ -59,10 +76,8 @@ export async function GET(
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: { id: string } }
 ) {
-  const id = params.id;
-
   try {
     const supabase = await createClient();
 
@@ -79,13 +94,26 @@ export async function PATCH(
       );
     }
 
+    // Properly await the params object
+    const id = context.params.id;
     const updateData = await request.json();
 
     const { data, error } = await supabase
       .from("drivers")
       .update(updateData)
       .eq("id", id)
-      .select()
+      .select(
+        `
+        *,
+        companies:company_id (
+          id,
+          name
+        ),
+        driver_licenses(*),
+        medical_cards(*),
+        mvr_files(*)
+      `
+      )
       .single();
 
     if (error) {
@@ -96,11 +124,21 @@ export async function PATCH(
       );
     }
 
-    return NextResponse.json(data);
+    // Clear both the specific driver's cache and the list cache
+    await clearDriverCache(parseInt(id));
+    await clearDriverListCache();
+
+    // Transform the response to include company_name
+    const transformedData = {
+      ...data,
+      company_name: data.companies?.name || "N/A",
+    };
+
+    return NextResponse.json(transformedData);
   } catch (error) {
-    console.error("Error in driver PATCH API:", error);
+    console.error("Error in driver PATCH route:", error);
     return NextResponse.json(
-      { error: "An unexpected error occurred" },
+      { error: "Internal server error" },
       { status: 500 }
     );
   }
@@ -108,10 +146,8 @@ export async function PATCH(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: { id: string } }
 ) {
-  const id = params.id;
-
   try {
     const supabase = await createClient();
 
@@ -127,6 +163,9 @@ export async function DELETE(
         { status: 401 }
       );
     }
+
+    // Properly await the params object
+    const id = context.params.id;
 
     // Delete the driver
     const { error } = await supabase.from("drivers").delete().eq("id", id);
@@ -139,11 +178,15 @@ export async function DELETE(
       );
     }
 
+    // Clear both the specific driver's cache and the list cache
+    await clearDriverCache(parseInt(id));
+    await clearDriverListCache();
+
     return NextResponse.json({ success: true, id });
   } catch (error) {
-    console.error("Error in driver DELETE API:", error);
+    console.error("Error in driver DELETE route:", error);
     return NextResponse.json(
-      { error: "An unexpected error occurred" },
+      { error: "Internal server error" },
       { status: 500 }
     );
   }
