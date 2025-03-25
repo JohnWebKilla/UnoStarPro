@@ -127,8 +127,18 @@ export function TopNav({ userRole, userName, userEmail }: TopNavProps) {
 
   const handleLogout = async () => {
     try {
-      await signOutAction();
-      router.replace("/sign-in");
+      const result = await signOutAction();
+
+      if (!result.success) {
+        console.error("Logout error:", result.error);
+        return;
+      }
+
+      // Clear local storage
+      localStorage.clear();
+
+      // Use window.location.href for a full page refresh
+      window.location.href = "/sign-in";
     } catch (error) {
       console.error("Logout error:", error);
     }

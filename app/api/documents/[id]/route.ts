@@ -1,15 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
-import { Session } from "@supabase/supabase-js";
-import { SupabaseClient } from "@supabase/supabase-js";
-import { Database } from "@/types/supabase";
+
+type Context = {
+  params: { id: string };
+};
 
 // Get details for a specific document
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
-  const id = params.id;
+export async function GET(request: NextRequest, { params }: Context) {
+  const { id } = params;
 
   // Get document type from query parameters
   const url = new URL(request.url);
@@ -81,11 +79,8 @@ export async function GET(
 }
 
 // Update a document
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
-  const id = params.id;
+export async function PATCH(request: NextRequest, { params }: Context) {
+  const { id } = params;
 
   // Get document type from query parameters
   const url = new URL(request.url);
@@ -157,11 +152,8 @@ export async function PATCH(
 }
 
 // Delete a document
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
-  const id = params.id;
+export async function DELETE(request: NextRequest, { params }: Context) {
+  const { id } = params;
 
   // Get document type from query parameters
   const url = new URL(request.url);

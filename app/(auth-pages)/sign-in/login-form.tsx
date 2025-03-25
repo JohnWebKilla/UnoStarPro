@@ -59,14 +59,17 @@ function SearchParamsMessage() {
 
 export default function LoginForm() {
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { setUserRole, setUserName, setUserEmail } = useUser();
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsLoading(true);
+    setLoadingMessage("Authenticating...");
     setError(null);
 
     const formData = new FormData(e.currentTarget);
@@ -90,12 +93,37 @@ export default function LoginForm() {
       // Store user data in localStorage
       localStorage.setItem("userData", JSON.stringify(result.userData));
 
+      setLoadingMessage("Preparing your workspace...");
+
       // Initialize cache manager and prefetch data before navigation
       const cacheManager = new ClientCacheManager(result.userData.role);
-      await cacheManager.prefetchAllData();
 
-      // Navigate to dashboard
-      router.replace(result.dashboardUrl);
+      // Start prefetching
+      const prefetchPromise = cacheManager.prefetchAllData();
+
+      // Poll for prefetch completion
+      const pollInterval = 500; // 500ms
+      const maxAttempts = 20; // 10 seconds total
+      let attempts = 0;
+
+      while (attempts < maxAttempts) {
+        const isComplete = await cacheManager.isPrefetchComplete();
+        if (isComplete) {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, pollInterval));
+        attempts++;
+      }
+
+      // Check if there's a redirect URL in the search params
+      const redirectTo = searchParams.get("redirectTo");
+
+      // Navigate to the redirect URL or dashboard
+      if (redirectTo && redirectTo.startsWith("/(protected)")) {
+        router.replace(redirectTo);
+      } else {
+        router.replace(result.dashboardUrl);
+      }
     } catch (error) {
       console.error("Login error:", error);
       setError("An unexpected error occurred");
@@ -104,7 +132,7 @@ export default function LoginForm() {
   };
 
   if (isLoading) {
-    return <InitialLoadingScreen />;
+    return <InitialLoadingScreen message={loadingMessage} />;
   }
 
   return (

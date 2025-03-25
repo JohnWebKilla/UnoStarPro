@@ -9,6 +9,7 @@ import { getDashboardForRole } from "@/utils/protected";
 import type { Role } from "@/types/role";
 import { ClientCacheManager } from "@/lib/client-cache-manager";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+import { revalidatePath } from "next/cache";
 
 export async function signUpAction(formData: FormData) {
   const supabase = await createClient();
@@ -264,37 +265,19 @@ export const resetPasswordAction = async (formData: FormData) => {
 };
 
 export async function signOutAction() {
-  const supabase = await createClient();
-
   try {
+    const supabase = await createClient();
+
     // Sign out from Supabase
     const { error } = await supabase.auth.signOut();
     if (error) {
-      console.error("Sign-out error:", error);
-      throw error;
+      return { success: false, error: error.message };
     }
 
-    // Clear all cached data
-    if (typeof window !== "undefined") {
-      // Clear localStorage
-      const keys = Object.keys(localStorage);
-      const cacheKeys = keys.filter(
-        (key) =>
-          key.startsWith("page_data:") ||
-          key === "userData" ||
-          key.includes("supabase") ||
-          key.includes("auth")
-      );
-      cacheKeys.forEach((key) => localStorage.removeItem(key));
-
-      // Clear sessionStorage
-      sessionStorage.clear();
-    }
-
-    // Redirect to sign-in page
-    return redirect("/sign-in");
+    // Return success response
+    return { success: true };
   } catch (error) {
     console.error("Sign-out error:", error);
-    throw error;
+    return { success: false, error: "Failed to sign out" };
   }
 }

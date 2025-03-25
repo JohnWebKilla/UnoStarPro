@@ -3,19 +3,13 @@
 import { createClient } from "@/utils/supabase/server";
 import { revalidatePath } from "next/cache";
 import { setCache, getCache } from "@/lib/redis";
+import { clearDriverCache, clearDriverListCache } from "./cache";
+import { Driver } from "./types";
 import {
   DRIVER_LIST_KEY,
   DRIVER_DETAIL_KEY,
   DRIVER_DOCUMENTS_KEY,
   CACHE_EXPIRATION,
-  clearDriverCache,
-  clearDriverListCache,
-} from "./cache";
-import { Driver, Document } from "./types";
-import {
-  DRIVER_LIST_KEY as DRIVER_LIST_KEY_CONST,
-  DRIVER_DETAIL_KEY as DRIVER_DETAIL_KEY_CONST,
-  DRIVER_DOCUMENTS_KEY as DRIVER_DOCUMENTS_KEY_CONST,
 } from "./constants";
 
 // Helper function for retrying database operations
@@ -48,7 +42,7 @@ export async function getDriversAction(): Promise<Driver[]> {
     const supabase = await createClient();
 
     // Try to get from cache first
-    const cachedDrivers = await getCache<Driver[]>(DRIVER_LIST_KEY_CONST);
+    const cachedDrivers = await getCache<Driver[]>(DRIVER_LIST_KEY);
 
     if (cachedDrivers) {
       console.log("Using cached drivers from Redis");
@@ -143,7 +137,7 @@ export async function getDriversAction(): Promise<Driver[]> {
     console.log(`Database query took ${queryEndTime - queryStartTime}ms`);
 
     // Cache the result
-    await setCache(DRIVER_LIST_KEY_CONST, driversWithDocs, CACHE_EXPIRATION);
+    await setCache(DRIVER_LIST_KEY, driversWithDocs, CACHE_EXPIRATION);
 
     const endTime = Date.now();
     console.log(`Drivers fetched and cached in ${endTime - startTime}ms`);
@@ -166,7 +160,7 @@ export async function getDriverAction(
     const supabase = await createClient();
 
     // Try to get from cache first
-    const cacheKey = DRIVER_DETAIL_KEY_CONST(driverId);
+    const cacheKey = DRIVER_DETAIL_KEY(driverId);
     const cachedDriver = await getCache<Driver>(cacheKey);
 
     if (cachedDriver) {

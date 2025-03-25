@@ -5,7 +5,7 @@ import { getCache, setCache } from "@/lib/redis";
 import {
   DRIVER_LIST_KEY,
   CACHE_EXPIRATION,
-} from "@/app/(protected)/Drivers/cache";
+} from "@/app/(protected)/Drivers/constants";
 
 export async function GET(request: NextRequest) {
   try {
