@@ -1,7 +1,5 @@
 "use client";
 
-import data from "@emoji-mart/data";
-import Picker from "@emoji-mart/react";
 import { Smile } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,8 +10,36 @@ import {
 } from "@/components/ui/dialog";
 import { useState } from "react";
 
+// Common emojis that are frequently used in chat/messaging
+const COMMON_EMOJIS = [
+  "👍",
+  "👎",
+  "😊",
+  "😂",
+  "🤔",
+  "👋",
+  "🎉",
+  "❤️",
+  "👀",
+  "🙌",
+  "🤝",
+  "👏",
+  "🔥",
+  "⭐",
+  "✅",
+  "❌",
+  "💡",
+  "💪",
+  "🎯",
+  "🚀",
+  "💯",
+  "🙏",
+  "👌",
+  "✨",
+];
+
 interface EmojiPickerProps {
-  onEmojiSelect: (emoji: any) => void;
+  onEmojiSelect: (emoji: string) => void;
 }
 
 export function EmojiPicker({ onEmojiSelect }: EmojiPickerProps) {
@@ -26,23 +52,22 @@ export function EmojiPicker({ onEmojiSelect }: EmojiPickerProps) {
           <Smile className="h-4 w-4" />
         </Button>
       </DialogTrigger>
-      <DialogContent className="p-0">
-        <DialogTitle className="sr-only">Pick an emoji</DialogTitle>
-        <div className="border-0">
-          <Picker
-            data={data}
-            onEmojiSelect={(emoji: any) => {
-              onEmojiSelect(emoji);
-              setOpen(false);
-            }}
-            theme="light"
-            previewPosition="none"
-            skinTonePosition="none"
-            searchPosition="none"
-            navPosition="none"
-            perLine={8}
-            maxFrequentRows={0}
-          />
+      <DialogContent className="p-4">
+        <DialogTitle className="mb-4">Pick an emoji</DialogTitle>
+        <div className="grid grid-cols-8 gap-2">
+          {COMMON_EMOJIS.map((emoji) => (
+            <Button
+              key={emoji}
+              variant="ghost"
+              className="h-8 w-8 p-0 hover:bg-muted"
+              onClick={() => {
+                onEmojiSelect(emoji);
+                setOpen(false);
+              }}
+            >
+              {emoji}
+            </Button>
+          ))}
         </div>
       </DialogContent>
     </Dialog>
