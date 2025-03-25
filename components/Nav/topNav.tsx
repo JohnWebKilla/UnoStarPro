@@ -110,8 +110,8 @@ const NAV_ITEMS: NavItem[] = [
 
 interface TopNavProps {
   userRole: Role | null;
-  userName: string;
-  userEmail: string;
+  userName: string | null;
+  userEmail: string | null;
 }
 
 export function TopNav({ userRole, userName, userEmail }: TopNavProps) {

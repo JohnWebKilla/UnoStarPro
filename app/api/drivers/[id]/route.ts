@@ -6,8 +6,8 @@ import {
 } from "@/app/(protected)/Drivers/cache";
 
 export async function GET(
-  request: NextRequest,
-  context: { params: { id: string } }
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const supabase = await createClient();
@@ -26,7 +26,7 @@ export async function GET(
     }
 
     // Properly await the params object
-    const id = context.params.id;
+    const { id } = await params;
 
     // Fetch the driver with associated documents and company information
     const { data, error } = await supabase
@@ -75,8 +75,8 @@ export async function GET(
 }
 
 export async function PATCH(
-  request: NextRequest,
-  context: { params: { id: string } }
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const supabase = await createClient();
@@ -95,7 +95,7 @@ export async function PATCH(
     }
 
     // Properly await the params object
-    const id = context.params.id;
+    const { id } = await params;
     const updateData = await request.json();
 
     const { data, error } = await supabase
@@ -145,8 +145,8 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  request: NextRequest,
-  context: { params: { id: string } }
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const supabase = await createClient();
@@ -165,7 +165,7 @@ export async function DELETE(
     }
 
     // Properly await the params object
-    const id = context.params.id;
+    const { id } = await params;
 
     // Delete the driver
     const { error } = await supabase.from("drivers").delete().eq("id", id);

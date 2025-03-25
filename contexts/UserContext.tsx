@@ -14,6 +14,8 @@ interface UserContextType {
   userRole: Role | null;
   userName: string | null;
   userEmail: string | null;
+  isLoading: boolean;
+  isHydrated: boolean;
   setUserRole: (role: Role | null) => void;
   setUserName: (name: string | null) => void;
   setUserEmail: (email: string | null) => void;
@@ -25,6 +27,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const [userRole, setUserRole] = useState<Role | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isHydrated, setIsHydrated] = useState(false);
 
   useEffect(() => {
     // Load user data from localStorage on mount
@@ -44,6 +48,9 @@ export function UserProvider({ children }: { children: ReactNode }) {
     }
     if (savedName) setUserName(savedName);
     if (savedEmail) setUserEmail(savedEmail);
+
+    setIsLoading(false);
+    setIsHydrated(true);
   }, []);
 
   return (
@@ -52,6 +59,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
         userRole,
         userName,
         userEmail,
+        isLoading,
+        isHydrated,
         setUserRole,
         setUserName,
         setUserEmail,

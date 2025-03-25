@@ -182,7 +182,7 @@ export default function DriverDocumentsPage() {
     }
 
     try {
-      const response = await fetch(`/api/documents/${id}?type=${type}`, {
+      const response = await fetch(`/api/documents?id=${id}&type=${type}`, {
         method: "DELETE",
       });
 

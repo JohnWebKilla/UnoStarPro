@@ -86,7 +86,13 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    ...PROTECTED_ROUTES.map((route) => `${route}/:path*`),
+    "/Dashboard/:path*",
+    "/Drivers/:path*",
+    "/Vehicles/:path*",
+    "/Settings/:path*",
+    "/Reports/:path*",
+    "/Notifications/:path*",
+    "/Profile/:path*",
     "/sign-in",
     "/sign-up",
     "/api/cache",

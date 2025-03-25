@@ -57,8 +57,8 @@ export interface CacheResponse<T> {
   data: T;
   source: "cache" | "database";
   timing: {
-    start: number;
-    end: number;
-    duration: number;
+    total: number;
+    database?: number;
+    source: "client-cache" | "server";
   };
 }

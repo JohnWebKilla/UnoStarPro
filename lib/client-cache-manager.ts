@@ -410,3 +410,58 @@ export class ClientCacheManager {
     localStorage.removeItem(cacheKey);
   }
 }
+
+// Exported functions for page data management
+export async function getPageData(
+  userEmail: string,
+  path: string
+): Promise<PageData | null> {
+  const cacheKey = `${CACHE_PREFIX}${userEmail}:${path}`;
+  const cachedData = localStorage.getItem(cacheKey);
+
+  if (!cachedData) {
+    return null;
+  }
+
+  try {
+    const pageData: PageData = JSON.parse(cachedData);
+    if (pageData.expiresAt < Date.now()) {
+      localStorage.removeItem(cacheKey);
+      return null;
+    }
+    return pageData;
+  } catch (error) {
+    console.error("Error parsing cached data:", error);
+    localStorage.removeItem(cacheKey);
+    return null;
+  }
+}
+
+export async function refreshPageData(
+  userEmail: string,
+  role: Role,
+  path: string
+): Promise<void> {
+  const config = pageConfigs[role]?.find((cfg) => cfg.path === path);
+  if (!config) {
+    throw new Error(`No configuration found for path: ${path}`);
+  }
+
+  try {
+    const data = await config.fetchFunction();
+    const pageData: PageData = {
+      path,
+      data,
+      lastFetched: new Date().toISOString(),
+      expiresAt: Date.now() + CACHE_TTL,
+    };
+
+    localStorage.setItem(
+      `${CACHE_PREFIX}${userEmail}:${path}`,
+      JSON.stringify(pageData)
+    );
+  } catch (error) {
+    console.error(`Error refreshing page data for ${path}:`, error);
+    throw error;
+  }
+}
