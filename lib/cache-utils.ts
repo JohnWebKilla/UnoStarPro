@@ -83,7 +83,7 @@ export async function cacheCommonData(
     // Cache users
     cacheOperations.push(async () => {
       try {
-        const supabase = createClient();
+        const supabase = await createClient();
         const { data } = await supabase.from("users").select("*").limit(100);
         if (data) {
           await setCache(`users:list:${userId}`, data, CACHE_TTL);
@@ -96,7 +96,7 @@ export async function cacheCommonData(
     // Cache companies
     cacheOperations.push(async () => {
       try {
-        const supabase = createClient();
+        const supabase = await createClient();
         const { data } = await supabase
           .from("companies")
           .select("*")
@@ -112,7 +112,7 @@ export async function cacheCommonData(
     // Cache drivers
     cacheOperations.push(async () => {
       try {
-        const supabase = createClient();
+        const supabase = await createClient();
         const { data } = await supabase.from("drivers").select("*").limit(100);
         if (data) {
           await setCache("drivers:client-list", data, CACHE_TTL);
@@ -127,7 +127,7 @@ export async function cacheCommonData(
   // Cache dashboard data
   cacheOperations.push(async () => {
     try {
-      const supabase = createClient();
+      const supabase = await createClient();
       const { data } = await supabase.rpc("get_dashboard_data", {
         user_id: userId,
       });
@@ -142,7 +142,7 @@ export async function cacheCommonData(
   // Cache expenses
   cacheOperations.push(async () => {
     try {
-      const supabase = createClient();
+      const supabase = await createClient();
       const { data } = await supabase.rpc("get_expenses", {
         month_param: month,
       });
@@ -157,7 +157,7 @@ export async function cacheCommonData(
   // Cache scheduling
   cacheOperations.push(async () => {
     try {
-      const supabase = createClient();
+      const supabase = await createClient();
       const { data } = await supabase.rpc("get_scheduling_data");
       if (data) {
         await setCache(`api:/api/scheduling`, data, CACHE_TTL);
@@ -170,7 +170,7 @@ export async function cacheCommonData(
   // Cache payroll
   cacheOperations.push(async () => {
     try {
-      const supabase = createClient();
+      const supabase = await createClient();
       const { data } = await supabase.rpc("get_monthly_payroll", {
         month_param: month,
       });
