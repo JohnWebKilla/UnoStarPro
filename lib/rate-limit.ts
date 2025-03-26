@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRedisClient } from "./redis";
+import { RedisManager } from "./redis-manager";
 
 interface RateLimitConfig {
   // Maximum number of requests allowed in the time window
@@ -33,7 +33,7 @@ export async function rateLimit(
   const key = `rate-limit:${identifier}:${ip}`;
 
   try {
-    const redis = await getRedisClient();
+    const redis = await RedisManager.getConnection();
     if (!redis) {
       console.warn("Redis client not initialized, skipping rate limiting");
       return undefined;
@@ -90,5 +90,16 @@ export async function rateLimit(
     console.error("Rate limiting error:", error);
     // If Redis fails, allow the request to proceed
     return undefined;
+  }
+}
+
+export async function getRemainingRequests(key: string, limit: number) {
+  try {
+    const redis = await RedisManager.getConnection();
+    const current = await redis.get(key);
+    return limit - (current ? parseInt(current, 10) : 0);
+  } catch (error) {
+    console.error("Error getting remaining requests:", error);
+    return 0;
   }
 }

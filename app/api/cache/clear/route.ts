@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { flushCache } from "@/lib/redis";
+import { clearAllCache } from "@/lib/redis";
 
 export async function POST(request: NextRequest) {
   try {
-    await flushCache();
+    await clearAllCache();
     return NextResponse.json({
       success: true,
       message: "Cache cleared successfully",

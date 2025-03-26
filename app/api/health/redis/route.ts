@@ -1,35 +1,23 @@
 import { NextResponse } from "next/server";
-import { getRedisClient } from "@/lib/redis";
+import { isRedisConnected } from "@/lib/redis";
 
 export async function GET() {
   try {
-    const redis = await getRedisClient();
-    if (!redis) {
+    const isConnected = isRedisConnected();
+
+    if (!isConnected) {
       return NextResponse.json(
-        {
-          status: "unhealthy",
-          error: "Redis client not initialized",
-          timestamp: new Date().toISOString(),
-        },
+        { status: "error", message: "Redis is not connected" },
         { status: 503 }
       );
     }
 
-    await redis.ping();
-
-    return NextResponse.json({
-      status: "healthy",
-      timestamp: new Date().toISOString(),
-    });
+    return NextResponse.json({ status: "ok", message: "Redis is connected" });
   } catch (error) {
-    console.error("[Redis Health Check] Failed:", error);
+    console.error("Redis health check failed:", error);
     return NextResponse.json(
-      {
-        status: "unhealthy",
-        error: error instanceof Error ? error.message : "Unknown error",
-        timestamp: new Date().toISOString(),
-      },
-      { status: 503 }
+      { status: "error", message: "Redis health check failed" },
+      { status: 500 }
     );
   }
 }

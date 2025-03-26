@@ -1,4 +1,4 @@
-import { getRedisClient } from "./redis";
+import { RedisManager } from "./redis-manager";
 import { v4 as uuidv4 } from "uuid";
 
 // Default session expiration time (24 hours)
@@ -17,7 +17,7 @@ export async function createSession(
   data: Record<string, any>,
   expiryInSeconds: number = DEFAULT_SESSION_EXPIRY
 ): Promise<string> {
-  const redis = await getRedisClient();
+  const redis = await RedisManager.getConnection();
   if (!redis) {
     throw new Error("Redis client not initialized");
   }
@@ -58,37 +58,12 @@ export async function createSession(
 export async function getSession<T = Record<string, any>>(
   sessionId: string
 ): Promise<T | null> {
-  const redis = await getRedisClient();
-  if (!redis) {
-    throw new Error("Redis client not initialized");
-  }
-
-  const sessionKey = `session:${sessionId}`;
-
-  // Get session data
-  const sessionData = await redis.get(sessionKey);
-  if (!sessionData) return null;
-
   try {
-    // Parse session data
-    const session = JSON.parse(sessionData.toString()) as T;
-
-    // Update last accessed timestamp
-    const updatedSession = {
-      ...session,
-      lastAccessed: new Date().toISOString(),
-    };
-
-    // Get the remaining TTL
-    const ttl = await redis.ttl(sessionKey);
-    if (ttl > 0) {
-      // Update the session with the new timestamp
-      await redis.set(sessionKey, JSON.stringify(updatedSession), "EX", ttl);
-    }
-
-    return updatedSession;
+    const redis = await RedisManager.getConnection();
+    const data = await redis.get(`session:${sessionId}`);
+    return data ? JSON.parse(data) : null;
   } catch (error) {
-    console.error("Error parsing session data:", error);
+    console.error("Error getting session:", error);
     return null;
   }
 }
@@ -104,7 +79,7 @@ export async function updateSession(
   sessionId: string,
   data: Record<string, any>
 ): Promise<boolean> {
-  const redis = await getRedisClient();
+  const redis = await RedisManager.getConnection();
   if (!redis) {
     throw new Error("Redis client not initialized");
   }
@@ -148,33 +123,14 @@ export async function updateSession(
  * @returns Success status
  */
 export async function deleteSession(sessionId: string): Promise<boolean> {
-  const redis = await getRedisClient();
-  if (!redis) {
-    throw new Error("Redis client not initialized");
+  try {
+    const redis = await RedisManager.getConnection();
+    await redis.del(`session:${sessionId}`);
+    return true;
+  } catch (error) {
+    console.error("Error deleting session:", error);
+    return false;
   }
-
-  const sessionKey = `session:${sessionId}`;
-
-  // Get session to find user ID
-  const sessionData = await redis.get(sessionKey);
-  if (sessionData) {
-    try {
-      const session = JSON.parse(sessionData.toString());
-      const userId = session.userId;
-
-      // Remove session from user's sessions set
-      if (userId) {
-        const userSessionsKey = `user-sessions:${userId}`;
-        await redis.srem(userSessionsKey, sessionId);
-      }
-    } catch (error) {
-      console.error("Error parsing session during deletion:", error);
-    }
-  }
-
-  // Delete the session
-  const result = await redis.del(sessionKey);
-  return result === 1;
 }
 
 /**
@@ -184,7 +140,7 @@ export async function deleteSession(sessionId: string): Promise<boolean> {
  * @returns Array of session IDs
  */
 export async function getUserSessions(userId: string): Promise<string[]> {
-  const redis = await getRedisClient();
+  const redis = await RedisManager.getConnection();
   if (!redis) {
     throw new Error("Redis client not initialized");
   }
@@ -203,7 +159,7 @@ export async function getUserSessions(userId: string): Promise<string[]> {
  * @returns Number of sessions deleted
  */
 export async function deleteUserSessions(userId: string): Promise<number> {
-  const redis = await getRedisClient();
+  const redis = await RedisManager.getConnection();
   if (!redis) {
     throw new Error("Redis client not initialized");
   }
@@ -227,4 +183,19 @@ export async function deleteUserSessions(userId: string): Promise<number> {
   await redis.del(userSessionsKey);
 
   return deletedCount;
+}
+
+export async function refreshSession(sessionId: string) {
+  try {
+    const redis = await RedisManager.getConnection();
+    const exists = await redis.exists(`session:${sessionId}`);
+    if (exists) {
+      await redis.expire(`session:${sessionId}`, DEFAULT_SESSION_EXPIRY);
+      return true;
+    }
+    return false;
+  } catch (error) {
+    console.error("Error refreshing session:", error);
+    return false;
+  }
 }
