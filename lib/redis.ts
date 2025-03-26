@@ -478,3 +478,195 @@ const CACHE_TTL = 60 * 60; // 1 hour
 // Key prefixes for different types of data
 const PAYMENT_METHODS_KEY = (companyId: number) =>
   `payment_methods:${companyId}`;
+const STRIPE_DATA_KEY = (companyId: number) => `stripe_data:${companyId}`;
+const STRIPE_PLANS_KEY = "stripe_plans";
+
+// Initialize Upstash Redis client if available
+const upstashRedis = process.env.UPSTASH_REDIS_REST_URL
+  ? new UpstashRedis({
+      url: process.env.UPSTASH_REDIS_REST_URL,
+      token: process.env.UPSTASH_REDIS_REST_TOKEN || "",
+    })
+  : null;
+
+// Stripe-related function type definitions
+export type CachePaymentMethodsFn = (
+  companyId: number,
+  paymentMethods: Stripe.PaymentMethod[]
+) => Promise<void>;
+export type GetCachedPaymentMethodsFn = (
+  companyId: number
+) => Promise<Stripe.PaymentMethod[] | null>;
+export type CacheStripeDataFn = (companyId: number, data: any) => Promise<void>;
+export type GetCachedStripeDataFn = (companyId: number) => Promise<any>;
+export type CacheStripePlansFn = (plans: any) => Promise<void>;
+export type GetCachedStripePlansFn = () => Promise<any>;
+export type InvalidateStripeCacheFn = (companyId: number) => Promise<void>;
+export type InvalidatePaymentMethodsCacheFn = (
+  companyId: number
+) => Promise<void>;
+export type InvalidateStripePlansCacheFn = () => Promise<void>;
+
+// Export all Stripe-related functions
+export const cachePaymentMethods: CachePaymentMethodsFn = async (
+  companyId,
+  paymentMethods
+) => {
+  try {
+    if (upstashRedis) {
+      await upstashRedis.set(
+        PAYMENT_METHODS_KEY(companyId),
+        JSON.stringify(paymentMethods),
+        { ex: CACHE_TTL }
+      );
+    }
+    await setCache(PAYMENT_METHODS_KEY(companyId), paymentMethods, CACHE_TTL);
+  } catch (error) {
+    console.error("Error caching payment methods:", error);
+  }
+};
+
+export const getCachedPaymentMethods: GetCachedPaymentMethodsFn = async (
+  companyId
+) => {
+  try {
+    if (upstashRedis) {
+      const cached = await upstashRedis.get(PAYMENT_METHODS_KEY(companyId));
+      if (cached) {
+        return JSON.parse(cached as string);
+      }
+    }
+    return await getCache(PAYMENT_METHODS_KEY(companyId));
+  } catch (error) {
+    console.error("Error getting cached payment methods:", error);
+    return null;
+  }
+};
+
+export const cacheStripeData: CacheStripeDataFn = async (companyId, data) => {
+  try {
+    const dataWithTimestamp = {
+      data,
+      cacheTime: Date.now(),
+    };
+    if (upstashRedis) {
+      await upstashRedis.set(
+        STRIPE_DATA_KEY(companyId),
+        JSON.stringify(dataWithTimestamp),
+        { ex: CACHE_TTL }
+      );
+    }
+    await setCache(STRIPE_DATA_KEY(companyId), dataWithTimestamp, CACHE_TTL);
+  } catch (error) {
+    console.error("Error caching Stripe data:", error);
+  }
+};
+
+export const getCachedStripeData: GetCachedStripeDataFn = async (companyId) => {
+  try {
+    if (upstashRedis) {
+      const upstashData = await upstashRedis.get(STRIPE_DATA_KEY(companyId));
+      if (upstashData) {
+        const parsedData = JSON.parse(upstashData as string);
+        if (Date.now() - (parsedData.cacheTime || 0) < 5 * 60 * 1000) {
+          return parsedData.data;
+        }
+      }
+    }
+    const cachedData = await getCacheWithTime<any>(STRIPE_DATA_KEY(companyId));
+    if (
+      cachedData &&
+      Date.now() - (cachedData.cacheTime || 0) < 5 * 60 * 1000
+    ) {
+      return cachedData.data;
+    }
+    return null;
+  } catch (error) {
+    console.error("Error getting cached Stripe data:", error);
+    return null;
+  }
+};
+
+export const cacheStripePlans: CacheStripePlansFn = async (plans) => {
+  try {
+    const dataWithTimestamp = {
+      data: plans,
+      cacheTime: Date.now(),
+    };
+    if (upstashRedis) {
+      await upstashRedis.set(
+        STRIPE_PLANS_KEY,
+        JSON.stringify(dataWithTimestamp),
+        { ex: CACHE_TTL * 24 }
+      );
+    }
+    await setCache(STRIPE_PLANS_KEY, dataWithTimestamp, CACHE_TTL * 24);
+  } catch (error) {
+    console.error("Error caching Stripe plans:", error);
+  }
+};
+
+export const getCachedStripePlans: GetCachedStripePlansFn = async () => {
+  try {
+    if (upstashRedis) {
+      const cachedData = await upstashRedis.get(STRIPE_PLANS_KEY);
+      if (cachedData) {
+        const parsedData = JSON.parse(cachedData as string);
+        if (Date.now() - (parsedData.cacheTime || 0) < 60 * 60 * 1000) {
+          return parsedData.data;
+        }
+      }
+    }
+    const cachedData = await getCache<{ cacheTime?: number; data?: any }>(
+      STRIPE_PLANS_KEY
+    );
+    if (
+      cachedData?.cacheTime &&
+      Date.now() - cachedData.cacheTime < 60 * 60 * 1000
+    ) {
+      return cachedData.data;
+    }
+    return null;
+  } catch (error) {
+    console.error("Error getting cached Stripe plans:", error);
+    return null;
+  }
+};
+
+export const invalidatePaymentMethodsCache: InvalidatePaymentMethodsCacheFn =
+  async (companyId) => {
+    try {
+      if (upstashRedis) {
+        await upstashRedis.del(PAYMENT_METHODS_KEY(companyId));
+      }
+      await deleteCache(PAYMENT_METHODS_KEY(companyId));
+    } catch (error) {
+      console.error("Error invalidating payment methods cache:", error);
+    }
+  };
+
+export const invalidateStripeCache: InvalidateStripeCacheFn = async (
+  companyId
+) => {
+  try {
+    if (upstashRedis) {
+      await upstashRedis.del(STRIPE_DATA_KEY(companyId));
+    }
+    await deleteCache(STRIPE_DATA_KEY(companyId));
+    await invalidatePaymentMethodsCache(companyId);
+  } catch (error) {
+    console.error("Error invalidating Stripe cache:", error);
+  }
+};
+
+export const invalidateStripePlansCache: InvalidateStripePlansCacheFn =
+  async () => {
+    try {
+      if (upstashRedis) {
+        await upstashRedis.del(STRIPE_PLANS_KEY);
+      }
+      await deleteCache(STRIPE_PLANS_KEY);
+    } catch (error) {
+      console.error("Error invalidating Stripe plans cache:", error);
+    }
+  };
