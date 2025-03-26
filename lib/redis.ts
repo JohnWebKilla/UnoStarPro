@@ -14,6 +14,7 @@ interface RedisConfigOptions {
   connectTimeout?: number;
   commandTimeout?: number;
   maxRetriesPerRequest?: number;
+  reconnectOnError?: (err: Error) => number;
 }
 
 // Connection pool implementation
@@ -28,6 +29,9 @@ class RedisConnectionPool {
   constructor(maxConnections: number = 5) {
     this.maxConnections = maxConnections;
     this.config = getRedisConfig();
+    // Add connection timeout
+    this.config.connectTimeout = 2000; // Reduce to 2 seconds for faster fallback
+    this.config.maxRetriesPerRequest = 1; // Reduce retries for faster fallback
     console.log(
       `Initializing Redis connection pool with max ${maxConnections} connections`
     );
@@ -40,13 +44,18 @@ class RedisConnectionPool {
     );
 
     if (availableConnection) {
-      // Check if connection is still valid
+      // Check if connection is still valid with timeout
       try {
-        await availableConnection.ping();
+        const pingPromise = availableConnection.ping();
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("Ping timeout")), 1000)
+        );
+        await Promise.race([pingPromise, timeoutPromise]);
         this.inUse.add(availableConnection);
         this.lastUsed.set(availableConnection, Date.now());
         return availableConnection;
       } catch (error) {
+        console.warn("Connection validation failed:", error);
         // Connection is broken, remove it from the pool
         this.removeFromPool(availableConnection);
       }
@@ -192,13 +201,24 @@ const getRedisConfig = (): RedisConfigOptions => {
       host,
       port,
       password: process.env.REDIS_PASSWORD,
-      // Do NOT enable TLS for Redis Cloud - it doesn't require it
-      connectTimeout: 5000, // 5 seconds
-      commandTimeout: 3000, // 3 seconds
+      tls: isSecure ? { rejectUnauthorized: false } : undefined,
+      connectTimeout: 3000, // Reduce to 3 seconds
+      commandTimeout: 2000, // Reduce to 2 seconds
       maxRetriesPerRequest: 2,
       retryStrategy: (times: number) => {
-        // Retry connection with exponential backoff, but limit to 2 seconds max
-        return Math.min(times * 50, 2000);
+        const delay = Math.min(times * 100, 3000); // More aggressive retry with max 3s delay
+        console.log(
+          `Redis retrying connection in ${delay}ms (attempt ${times})`
+        );
+        return delay;
+      },
+      reconnectOnError: (err) => {
+        const targetError = "READONLY";
+        if (err.message.includes(targetError)) {
+          // Force reconnect on READONLY error
+          return 2;
+        }
+        return 1;
       },
     };
   }
@@ -207,9 +227,12 @@ const getRedisConfig = (): RedisConfigOptions => {
   return {
     host: "localhost",
     port: 6379,
-    connectTimeout: 5000, // 5 seconds
-    commandTimeout: 3000, // 3 seconds
+    connectTimeout: 3000,
+    commandTimeout: 2000,
     maxRetriesPerRequest: 2,
+    retryStrategy: (times: number) => {
+      return Math.min(times * 100, 3000);
+    },
   };
 };
 
@@ -255,8 +278,8 @@ export const getRedisClient = async (): Promise<Redis> => {
     const maxConnections = process.env.REDIS_MAX_CONNECTIONS
       ? parseInt(process.env.REDIS_MAX_CONNECTIONS, 10)
       : process.env.NODE_ENV === "production"
-        ? 10
-        : 5;
+        ? 5 // Reduce max connections in production to prevent connection exhaustion
+        : 3;
 
     connectionPool = new RedisConnectionPool(maxConnections);
   }
@@ -270,9 +293,23 @@ export const getRedisClient = async (): Promise<Redis> => {
 
     // Get a new client from the pool
     activeClient = await connectionPool.getConnection();
+
+    // Verify connection is working
+    await activeClient.ping();
+
     return activeClient;
-  } catch (error) {
+  } catch (error: any) {
     console.error("Failed to get Redis client from pool:", error);
+    // Try to create a new pool if the error seems connection-related
+    if (
+      typeof error.message === "string" &&
+      (error.message.includes("connect") || error.message.includes("timeout"))
+    ) {
+      console.log("Attempting to recreate connection pool...");
+      await connectionPool?.closeAll();
+      connectionPool = null;
+      return getRedisClient(); // Retry once
+    }
     return createDummyClient();
   }
 };
@@ -300,6 +337,7 @@ export const setCache = async (
   expireInSeconds?: number
 ): Promise<void> => {
   return withRedisClient(async (client) => {
+    const startTime = Date.now();
     try {
       console.log(`[Redis] Setting cache for key: ${key}`);
       const serializedValue = JSON.stringify(value);
@@ -308,28 +346,55 @@ export const setCache = async (
       } else {
         await client.set(key, serializedValue);
       }
-      console.log(`[Redis] Successfully set cache for key: ${key}`);
+      const duration = Date.now() - startTime;
+      console.log(
+        `[Redis] Successfully set cache for key: ${key} in ${duration}ms`
+      );
     } catch (error) {
-      console.error(`[Redis] Error setting cache for key ${key}:`, error);
-      throw error; // Propagate the error for better error handling
+      const duration = Date.now() - startTime;
+      console.error(
+        `[Redis] Error setting cache for key ${key} after ${duration}ms:`,
+        error
+      );
+      // Add connection status check
+      try {
+        await client.ping();
+      } catch (pingError) {
+        console.error(`[Redis] Connection appears to be down:`, pingError);
+      }
+      throw error;
     }
   });
 };
 
 export const getCache = async <T>(key: string): Promise<T | null> => {
   return withRedisClient(async (client) => {
+    const startTime = Date.now();
     try {
       console.log(`[Redis] Attempting to get cache for key: ${key}`);
       const value = await client.get(key);
+      const duration = Date.now() - startTime;
+
       if (!value) {
-        console.log(`[Redis] Cache miss for key: ${key}`);
+        console.log(`[Redis] Cache miss for key: ${key} in ${duration}ms`);
         return null;
       }
-      console.log(`[Redis] Cache hit for key: ${key}`);
+
+      console.log(`[Redis] Cache hit for key: ${key} in ${duration}ms`);
       return JSON.parse(value) as T;
     } catch (error) {
-      console.error(`[Redis] Error getting cache for key ${key}:`, error);
-      throw error; // Propagate the error for better error handling
+      const duration = Date.now() - startTime;
+      console.error(
+        `[Redis] Error getting cache for key ${key} after ${duration}ms:`,
+        error
+      );
+      // Add connection status check
+      try {
+        await client.ping();
+      } catch (pingError) {
+        console.error(`[Redis] Connection appears to be down:`, pingError);
+      }
+      throw error;
     }
   });
 };
@@ -413,229 +478,3 @@ const CACHE_TTL = 60 * 60; // 1 hour
 // Key prefixes for different types of data
 const PAYMENT_METHODS_KEY = (companyId: number) =>
   `payment_methods:${companyId}`;
-const STRIPE_DATA_KEY = (companyId: number) => `stripe_data:${companyId}`;
-const STRIPE_PLANS_KEY = "stripe_plans";
-
-// Initialize Upstash Redis client if available
-const upstashRedis = process.env.UPSTASH_REDIS_REST_URL
-  ? new UpstashRedis({
-      url: process.env.UPSTASH_REDIS_REST_URL,
-      token: process.env.UPSTASH_REDIS_REST_TOKEN || "",
-    })
-  : null;
-
-// Function to cache payment methods
-export async function cachePaymentMethods(
-  companyId: number,
-  paymentMethods: Stripe.PaymentMethod[]
-) {
-  try {
-    // Try with Upstash Redis first
-    if (upstashRedis) {
-      await upstashRedis.set(
-        PAYMENT_METHODS_KEY(companyId),
-        JSON.stringify(paymentMethods),
-        { ex: CACHE_TTL }
-      );
-    }
-
-    // Also cache with regular Redis
-    await setCache(PAYMENT_METHODS_KEY(companyId), paymentMethods, CACHE_TTL);
-  } catch (error) {
-    console.error("Error caching payment methods:", error);
-  }
-}
-
-// Function to get cached payment methods
-export async function getCachedPaymentMethods(companyId: number) {
-  try {
-    // Try with Upstash Redis first
-    if (upstashRedis) {
-      const cached = await upstashRedis.get(PAYMENT_METHODS_KEY(companyId));
-      if (cached) {
-        return JSON.parse(cached as string);
-      }
-    }
-
-    // Fall back to regular Redis
-    return await getCache(PAYMENT_METHODS_KEY(companyId));
-  } catch (error) {
-    console.error("Error getting cached payment methods:", error);
-    return null;
-  }
-}
-
-// Function to get cached Stripe data
-export async function getCachedStripeData(companyId: number) {
-  try {
-    // Try Upstash first if available
-    if (upstashRedis) {
-      const upstashData = await upstashRedis.get(STRIPE_DATA_KEY(companyId));
-      if (upstashData) {
-        const parsedData = JSON.parse(upstashData as string);
-        const cacheTime = parsedData.cacheTime || 0;
-        const now = Date.now();
-
-        // If cache is less than 5 minutes old, return it
-        if (now - cacheTime < 5 * 60 * 1000) {
-          console.log("Using cached Stripe data from Upstash");
-          return parsedData.data;
-        }
-      }
-    }
-
-    // Fall back to regular Redis
-    const cachedData = await getCacheWithTime<any>(STRIPE_DATA_KEY(companyId));
-    if (cachedData) {
-      const cacheTime = cachedData.cacheTime || 0;
-      const now = Date.now();
-
-      // If cache is less than 5 minutes old, return it
-      if (now - cacheTime < 5 * 60 * 1000) {
-        console.log("Using cached Stripe data from Redis");
-        return cachedData.data;
-      }
-    }
-
-    return null;
-  } catch (error) {
-    console.error("Error getting cached Stripe data:", error);
-    return null;
-  }
-}
-
-// Function to cache Stripe data
-export async function cacheStripeData(companyId: number, data: any) {
-  try {
-    const dataWithTimestamp = {
-      data,
-      cacheTime: Date.now(),
-    };
-
-    // Try with Upstash Redis first
-    if (upstashRedis) {
-      await upstashRedis.set(
-        STRIPE_DATA_KEY(companyId),
-        JSON.stringify(dataWithTimestamp),
-        { ex: CACHE_TTL }
-      );
-    }
-
-    // Also cache with regular Redis
-    await setCache(STRIPE_DATA_KEY(companyId), dataWithTimestamp, CACHE_TTL);
-  } catch (error) {
-    console.error("Error caching Stripe data:", error);
-  }
-}
-
-// Function to invalidate payment methods cache
-export async function invalidatePaymentMethodsCache(companyId: number) {
-  try {
-    // Try with Upstash Redis first
-    if (upstashRedis) {
-      await upstashRedis.del(PAYMENT_METHODS_KEY(companyId));
-    }
-
-    // Also invalidate with regular Redis
-    await deleteCache(PAYMENT_METHODS_KEY(companyId));
-  } catch (error) {
-    console.error("Error invalidating payment methods cache:", error);
-  }
-}
-
-// Function to invalidate Stripe data cache
-export async function invalidateStripeCache(companyId: number) {
-  try {
-    // Try with Upstash Redis first
-    if (upstashRedis) {
-      await upstashRedis.del(STRIPE_DATA_KEY(companyId));
-    }
-
-    // Also invalidate with regular Redis
-    await deleteCache(STRIPE_DATA_KEY(companyId));
-    await invalidatePaymentMethodsCache(companyId);
-  } catch (error) {
-    console.error("Error invalidating Stripe cache:", error);
-  }
-}
-
-// Function to cache Stripe plans
-export async function cacheStripePlans(plans: any) {
-  try {
-    const dataWithTimestamp = {
-      data: plans,
-      cacheTime: Date.now(),
-    };
-
-    // Try with Upstash Redis first
-    if (upstashRedis) {
-      await upstashRedis.set(
-        STRIPE_PLANS_KEY,
-        JSON.stringify(dataWithTimestamp),
-        { ex: CACHE_TTL * 24 } // Cache plans for 24 hours
-      );
-    }
-
-    // Also cache with regular Redis
-    await setCache(STRIPE_PLANS_KEY, dataWithTimestamp, CACHE_TTL * 24);
-  } catch (error) {
-    console.error("Error caching Stripe plans:", error);
-  }
-}
-
-// Function to get cached Stripe plans
-export async function getCachedStripePlans() {
-  try {
-    // Try with Upstash Redis first
-    if (upstashRedis) {
-      const cachedData = await upstashRedis.get(STRIPE_PLANS_KEY);
-
-      if (cachedData) {
-        const parsedData = JSON.parse(cachedData as string);
-        // Check if the cache is still fresh (less than 1 hour old)
-        const cacheTime = parsedData.cacheTime || 0;
-        const now = Date.now();
-
-        // If cache is less than 1 hour old, return it
-        if (now - cacheTime < 60 * 60 * 1000) {
-          console.log("Using cached Stripe plans from Upstash");
-          return parsedData.data;
-        }
-      }
-    }
-
-    // Fall back to regular Redis
-    const cachedData = await getCache<{ cacheTime?: number; data?: any }>(
-      STRIPE_PLANS_KEY
-    );
-    if (cachedData && cachedData.cacheTime) {
-      const now = Date.now();
-
-      // If cache is less than 1 hour old, return it
-      if (now - cachedData.cacheTime < 60 * 60 * 1000 && cachedData.data) {
-        console.log("Using cached Stripe plans from Redis");
-        return cachedData.data;
-      }
-    }
-
-    return null;
-  } catch (error) {
-    console.error("Error getting cached Stripe plans:", error);
-    return null;
-  }
-}
-
-// Function to invalidate Stripe plans cache
-export async function invalidateStripePlansCache() {
-  try {
-    // Try with Upstash Redis first
-    if (upstashRedis) {
-      await upstashRedis.del(STRIPE_PLANS_KEY);
-    }
-
-    // Also invalidate with regular Redis
-    await deleteCache(STRIPE_PLANS_KEY);
-  } catch (error) {
-    console.error("Error invalidating Stripe plans cache:", error);
-  }
-}
