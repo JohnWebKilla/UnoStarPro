@@ -9,6 +9,8 @@ import { getDashboardForRole } from "@/utils/protected";
 import type { Role } from "@/types/role";
 import { ClientCacheManager } from "@/lib/client-cache-manager";
 import { revalidatePath } from "next/cache";
+import { getDashboardUrl } from "@/lib/get-dashboard-url";
+import { prefetchData } from "@/lib/prefetch-data";
 
 export async function signUpAction(formData: FormData) {
   const supabase = await createClient();
@@ -107,109 +109,30 @@ export async function signIn(email: string, password: string) {
       password,
     });
 
-    if (signInError) throw signInError;
-    if (!user) throw new Error("No user returned from sign in");
-
-    console.log("Auth successful, user ID:", user.id);
-
-    // Get user data including role
-    let { data: userData, error: userError } = await supabase
-      .from("users")
-      .select("*")
-      .eq("id", user.id)
-      .single();
-
-    // If user data doesn't exist, create it
-    if (userError?.code === "PGRST116") {
-      console.log("User record not found, creating one...");
-
-      // Extract name parts from email or user metadata
-      const nameParts = user.user_metadata?.full_name?.split(" ") ||
-        email.split("@")[0].split(".") || ["User", user.id.slice(0, 8)];
-
-      const first_name = nameParts[0] || "User";
-      const last_name = nameParts[1] || user.id.slice(0, 8);
-
-      const newUserData = {
-        id: user.id,
-        email: user.email,
-        first_name,
-        last_name,
-        role: "customer", // Default role
-        status: "active",
-        created_at: new Date().toISOString(),
-        has_all_access: false,
-        payment_frequency: "monthly",
-        department: "general",
-        company_id: 1, // Default company ID
-      };
-
-      const { data: newUser, error: insertError } = await supabase
-        .from("users")
-        .insert(newUserData)
-        .select()
-        .single();
-
-      if (insertError) {
-        console.error("Error creating user record:", insertError);
-        throw insertError;
-      }
-
-      userData = newUser;
-    } else if (userError) {
-      console.error("Error fetching user data:", userError);
-      throw userError;
+    if (signInError) {
+      throw signInError;
     }
 
-    if (!userData) throw new Error("No user data found");
+    // Get user role for dashboard URL
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user?.id)
+      .single();
 
-    // Initialize cache manager with user's role
-    const cacheManager = new ClientCacheManager(userData.role);
-
-    // Get dashboard URL based on role
-    const dashboardUrl = getDashboardForRole(userData.role as Role);
+    const dashboardUrl = getDashboardUrl(profile?.role);
     console.log("Dashboard URL for role:", {
-      role: userData.role,
+      role: profile?.role,
       dashboardUrl,
     });
 
-    try {
-      // Start prefetching all data
-      await cacheManager.prefetchAllData();
+    // Prefetch commonly accessed data
+    await prefetchData(supabase, profile?.role);
 
-      return {
-        success: true,
-        dashboardUrl,
-        userData: {
-          role: userData.role,
-          first_name: userData.first_name,
-          last_name: userData.last_name,
-          email: userData.email,
-          status: userData.status,
-        },
-      };
-    } catch (error) {
-      console.error("Cache prefetch error:", error);
-      // Continue with login even if prefetch fails
-      return {
-        success: true,
-        dashboardUrl,
-        userData: {
-          role: userData.role,
-          first_name: userData.first_name,
-          last_name: userData.last_name,
-          email: userData.email,
-          status: userData.status,
-        },
-      };
-    }
+    return { success: true, dashboardUrl };
   } catch (error) {
     console.error("Sign in error:", error);
-    return {
-      success: false,
-      error:
-        error instanceof Error ? error.message : "An unknown error occurred",
-    };
+    return { success: false, error: "Invalid credentials" };
   }
 }
 
