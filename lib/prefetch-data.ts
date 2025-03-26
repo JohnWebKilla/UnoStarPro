@@ -1,16 +1,16 @@
 import { SupabaseClient } from "@supabase/supabase-js";
 import { Redis } from "@upstash/redis";
 
-// Initialize Redis client with URL and password
+// Initialize Redis client with Upstash configuration
 const redis = new Redis({
-  url: `redis://${process.env.REDIS_URL}`,
-  token: process.env.REDIS_PASSWORD || "",
+  url: "https://redis-17933.crce177.me-south-1-1.ec2.redns.redis-cloud.com", // Upstash requires https URL
+  token: process.env.REDIS_TOKEN || "", // Use REDIS_TOKEN for Upstash
 });
 
 export async function prefetchData(supabase: SupabaseClient, role?: string) {
   try {
-    if (!process.env.REDIS_URL || !process.env.REDIS_PASSWORD) {
-      console.warn("Redis credentials not found, skipping prefetch");
+    if (!process.env.REDIS_TOKEN) {
+      console.warn("Redis token not found, skipping prefetch");
       return;
     }
 
