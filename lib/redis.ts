@@ -1,5 +1,4 @@
-import Redis from "ioredis";
-import { Redis as UpstashRedis } from "@upstash/redis";
+import { Redis } from "@upstash/redis";
 import { Stripe } from "stripe";
 
 // Define Redis options interface
@@ -17,171 +16,120 @@ interface RedisConfigOptions {
   reconnectOnError?: (err: Error) => number;
 }
 
-// Connection pool implementation
+// Connection pool configuration
+const MAX_POOL_SIZE = 10;
+const ACQUIRE_TIMEOUT = 10000; // 10 seconds
+
+interface PoolClient {
+  client: Redis;
+  inUse: boolean;
+  lastUsed: number;
+}
+
 class RedisConnectionPool {
-  private pool: Redis[] = [];
-  private maxConnections: number;
-  private config: RedisConfigOptions;
-  private inUse: Set<Redis> = new Set();
-  private lastUsed: Map<Redis, number> = new Map();
-  private connectionPromises: Map<Redis, Promise<void>> = new Map();
+  private pool: PoolClient[] = [];
+  private waitingQueue: ((client: Redis) => void)[] = [];
 
-  constructor(maxConnections: number = 5) {
-    this.maxConnections = maxConnections;
-    this.config = getRedisConfig();
-    // Add connection timeout
-    this.config.connectTimeout = 2000; // Reduce to 2 seconds for faster fallback
-    this.config.maxRetriesPerRequest = 1; // Reduce retries for faster fallback
-    console.log(
-      `Initializing Redis connection pool with max ${maxConnections} connections`
-    );
+  constructor() {
+    // Initialize the pool with a few connections
+    this.initializePool(3); // Start with 3 connections
   }
 
-  async getConnection(): Promise<Redis> {
-    // First, try to find an available connection
-    const availableConnection = this.pool.find(
-      (client) => !this.inUse.has(client)
-    );
-
-    if (availableConnection) {
-      // Check if connection is still valid with timeout
-      try {
-        const pingPromise = availableConnection.ping();
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Ping timeout")), 1000)
-        );
-        await Promise.race([pingPromise, timeoutPromise]);
-        this.inUse.add(availableConnection);
-        this.lastUsed.set(availableConnection, Date.now());
-        return availableConnection;
-      } catch (error) {
-        console.warn("Connection validation failed:", error);
-        // Connection is broken, remove it from the pool
-        this.removeFromPool(availableConnection);
-      }
-    }
-
-    // If pool is not full, create a new connection
-    if (this.pool.length < this.maxConnections) {
-      const newClient = await this.createClient();
-      this.pool.push(newClient);
-      this.inUse.add(newClient);
-      this.lastUsed.set(newClient, Date.now());
-      return newClient;
-    }
-
-    // If we reach here, all connections are in use
-    // Find the least recently used connection
-    let leastRecentlyUsed: Redis | null = null;
-    let oldestTime = Infinity;
-
-    // Fix for MapIterator error - convert to Array before iterating
-    Array.from(this.lastUsed.entries()).forEach(([client, time]) => {
-      if (time < oldestTime) {
-        oldestTime = time;
-        leastRecentlyUsed = client;
-      }
-    });
-
-    if (leastRecentlyUsed) {
-      this.inUse.add(leastRecentlyUsed);
-      this.lastUsed.set(leastRecentlyUsed, Date.now());
-      return leastRecentlyUsed;
-    }
-
-    // Fallback to dummy client if all else fails
-    console.warn(
-      "All Redis connections in use, creating temporary dummy client"
-    );
-    return createDummyClient();
-  }
-
-  releaseConnection(client: Redis): void {
-    this.inUse.delete(client);
-    this.lastUsed.set(client, Date.now());
-  }
-
-  private async createClient(): Promise<Redis> {
-    const client = new Redis({
-      ...this.config,
-      // Enable auto reconnection
-      reconnectOnError: (err) => {
-        console.warn("Redis reconnecting due to error:", err.message);
-        return true; // Always try to reconnect
-      },
-      retryStrategy: (times) => {
-        // More aggressive retry strategy for serverless
-        const delay = Math.min(times * 50, 1000);
-        console.log(
-          `Redis retrying connection in ${delay}ms (attempt ${times})`
-        );
-        return delay;
-      },
-      // Add connection pool settings
-      enableOfflineQueue: true, // Enable queue when disconnected
-      enableReadyCheck: true, // Check if Redis is ready before executing commands
-      maxRetriesPerRequest: 3,
-    });
-
-    const connectionPromise = new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        console.warn("Redis connection timeout");
-        reject(new Error("Redis connection timeout"));
-      }, this.config.connectTimeout || 3000);
-
-      client.on("connect", () => {
-        clearTimeout(timeout);
-        console.log("New Redis connection established");
-        resolve();
+  private async initializePool(size: number) {
+    for (let i = 0; i < size && this.pool.length < MAX_POOL_SIZE; i++) {
+      const client = new Redis({
+        url: process.env.UPSTASH_REDIS_REST_URL || "",
+        token: process.env.UPSTASH_REDIS_REST_TOKEN || "",
       });
+      this.pool.push({ client, inUse: false, lastUsed: Date.now() });
+    }
+  }
 
-      client.on("error", (err) => {
-        console.error("Redis connection error:", err);
-        // Don't reject here, let the retry strategy work
+  private async getAvailableClient(): Promise<Redis> {
+    // First, try to find an available client
+    const availableClient = this.pool.find((c) => !c.inUse);
+    if (availableClient) {
+      availableClient.inUse = true;
+      availableClient.lastUsed = Date.now();
+      return availableClient.client;
+    }
+
+    // If pool isn't at max size, create a new client
+    if (this.pool.length < MAX_POOL_SIZE) {
+      const client = new Redis({
+        url: process.env.UPSTASH_REDIS_REST_URL || "",
+        token: process.env.UPSTASH_REDIS_REST_TOKEN || "",
       });
-    });
-
-    this.connectionPromises.set(client, connectionPromise);
-
-    try {
-      await connectionPromise;
+      const poolClient = { client, inUse: true, lastUsed: Date.now() };
+      this.pool.push(poolClient);
       return client;
-    } catch (error) {
-      this.removeFromPool(client);
-      throw error;
     }
+
+    // If we reach here, we need to wait for a client
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        const index = this.waitingQueue.findIndex((cb) => cb === resolver);
+        if (index !== -1) {
+          this.waitingQueue.splice(index, 1);
+        }
+        reject(new Error("Timeout waiting for available Redis client"));
+      }, ACQUIRE_TIMEOUT);
+
+      const resolver = (client: Redis) => {
+        clearTimeout(timeout);
+        resolve(client);
+      };
+
+      this.waitingQueue.push(resolver);
+    });
   }
 
-  private removeFromPool(client: Redis): void {
-    const index = this.pool.indexOf(client);
-    if (index !== -1) {
-      this.pool.splice(index, 1);
-    }
-    this.inUse.delete(client);
-    this.lastUsed.delete(client);
-    this.connectionPromises.delete(client);
+  public releaseClient(client: Redis) {
+    const poolClient = this.pool.find((c) => c.client === client);
+    if (poolClient) {
+      poolClient.inUse = false;
+      poolClient.lastUsed = Date.now();
 
-    try {
-      client.disconnect();
-    } catch (e) {
-      console.error("Error disconnecting Redis client:", e);
-    }
-  }
-
-  async closeAll(): Promise<void> {
-    for (const client of this.pool) {
-      try {
-        client.disconnect();
-      } catch (e) {
-        console.error("Error disconnecting Redis client:", e);
+      // If there are waiting requests, give them this client
+      if (this.waitingQueue.length > 0) {
+        const nextResolver = this.waitingQueue.shift();
+        if (nextResolver) {
+          poolClient.inUse = true;
+          nextResolver(client);
+        }
       }
     }
-    this.pool = [];
-    this.inUse.clear();
-    this.lastUsed.clear();
-    this.connectionPromises.clear();
+  }
+
+  async withClient<T>(operation: (client: Redis) => Promise<T>): Promise<T> {
+    const client = await this.getAvailableClient();
+    try {
+      return await operation(client);
+    } finally {
+      this.releaseClient(client);
+    }
+  }
+
+  // Cleanup old connections periodically
+  startCleanup(interval: number = 60000) {
+    // Default: every minute
+    setInterval(() => {
+      const now = Date.now();
+      // Keep at least 3 connections in the pool
+      if (this.pool.length > 3) {
+        this.pool = this.pool.filter((client) => {
+          const idle = now - client.lastUsed;
+          // Remove if idle for more than 5 minutes and not in use
+          return client.inUse || idle < 300000;
+        });
+      }
+    }, interval);
   }
 }
+
+// Create a singleton instance
+const redisPool = new RedisConnectionPool();
+redisPool.startCleanup();
 
 // Check if we're in production or development
 const getRedisConfig = (): RedisConfigOptions => {
@@ -281,21 +229,22 @@ export const getRedisClient = async (): Promise<Redis> => {
         ? 5 // Reduce max connections in production to prevent connection exhaustion
         : 3;
 
-    connectionPool = new RedisConnectionPool(maxConnections);
+    connectionPool = new RedisConnectionPool();
   }
 
   try {
     // Release the previous client if it exists
     if (activeClient) {
-      connectionPool.releaseConnection(activeClient);
+      connectionPool.releaseClient(activeClient);
       activeClient = null;
     }
 
     // Get a new client from the pool
-    activeClient = await connectionPool.getConnection();
-
-    // Verify connection is working
-    await activeClient.ping();
+    activeClient = await connectionPool.withClient(async (client) => {
+      // Verify connection is working
+      await client.ping();
+      return client;
+    });
 
     return activeClient;
   } catch (error: any) {
@@ -306,7 +255,7 @@ export const getRedisClient = async (): Promise<Redis> => {
       (error.message.includes("connect") || error.message.includes("timeout"))
     ) {
       console.log("Attempting to recreate connection pool...");
-      await connectionPool?.closeAll();
+      await connectionPool?.startCleanup();
       connectionPool = null;
       return getRedisClient(); // Retry once
     }
@@ -325,7 +274,7 @@ export const withRedisClient = async <T>(
     return await operation(client);
   } finally {
     if (client && connectionPool) {
-      connectionPool.releaseConnection(client);
+      connectionPool.releaseClient(client);
     }
   }
 };
@@ -483,7 +432,7 @@ const STRIPE_PLANS_KEY = "stripe_plans";
 
 // Initialize Upstash Redis client if available
 const upstashRedis = process.env.UPSTASH_REDIS_REST_URL
-  ? new UpstashRedis({
+  ? new Redis({
       url: process.env.UPSTASH_REDIS_REST_URL,
       token: process.env.UPSTASH_REDIS_REST_TOKEN || "",
     })
