@@ -3,63 +3,43 @@ import { getRedisClient } from "@/lib/redis";
 
 export async function GET() {
   try {
-    // Get Redis client (now returns a Promise<Redis>)
     const redis = await getRedisClient();
 
-    // Test basic connection
+    // Test Redis connection with PING
     const pingResult = await redis.ping();
 
-    // Get Redis info
-    const info = await redis.info();
-
-    // Get Redis config
+    // Get Redis status
     const config = {
-      host: redis.options.host,
-      port: redis.options.port,
-      tls: !!redis.options.tls,
-      password: redis.options.password ? "******" : "not set",
+      status: pingResult === "PONG" ? "connected" : "error",
+      timestamp: new Date().toISOString(),
+      environment: process.env.NODE_ENV || "unknown",
+      upstashUrl: process.env.UPSTASH_REDIS_REST_URL
+        ? "configured"
+        : "not configured",
     };
+
+    // Test basic operations
+    const testKey = "connection_test";
+    await redis.set(testKey, "test_value");
+    const testValue = await redis.get(testKey);
+    await redis.del(testKey);
 
     return NextResponse.json({
       status: "success",
-      ping: pingResult,
       config,
-      info: {
-        redisVersion:
-          info
-            .split("\n")
-            .find((line) => line.startsWith("redis_version"))
-            ?.split(":")[1]
-            ?.trim() || "unknown",
-        connected_clients:
-          info
-            .split("\n")
-            .find((line) => line.startsWith("connected_clients"))
-            ?.split(":")[1]
-            ?.trim() || "unknown",
-        used_memory_human:
-          info
-            .split("\n")
-            .find((line) => line.startsWith("used_memory_human"))
-            ?.split(":")[1]
-            ?.trim() || "unknown",
-        timestamp: new Date().toISOString(),
-        environment: process.env.NODE_ENV || "development",
+      operations: {
+        set: "success",
+        get: testValue === "test_value" ? "success" : "failed",
+        delete: "success",
       },
     });
   } catch (error: any) {
-    console.error("Redis test error:", error);
-
+    console.error("Redis connection test failed:", error);
     return NextResponse.json(
       {
         status: "error",
-        message: error.message,
-        stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
-        config: {
-          host: process.env.REDIS_URL?.split(":")[0] || "localhost",
-          port: process.env.REDIS_URL?.split(":")[1] || 6379,
-          password: process.env.REDIS_PASSWORD ? "set" : "not set",
-        },
+        message: error.message || "Redis connection test failed",
+        error: process.env.NODE_ENV === "development" ? error : undefined,
       },
       { status: 500 }
     );
