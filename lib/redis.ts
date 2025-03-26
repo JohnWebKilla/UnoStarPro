@@ -301,14 +301,17 @@ export const setCache = async (
 ): Promise<void> => {
   return withRedisClient(async (client) => {
     try {
+      console.log(`[Redis] Setting cache for key: ${key}`);
       const serializedValue = JSON.stringify(value);
       if (expireInSeconds) {
         await client.set(key, serializedValue, "EX", expireInSeconds);
       } else {
         await client.set(key, serializedValue);
       }
+      console.log(`[Redis] Successfully set cache for key: ${key}`);
     } catch (error) {
-      console.error(`Error setting cache for key ${key}:`, error);
+      console.error(`[Redis] Error setting cache for key ${key}:`, error);
+      throw error; // Propagate the error for better error handling
     }
   });
 };
@@ -316,12 +319,17 @@ export const setCache = async (
 export const getCache = async <T>(key: string): Promise<T | null> => {
   return withRedisClient(async (client) => {
     try {
+      console.log(`[Redis] Attempting to get cache for key: ${key}`);
       const value = await client.get(key);
-      if (!value) return null;
+      if (!value) {
+        console.log(`[Redis] Cache miss for key: ${key}`);
+        return null;
+      }
+      console.log(`[Redis] Cache hit for key: ${key}`);
       return JSON.parse(value) as T;
     } catch (error) {
-      console.error(`Error getting cache for key ${key}:`, error);
-      return null;
+      console.error(`[Redis] Error getting cache for key ${key}:`, error);
+      throw error; // Propagate the error for better error handling
     }
   });
 };
