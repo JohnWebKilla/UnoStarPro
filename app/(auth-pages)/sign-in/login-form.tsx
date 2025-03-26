@@ -91,29 +91,55 @@ export default function LoginForm() {
 
       setLoadingMessage("Preparing your workspace...");
 
-      // Initialize cache manager and prefetch data before navigation
+      // Initialize cache manager
       const cacheManager = new ClientCacheManager(result.userData.role);
 
       try {
         // Start prefetching and wait for completion
+        setLoadingMessage("Caching your data...");
         await cacheManager.prefetchAllData();
 
-        // Verify cache is populated
+        // Verify cache is populated with required data
         let retries = 0;
         const maxRetries = 5;
         const retryDelay = 1000; // 1 second
+        let isCacheReady = false;
 
-        while (retries < maxRetries) {
+        while (retries < maxRetries && !isCacheReady) {
+          setLoadingMessage(
+            `Verifying data cache... (Attempt ${retries + 1}/${maxRetries})`
+          );
+
+          // Check if cache is complete
           const isComplete = await cacheManager.isPrefetchComplete();
-          if (isComplete) {
-            break;
+          if (!isComplete) {
+            await new Promise((resolve) => setTimeout(resolve, retryDelay));
+            retries++;
+            continue;
           }
+
+          // Verify essential data is cached
+          try {
+            const cacheStatus = await cacheManager.verifyCacheStatus();
+            if (cacheStatus.isReady) {
+              isCacheReady = true;
+              break;
+            }
+          } catch (verifyError) {
+            console.error("Cache verification error:", verifyError);
+          }
+
           await new Promise((resolve) => setTimeout(resolve, retryDelay));
           retries++;
-          setLoadingMessage(
-            `Preparing your workspace... (Attempt ${retries + 1}/${maxRetries})`
+        }
+
+        if (!isCacheReady) {
+          console.warn(
+            "Cache verification incomplete, proceeding with caution"
           );
         }
+
+        setLoadingMessage("Redirecting to your dashboard...");
 
         // Check if there's a redirect URL in the search params
         const redirectTo = searchParams.get("redirectTo");
@@ -127,6 +153,7 @@ export default function LoginForm() {
       } catch (cacheError) {
         console.error("Cache preparation error:", cacheError);
         // Continue with navigation even if caching fails
+        setLoadingMessage("Proceeding with limited offline capability...");
         router.replace(result.dashboardUrl);
       }
     } catch (error) {

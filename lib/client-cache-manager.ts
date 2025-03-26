@@ -409,6 +409,43 @@ export class ClientCacheManager {
     const cacheKey = this.getCacheKey(path);
     localStorage.removeItem(cacheKey);
   }
+
+  async verifyCacheStatus(): Promise<{
+    isReady: boolean;
+    missingPaths: string[];
+  }> {
+    if (!this.isClient) {
+      return { isReady: false, missingPaths: [] };
+    }
+
+    const configs = pageConfigs[this.role] || [];
+    const missingPaths: string[] = [];
+
+    for (const config of configs) {
+      const cacheKey = this.getCacheKey(config.path);
+      const cachedData = localStorage.getItem(cacheKey);
+
+      if (!cachedData) {
+        missingPaths.push(config.path);
+        continue;
+      }
+
+      try {
+        const parsed = JSON.parse(cachedData);
+        if (this.isDataExpired(parsed.expiresAt)) {
+          missingPaths.push(config.path);
+        }
+      } catch (error) {
+        console.error(`Error parsing cache for ${config.path}:`, error);
+        missingPaths.push(config.path);
+      }
+    }
+
+    return {
+      isReady: missingPaths.length === 0,
+      missingPaths,
+    };
+  }
 }
 
 // Exported functions for page data management
