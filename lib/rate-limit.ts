@@ -34,10 +34,14 @@ export async function rateLimit(
 
   try {
     const redis = await getRedisClient();
+    if (!redis) {
+      console.warn("Redis client not initialized, skipping rate limiting");
+      return undefined;
+    }
 
     // Get current count
     const currentCount = await redis.get(key);
-    const count = currentCount ? parseInt(currentCount, 10) : 0;
+    const count = currentCount ? parseInt(currentCount.toString(), 10) : 0;
 
     // If count exceeds limit, return error response
     if (count >= limit) {
@@ -77,7 +81,7 @@ export async function rateLimit(
     headers.set("X-RateLimit-Remaining", (limit - count - 1).toString());
     headers.set(
       "X-RateLimit-Reset",
-      (Math.floor(Date.now() / 1000) + ttl).toString()
+      (Math.floor(Date.now() / 1000) + (ttl || 0)).toString()
     );
 
     // No need to block the request, just return undefined

@@ -8,7 +8,6 @@ import { redirect } from "next/navigation";
 import { getDashboardForRole } from "@/utils/protected";
 import type { Role } from "@/types/role";
 import { ClientCacheManager } from "@/lib/client-cache-manager";
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import { revalidatePath } from "next/cache";
 
 export async function signUpAction(formData: FormData) {

@@ -4,6 +4,23 @@ import { getRedisClient } from "@/lib/redis";
 export async function GET() {
   try {
     const redis = await getRedisClient();
+    if (!redis) {
+      return NextResponse.json(
+        {
+          status: "error",
+          message: "Redis client not initialized",
+          config: {
+            status: "error",
+            timestamp: new Date().toISOString(),
+            environment: process.env.NODE_ENV || "unknown",
+            upstashUrl: process.env.UPSTASH_REDIS_REST_URL
+              ? "configured"
+              : "not configured",
+          },
+        },
+        { status: 500 }
+      );
+    }
 
     // Test Redis connection with PING
     const pingResult = await redis.ping();

@@ -18,6 +18,9 @@ export async function createSession(
   expiryInSeconds: number = DEFAULT_SESSION_EXPIRY
 ): Promise<string> {
   const redis = await getRedisClient();
+  if (!redis) {
+    throw new Error("Redis client not initialized");
+  }
 
   // Generate a unique session ID
   const sessionId = uuidv4();
@@ -56,6 +59,10 @@ export async function getSession<T = Record<string, any>>(
   sessionId: string
 ): Promise<T | null> {
   const redis = await getRedisClient();
+  if (!redis) {
+    throw new Error("Redis client not initialized");
+  }
+
   const sessionKey = `session:${sessionId}`;
 
   // Get session data
@@ -64,7 +71,7 @@ export async function getSession<T = Record<string, any>>(
 
   try {
     // Parse session data
-    const session = JSON.parse(sessionData) as T;
+    const session = JSON.parse(sessionData.toString()) as T;
 
     // Update last accessed timestamp
     const updatedSession = {
@@ -98,6 +105,10 @@ export async function updateSession(
   data: Record<string, any>
 ): Promise<boolean> {
   const redis = await getRedisClient();
+  if (!redis) {
+    throw new Error("Redis client not initialized");
+  }
+
   const sessionKey = `session:${sessionId}`;
 
   // Get current session
@@ -106,7 +117,7 @@ export async function updateSession(
 
   try {
     // Parse current session
-    const currentSession = JSON.parse(currentSessionData);
+    const currentSession = JSON.parse(currentSessionData.toString());
 
     // Merge with new data
     const updatedSession = {
@@ -138,13 +149,17 @@ export async function updateSession(
  */
 export async function deleteSession(sessionId: string): Promise<boolean> {
   const redis = await getRedisClient();
+  if (!redis) {
+    throw new Error("Redis client not initialized");
+  }
+
   const sessionKey = `session:${sessionId}`;
 
   // Get session to find user ID
   const sessionData = await redis.get(sessionKey);
   if (sessionData) {
     try {
-      const session = JSON.parse(sessionData);
+      const session = JSON.parse(sessionData.toString());
       const userId = session.userId;
 
       // Remove session from user's sessions set
@@ -170,6 +185,10 @@ export async function deleteSession(sessionId: string): Promise<boolean> {
  */
 export async function getUserSessions(userId: string): Promise<string[]> {
   const redis = await getRedisClient();
+  if (!redis) {
+    throw new Error("Redis client not initialized");
+  }
+
   const userSessionsKey = `user-sessions:${userId}`;
 
   // Get all session IDs for the user
@@ -185,6 +204,10 @@ export async function getUserSessions(userId: string): Promise<string[]> {
  */
 export async function deleteUserSessions(userId: string): Promise<number> {
   const redis = await getRedisClient();
+  if (!redis) {
+    throw new Error("Redis client not initialized");
+  }
+
   const userSessionsKey = `user-sessions:${userId}`;
 
   // Get all session IDs for the user

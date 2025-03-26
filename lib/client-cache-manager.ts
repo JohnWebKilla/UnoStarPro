@@ -1,5 +1,5 @@
 import { Role } from "@/types/role";
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+import { createClient } from "@/utils/supabase/client";
 
 const CACHE_PREFIX = "page_data:";
 const CACHE_TTL = 3600 * 1000; // 1 hour in milliseconds
@@ -28,7 +28,7 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
       return { "Cache-Control": "no-store" };
     }
 
-    const supabase = createClientComponentClient();
+    const supabase = createClient();
     const {
       data: { session },
       error: sessionError,

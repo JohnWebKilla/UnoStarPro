@@ -4,6 +4,17 @@ import { getRedisClient } from "@/lib/redis";
 export async function GET() {
   try {
     const redis = await getRedisClient();
+    if (!redis) {
+      return NextResponse.json(
+        {
+          status: "unhealthy",
+          error: "Redis client not initialized",
+          timestamp: new Date().toISOString(),
+        },
+        { status: 503 }
+      );
+    }
+
     await redis.ping();
 
     return NextResponse.json({
