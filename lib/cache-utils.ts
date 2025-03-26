@@ -89,8 +89,9 @@ export async function cacheCommonData(
         const supabase = await createClient();
         const { data } = await supabase.from("users").select("*").limit(100);
         if (data) {
+          // Cache both formats
           await setCache(`users:list:${userId}`, data, CACHE_TTL);
-          await setCache(`api:/api/users`, data, CACHE_TTL); // Cache both keys
+          await setCache(`api:/api/users`, data, CACHE_TTL);
         }
       } catch (error) {
         console.error("Error caching users:", error);
@@ -106,8 +107,9 @@ export async function cacheCommonData(
           .select("*")
           .limit(100);
         if (data) {
+          // Cache both formats
           await setCache("companies:list", data, CACHE_TTL);
-          await setCache(`api:/api/companies`, data, CACHE_TTL); // Cache both keys
+          await setCache(`api:/api/companies`, data, CACHE_TTL);
         }
       } catch (error) {
         console.error("Error caching companies:", error);
@@ -120,8 +122,9 @@ export async function cacheCommonData(
         const supabase = await createClient();
         const { data } = await supabase.from("drivers").select("*").limit(100);
         if (data) {
+          // Cache both formats
           await setCache("drivers:client-list", data, CACHE_TTL);
-          await setCache(`api:/api/drivers`, data, CACHE_TTL); // Cache both keys
+          await setCache(`api:/api/drivers`, data, CACHE_TTL);
         }
       } catch (error) {
         console.error("Error caching drivers:", error);
@@ -138,6 +141,8 @@ export async function cacheCommonData(
         user_id: userId,
       });
       if (data) {
+        // Cache both formats
+        await setCache(`dashboard:${userId}`, data, CACHE_TTL);
         await setCache(`api:/api/dashboard`, data, CACHE_TTL);
       }
     } catch (error) {
@@ -155,8 +160,15 @@ export async function cacheCommonData(
         month_param: month,
       });
       if (currentData) {
+        // Cache both formats
+        await setCache(`expenses:${month}:${userId}`, currentData, CACHE_TTL);
         await setCache(
           `api:/api/expenses?month=${month}`,
+          currentData,
+          CACHE_TTL
+        );
+        await setCache(
+          `expenses:chart:${month}:${userId}`,
           currentData,
           CACHE_TTL
         );
@@ -172,8 +184,19 @@ export async function cacheCommonData(
         month_param: nextMonthStr,
       });
       if (nextData) {
+        // Cache both formats
+        await setCache(
+          `expenses:${nextMonthStr}:${userId}`,
+          nextData,
+          CACHE_TTL
+        );
         await setCache(
           `api:/api/expenses?month=${nextMonthStr}`,
+          nextData,
+          CACHE_TTL
+        );
+        await setCache(
+          `expenses:chart:${nextMonthStr}:${userId}`,
           nextData,
           CACHE_TTL
         );
@@ -192,9 +215,18 @@ export async function cacheCommonData(
   cacheOperations.push(async () => {
     try {
       const supabase = await createClient();
-      const { data } = await supabase.rpc("get_scheduling_data");
-      if (data) {
-        await setCache(`api:/api/scheduling`, data, CACHE_TTL);
+      const [{ data: employees }, { data: schedules }] = await Promise.all([
+        supabase.from("users").select("*"),
+        supabase.from("schedules").select("*"),
+      ]);
+      if (employees && schedules) {
+        const schedulingData = {
+          employees,
+          schedules,
+        };
+        // Cache both formats
+        await setCache("scheduling:data", schedulingData, CACHE_TTL);
+        await setCache(`api:/api/scheduling`, schedulingData, CACHE_TTL);
       }
     } catch (error) {
       console.error("Error caching scheduling:", error);
@@ -211,6 +243,12 @@ export async function cacheCommonData(
         month_param: month,
       });
       if (currentData) {
+        // Cache both formats
+        await setCache(
+          `payroll:summary:${month}:${userId}`,
+          currentData,
+          CACHE_TTL
+        );
         await setCache(
           `api:/api/payroll/monthly-summary?month=${month}`,
           currentData,
@@ -223,6 +261,12 @@ export async function cacheCommonData(
         month_param: nextMonthStr,
       });
       if (nextData) {
+        // Cache both formats
+        await setCache(
+          `payroll:summary:${nextMonthStr}:${userId}`,
+          nextData,
+          CACHE_TTL
+        );
         await setCache(
           `api:/api/payroll/monthly-summary?month=${nextMonthStr}`,
           nextData,
