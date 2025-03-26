@@ -1,4 +1,21 @@
 import { getCache, setCache } from "./redis";
+import { Role } from "@/types/role";
+import { createClient } from "@/utils/supabase/server";
+import { cookies } from "next/headers";
+
+const CACHE_TTL = 300; // 5 minutes
+
+interface CommonData {
+  users?: any[];
+  companies?: any[];
+  drivers?: any[];
+  dashboard?: any;
+  expenses?: any;
+  scheduling?: any;
+  payroll?: any;
+}
+
+type CacheOperation = () => Promise<void>;
 
 /**
  * Generic function to cache database query results
@@ -49,4 +66,127 @@ export function buildCacheKey(
     (part) => part !== null && part !== undefined
   );
   return `${prefix}:${validParts.join(":")}`;
+}
+
+export async function cacheCommonData(
+  userId: string,
+  role: Role
+): Promise<void> {
+  const cookieStore = cookies();
+  const month = new Date().toISOString().slice(0, 7);
+
+  // Define all cache operations based on role
+  const cacheOperations: CacheOperation[] = [];
+
+  // Admin and superadmin specific caching
+  if (role === "admin" || role === "superadmin") {
+    // Cache users
+    cacheOperations.push(async () => {
+      try {
+        const supabase = createClient();
+        const { data } = await supabase.from("users").select("*").limit(100);
+        if (data) {
+          await setCache(`users:list:${userId}`, data, CACHE_TTL);
+        }
+      } catch (error) {
+        console.error("Error caching users:", error);
+      }
+    });
+
+    // Cache companies
+    cacheOperations.push(async () => {
+      try {
+        const supabase = createClient();
+        const { data } = await supabase
+          .from("companies")
+          .select("*")
+          .limit(100);
+        if (data) {
+          await setCache("companies:list", data, CACHE_TTL);
+        }
+      } catch (error) {
+        console.error("Error caching companies:", error);
+      }
+    });
+
+    // Cache drivers
+    cacheOperations.push(async () => {
+      try {
+        const supabase = createClient();
+        const { data } = await supabase.from("drivers").select("*").limit(100);
+        if (data) {
+          await setCache("drivers:client-list", data, CACHE_TTL);
+        }
+      } catch (error) {
+        console.error("Error caching drivers:", error);
+      }
+    });
+  }
+
+  // Common caching for all roles
+  // Cache dashboard data
+  cacheOperations.push(async () => {
+    try {
+      const supabase = createClient();
+      const { data } = await supabase.rpc("get_dashboard_data", {
+        user_id: userId,
+      });
+      if (data) {
+        await setCache(`api:/api/dashboard`, data, CACHE_TTL);
+      }
+    } catch (error) {
+      console.error("Error caching dashboard:", error);
+    }
+  });
+
+  // Cache expenses
+  cacheOperations.push(async () => {
+    try {
+      const supabase = createClient();
+      const { data } = await supabase.rpc("get_expenses", {
+        month_param: month,
+      });
+      if (data) {
+        await setCache(`api:/api/expenses?month=${month}`, data, CACHE_TTL);
+      }
+    } catch (error) {
+      console.error("Error caching expenses:", error);
+    }
+  });
+
+  // Cache scheduling
+  cacheOperations.push(async () => {
+    try {
+      const supabase = createClient();
+      const { data } = await supabase.rpc("get_scheduling_data");
+      if (data) {
+        await setCache(`api:/api/scheduling`, data, CACHE_TTL);
+      }
+    } catch (error) {
+      console.error("Error caching scheduling:", error);
+    }
+  });
+
+  // Cache payroll
+  cacheOperations.push(async () => {
+    try {
+      const supabase = createClient();
+      const { data } = await supabase.rpc("get_monthly_payroll", {
+        month_param: month,
+      });
+      if (data) {
+        await setCache(
+          `api:/api/payroll/monthly-summary?month=${month}`,
+          data,
+          CACHE_TTL
+        );
+      }
+    } catch (error) {
+      console.error("Error caching payroll:", error);
+    }
+  });
+
+  // Execute all cache operations in parallel
+  await Promise.all(cacheOperations.map((op) => op()));
+  console.log(`Cache warming completed for user ${userId} with role ${role}`);
 }
