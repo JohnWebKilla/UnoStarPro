@@ -113,58 +113,39 @@ export async function signIn(email: string, password: string) {
       throw signInError || new Error("No user returned from sign in");
     }
 
-    // Try to get role from profiles first
-    let role = "customer"; // Default role
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role")
+    // Get user data from users table
+    const { data: userData, error: userError } = await supabase
+      .from("users")
+      .select("role, first_name, last_name")
       .eq("id", user.id)
       .single();
 
-    if (profile?.role) {
-      role = profile.role;
-    } else {
-      // Fallback to users table if no profile exists
-      const { data: userData } = await supabase
-        .from("users")
-        .select("role")
-        .eq("id", user.id)
-        .single();
-
-      if (userData?.role) {
-        role = userData.role;
-
-        // Create profile with role from users table
-        const { error: insertError } = await supabase.from("profiles").insert({
-          id: user.id,
-          role: userData.role,
-          updated_at: new Date().toISOString(),
-        });
-
-        if (insertError) {
-          console.error("Error creating profile:", insertError);
-        }
-      } else {
-        // Create default profile
-        const { error: insertError } = await supabase.from("profiles").insert({
-          id: user.id,
-          role: "customer", // Default role
-          updated_at: new Date().toISOString(),
-        });
-
-        if (insertError) {
-          console.error("Error creating profile:", insertError);
-        }
-      }
+    if (userError) {
+      console.error("Error fetching user data:", userError);
+      throw userError;
     }
 
+    if (!userData) {
+      console.error("No user data found");
+      throw new Error("No user data found");
+    }
+
+    const role = userData.role || "customer";
     const dashboardUrl = getDashboardUrl(role);
     console.log("Dashboard URL for role:", { role, dashboardUrl });
 
     // Prefetch data based on role
     await prefetchData(supabase, role);
 
-    return { success: true, dashboardUrl };
+    return {
+      success: true,
+      userData: {
+        role: role as Role,
+        first_name: userData.first_name,
+        last_name: userData.last_name,
+      },
+      dashboardUrl,
+    };
   } catch (error) {
     console.error("Sign in error:", error);
     return { success: false, error: "Invalid credentials" };

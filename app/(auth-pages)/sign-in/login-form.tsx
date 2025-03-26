@@ -94,30 +94,39 @@ export default function LoginForm() {
       // Initialize cache manager and prefetch data before navigation
       const cacheManager = new ClientCacheManager(result.userData.role);
 
-      // Start prefetching
-      const prefetchPromise = cacheManager.prefetchAllData();
+      try {
+        // Start prefetching and wait for completion
+        await cacheManager.prefetchAllData();
 
-      // Poll for prefetch completion
-      const pollInterval = 500; // 500ms
-      const maxAttempts = 20; // 10 seconds total
-      let attempts = 0;
+        // Verify cache is populated
+        let retries = 0;
+        const maxRetries = 5;
+        const retryDelay = 1000; // 1 second
 
-      while (attempts < maxAttempts) {
-        const isComplete = await cacheManager.isPrefetchComplete();
-        if (isComplete) {
-          break;
+        while (retries < maxRetries) {
+          const isComplete = await cacheManager.isPrefetchComplete();
+          if (isComplete) {
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, retryDelay));
+          retries++;
+          setLoadingMessage(
+            `Preparing your workspace... (Attempt ${retries + 1}/${maxRetries})`
+          );
         }
-        await new Promise((resolve) => setTimeout(resolve, pollInterval));
-        attempts++;
-      }
 
-      // Check if there's a redirect URL in the search params
-      const redirectTo = searchParams.get("redirectTo");
+        // Check if there's a redirect URL in the search params
+        const redirectTo = searchParams.get("redirectTo");
 
-      // Navigate to the redirect URL or dashboard
-      if (redirectTo && redirectTo.startsWith("/(protected)")) {
-        router.replace(redirectTo);
-      } else {
+        // Navigate to the redirect URL or dashboard
+        if (redirectTo && redirectTo.startsWith("/(protected)")) {
+          router.replace(redirectTo);
+        } else {
+          router.replace(result.dashboardUrl);
+        }
+      } catch (cacheError) {
+        console.error("Cache preparation error:", cacheError);
+        // Continue with navigation even if caching fails
         router.replace(result.dashboardUrl);
       }
     } catch (error) {
