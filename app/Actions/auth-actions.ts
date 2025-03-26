@@ -109,25 +109,60 @@ export async function signIn(email: string, password: string) {
       password,
     });
 
-    if (signInError) {
-      throw signInError;
+    if (signInError || !user) {
+      throw signInError || new Error("No user returned from sign in");
     }
 
-    // Get user role for dashboard URL
+    // Try to get role from profiles first
+    let role = "customer"; // Default role
     const { data: profile } = await supabase
       .from("profiles")
       .select("role")
-      .eq("id", user?.id)
+      .eq("id", user.id)
       .single();
 
-    const dashboardUrl = getDashboardUrl(profile?.role);
-    console.log("Dashboard URL for role:", {
-      role: profile?.role,
-      dashboardUrl,
-    });
+    if (profile?.role) {
+      role = profile.role;
+    } else {
+      // Fallback to users table if no profile exists
+      const { data: userData } = await supabase
+        .from("users")
+        .select("role")
+        .eq("id", user.id)
+        .single();
 
-    // Prefetch commonly accessed data
-    await prefetchData(supabase, profile?.role);
+      if (userData?.role) {
+        role = userData.role;
+
+        // Create profile with role from users table
+        const { error: insertError } = await supabase.from("profiles").insert({
+          id: user.id,
+          role: userData.role,
+          updated_at: new Date().toISOString(),
+        });
+
+        if (insertError) {
+          console.error("Error creating profile:", insertError);
+        }
+      } else {
+        // Create default profile
+        const { error: insertError } = await supabase.from("profiles").insert({
+          id: user.id,
+          role: "customer", // Default role
+          updated_at: new Date().toISOString(),
+        });
+
+        if (insertError) {
+          console.error("Error creating profile:", insertError);
+        }
+      }
+    }
+
+    const dashboardUrl = getDashboardUrl(role);
+    console.log("Dashboard URL for role:", { role, dashboardUrl });
+
+    // Prefetch data based on role
+    await prefetchData(supabase, role);
 
     return { success: true, dashboardUrl };
   } catch (error) {
