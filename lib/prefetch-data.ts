@@ -1,10 +1,19 @@
 import { SupabaseClient } from "@supabase/supabase-js";
 import { Redis } from "@upstash/redis";
 
-const redis = Redis.fromEnv();
+// Initialize Redis client with URL and password
+const redis = new Redis({
+  url: `redis://${process.env.REDIS_URL}`,
+  token: process.env.REDIS_PASSWORD || "",
+});
 
 export async function prefetchData(supabase: SupabaseClient, role?: string) {
   try {
+    if (!process.env.REDIS_URL || !process.env.REDIS_PASSWORD) {
+      console.warn("Redis credentials not found, skipping prefetch");
+      return;
+    }
+
     // Common data for all roles
     const commonPromises = [
       // Fetch and cache companies
