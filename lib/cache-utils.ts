@@ -74,6 +74,9 @@ export async function cacheCommonData(
 ): Promise<void> {
   const cookieStore = cookies();
   const month = new Date().toISOString().slice(0, 7);
+  const nextMonth = new Date();
+  nextMonth.setMonth(nextMonth.getMonth() + 1);
+  const nextMonthStr = nextMonth.toISOString().slice(0, 7);
 
   // Define all cache operations based on role
   const cacheOperations: CacheOperation[] = [];
@@ -86,7 +89,7 @@ export async function cacheCommonData(
         const supabase = await createClient();
         const { data } = await supabase.from("users").select("*").limit(100);
         if (data) {
-          await setCache(`users:list:${userId}`, data, CACHE_TTL);
+          await setCache(`api:/api/users`, data, CACHE_TTL);
         }
       } catch (error) {
         console.error("Error caching users:", error);
@@ -102,7 +105,7 @@ export async function cacheCommonData(
           .select("*")
           .limit(100);
         if (data) {
-          await setCache("companies:list", data, CACHE_TTL);
+          await setCache(`api:/api/companies`, data, CACHE_TTL);
         }
       } catch (error) {
         console.error("Error caching companies:", error);
@@ -115,7 +118,7 @@ export async function cacheCommonData(
         const supabase = await createClient();
         const { data } = await supabase.from("drivers").select("*").limit(100);
         if (data) {
-          await setCache("drivers:client-list", data, CACHE_TTL);
+          await setCache(`api:/api/drivers`, data, CACHE_TTL);
         }
       } catch (error) {
         console.error("Error caching drivers:", error);
@@ -139,15 +142,43 @@ export async function cacheCommonData(
     }
   });
 
-  // Cache expenses
+  // Cache expenses for current and next month
   cacheOperations.push(async () => {
     try {
       const supabase = await createClient();
-      const { data } = await supabase.rpc("get_expenses", {
+
+      // Current month expenses
+      const { data: currentData } = await supabase.rpc("get_expenses", {
         month_param: month,
       });
-      if (data) {
-        await setCache(`api:/api/expenses?month=${month}`, data, CACHE_TTL);
+      if (currentData) {
+        await setCache(
+          `api:/api/expenses?month=${month}`,
+          currentData,
+          CACHE_TTL
+        );
+        await setCache(
+          `api:/api/expenses/chart?month=${month}`,
+          currentData,
+          CACHE_TTL
+        );
+      }
+
+      // Next month expenses
+      const { data: nextData } = await supabase.rpc("get_expenses", {
+        month_param: nextMonthStr,
+      });
+      if (nextData) {
+        await setCache(
+          `api:/api/expenses?month=${nextMonthStr}`,
+          nextData,
+          CACHE_TTL
+        );
+        await setCache(
+          `api:/api/expenses/chart?month=${nextMonthStr}`,
+          nextData,
+          CACHE_TTL
+        );
       }
     } catch (error) {
       console.error("Error caching expenses:", error);
@@ -167,17 +198,31 @@ export async function cacheCommonData(
     }
   });
 
-  // Cache payroll
+  // Cache payroll for current and next month
   cacheOperations.push(async () => {
     try {
       const supabase = await createClient();
-      const { data } = await supabase.rpc("get_monthly_payroll", {
+
+      // Current month payroll
+      const { data: currentData } = await supabase.rpc("get_monthly_payroll", {
         month_param: month,
       });
-      if (data) {
+      if (currentData) {
         await setCache(
           `api:/api/payroll/monthly-summary?month=${month}`,
-          data,
+          currentData,
+          CACHE_TTL
+        );
+      }
+
+      // Next month payroll
+      const { data: nextData } = await supabase.rpc("get_monthly_payroll", {
+        month_param: nextMonthStr,
+      });
+      if (nextData) {
+        await setCache(
+          `api:/api/payroll/monthly-summary?month=${nextMonthStr}`,
+          nextData,
           CACHE_TTL
         );
       }
