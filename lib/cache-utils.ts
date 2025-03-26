@@ -89,7 +89,8 @@ export async function cacheCommonData(
         const supabase = await createClient();
         const { data } = await supabase.from("users").select("*").limit(100);
         if (data) {
-          await setCache(`api:/api/users`, data, CACHE_TTL);
+          await setCache(`users:list:${userId}`, data, CACHE_TTL);
+          await setCache(`api:/api/users`, data, CACHE_TTL); // Cache both keys
         }
       } catch (error) {
         console.error("Error caching users:", error);
@@ -105,7 +106,8 @@ export async function cacheCommonData(
           .select("*")
           .limit(100);
         if (data) {
-          await setCache(`api:/api/companies`, data, CACHE_TTL);
+          await setCache("companies:list", data, CACHE_TTL);
+          await setCache(`api:/api/companies`, data, CACHE_TTL); // Cache both keys
         }
       } catch (error) {
         console.error("Error caching companies:", error);
@@ -118,7 +120,8 @@ export async function cacheCommonData(
         const supabase = await createClient();
         const { data } = await supabase.from("drivers").select("*").limit(100);
         if (data) {
-          await setCache(`api:/api/drivers`, data, CACHE_TTL);
+          await setCache("drivers:client-list", data, CACHE_TTL);
+          await setCache(`api:/api/drivers`, data, CACHE_TTL); // Cache both keys
         }
       } catch (error) {
         console.error("Error caching drivers:", error);
