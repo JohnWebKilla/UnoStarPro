@@ -118,13 +118,22 @@ function PaychecksContent() {
         // Try to get from cache first
         if (!skipCache) {
           const cachedResult = await getClientCache(`payroll:${monthKey}`);
-          if (cachedResult && Array.isArray(cachedResult)) {
-            console.log("Using cached payroll data");
-            setSummaries(cachedResult);
-            setDataSource("cache");
-            setLastFetchTime(new Date());
-            setIsLoading(false);
-            return;
+          if (cachedResult) {
+            console.log("Using cached payroll data:", cachedResult);
+            // Handle both array and PayrollApiResponse formats
+            const payrollData = Array.isArray(cachedResult)
+              ? cachedResult
+              : cachedResult.data;
+
+            if (Array.isArray(payrollData)) {
+              setSummaries(payrollData);
+              setDataSource("cache");
+              setLastFetchTime(new Date());
+              setIsLoading(false);
+              return;
+            } else {
+              console.warn("Invalid cached payroll data format:", payrollData);
+            }
           }
         }
 
@@ -155,7 +164,7 @@ function PaychecksContent() {
           console.log(`Summaries loaded from API in ${fetchTime}ms:`, result);
           setSummaries(result.data);
           // Cache the data
-          await setClientCache(`payroll:${monthKey}`, result.data, 300);
+          await setClientCache(`payroll:${monthKey}`, result, 300);
         }
 
         setDataSource("database");

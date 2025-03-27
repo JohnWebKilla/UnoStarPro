@@ -118,11 +118,7 @@ export async function prefetchData(
         `${BASE_URL}/api/payroll/monthly-summary?month=${currentMonth}`
       ).then(async (data: ApiData | null) => {
         if (data) {
-          await setCache(
-            `payroll:summary:${currentMonth}:${userId}`,
-            data,
-            CACHE_TTL
-          );
+          await setCache(`payroll:${currentMonth}`, data, CACHE_TTL);
           await setCache(
             `api:/api/payroll/monthly-summary?month=${currentMonth}`,
             data,
