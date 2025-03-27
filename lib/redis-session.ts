@@ -1,4 +1,4 @@
-import { RedisManager } from "./redis-manager";
+import { RedisManager } from "@/lib/redis-manager";
 import { v4 as uuidv4 } from "uuid";
 
 // Default session expiration time (24 hours)
@@ -35,12 +35,9 @@ export async function createSession(
 
   // Store session in Redis
   const sessionKey = `session:${sessionId}`;
-  await redis.set(
-    sessionKey,
-    JSON.stringify(sessionData),
-    "EX",
-    expiryInSeconds
-  );
+  await redis.set(sessionKey, JSON.stringify(sessionData), {
+    ex: expiryInSeconds,
+  });
 
   // Create a user-to-sessions index for lookup
   const userSessionsKey = `user-sessions:${userId}`;
@@ -61,7 +58,7 @@ export async function getSession<T = Record<string, any>>(
   try {
     const redis = await RedisManager.getConnection();
     const data = await redis.get(`session:${sessionId}`);
-    return data ? JSON.parse(data) : null;
+    return data ? JSON.parse(data.toString()) : null;
   } catch (error) {
     console.error("Error getting session:", error);
     return null;
@@ -105,7 +102,9 @@ export async function updateSession(
     const ttl = await redis.ttl(sessionKey);
     if (ttl > 0) {
       // Update the session with the merged data
-      await redis.set(sessionKey, JSON.stringify(updatedSession), "EX", ttl);
+      await redis.set(sessionKey, JSON.stringify(updatedSession), {
+        ex: ttl,
+      });
       return true;
     }
 

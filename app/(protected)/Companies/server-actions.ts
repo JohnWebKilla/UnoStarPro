@@ -7,23 +7,76 @@ import { revalidatePath } from "next/cache";
 import { updateCompanyInStripe } from "./stripe-actions";
 import { setCache, getCache } from "@/lib/redis";
 
-export async function getCompaniesAction(): Promise<Company[]> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+// Update cache key to match API pattern
+const COMPANIES_CACHE_KEY = "api:/api/companies";
+const CACHE_TTL = 3600; // 1 hour
 
-  if (!user) {
-    throw new Error("Not authenticated");
+export async function getCompaniesAction(): Promise<{
+  data: Company[];
+  source: "cache" | "database";
+  timing: { total: number; database?: number };
+}> {
+  const startTime = Date.now();
+
+  try {
+    // Try to get from cache first
+    const cachedData = await getCache<Company[]>(COMPANIES_CACHE_KEY);
+    if (cachedData) {
+      console.log("Using cached companies data from Redis");
+      return {
+        data: cachedData,
+        source: "cache",
+        timing: { total: Date.now() - startTime },
+      };
+    }
+
+    // If not in cache, fetch from database
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      throw new Error("Not authenticated");
+    }
+
+    const dbStartTime = Date.now();
+    const { data: companies, error } = await supabase
+      .from("companies")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+
+    // Cache the results
+    await setCache(COMPANIES_CACHE_KEY, companies, CACHE_TTL);
+    console.log(
+      "Companies data cached in Redis with key:",
+      COMPANIES_CACHE_KEY
+    );
+
+    return {
+      data: companies,
+      source: "database",
+      timing: {
+        total: Date.now() - startTime,
+        database: Date.now() - dbStartTime,
+      },
+    };
+  } catch (error) {
+    console.error("Error in getCompaniesAction:", error);
+    throw error;
   }
+}
 
-  const { data: companies, error } = await supabase
-    .from("companies")
-    .select("*")
-    .order("created_at", { ascending: false });
-
-  if (error) throw error;
-  return companies;
+export async function invalidateCompaniesCache(): Promise<void> {
+  try {
+    await setCache(COMPANIES_CACHE_KEY, null, 0);
+    console.log("Companies cache invalidated");
+  } catch (error) {
+    console.error("Error invalidating companies cache:", error);
+    throw error;
+  }
 }
 
 export async function createCompanyAction(

@@ -1,69 +1,99 @@
-import Redis from "ioredis";
+import { Redis } from "@upstash/redis";
+
+// Initialize Redis client
+const redis = new Redis({
+  url: process.env.UPSTASH_REDIS_REST_URL!,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+});
 
 export class RedisManager {
-  private static instance: Redis | null = null;
-  private static connectionPromise: Promise<Redis> | null = null;
+  private static instance: RedisManager;
+  private redis: Redis;
 
-  private static async createConnection(): Promise<Redis> {
-    if (!process.env.REDIS_URL || !process.env.REDIS_PASSWORD) {
-      throw new Error("Redis environment variables not configured");
+  private constructor() {
+    this.redis = redis;
+  }
+
+  static getInstance(): RedisManager {
+    if (!RedisManager.instance) {
+      RedisManager.instance = new RedisManager();
     }
+    return RedisManager.instance;
+  }
 
+  static async getConnection(): Promise<Redis> {
+    return RedisManager.getInstance().redis;
+  }
+
+  // Test Redis connection
+  static async testConnection(): Promise<boolean> {
     try {
-      // Create Redis connection URL
-      const redis = new Redis({
-        host: process.env.REDIS_URL.split(":")[0],
-        port: parseInt(process.env.REDIS_URL.split(":")[1], 10),
-        password: process.env.REDIS_PASSWORD,
-        retryStrategy: (times) => {
-          const delay = Math.min(times * 50, 2000);
-          return delay;
-        },
+      await RedisManager.getInstance().redis.ping();
+      console.log("Successfully connected to Upstash Redis");
+      return true;
+    } catch (error) {
+      console.error("Failed to connect to Redis:", error);
+      return false;
+    }
+  }
+
+  // Set cache with TTL
+  static async setCache(
+    key: string,
+    value: any,
+    ttl: number = 3600
+  ): Promise<boolean> {
+    try {
+      await RedisManager.getInstance().redis.set(key, JSON.stringify(value), {
+        ex: ttl,
       });
-
-      // Test the connection
-      await redis.ping();
-      console.log("Redis connection established successfully");
-
-      return redis;
+      return true;
     } catch (error) {
-      console.error("Failed to establish Redis connection:", error);
-      throw error;
+      console.error(`Error setting cache for key ${key}:`, error);
+      return false;
     }
   }
 
-  public static async getConnection(): Promise<Redis> {
-    // If we already have an instance, return it
-    if (this.instance) {
-      return this.instance;
-    }
-
-    // If we're already creating a connection, return the promise
-    if (this.connectionPromise) {
-      return this.connectionPromise;
-    }
-
-    // Create a new connection
+  // Get cache
+  static async getCache(key: string): Promise<any> {
     try {
-      this.connectionPromise = this.createConnection();
-      this.instance = await this.connectionPromise;
-      return this.instance;
+      const data = await RedisManager.getInstance().redis.get(key);
+      return data ? JSON.parse(data as string) : null;
     } catch (error) {
-      this.connectionPromise = null;
-      throw error;
+      console.error(`Error getting cache for key ${key}:`, error);
+      return null;
     }
   }
 
-  public static async disconnect(): Promise<void> {
-    if (this.instance) {
-      await this.instance.quit();
-      this.instance = null;
-      this.connectionPromise = null;
-      console.log("Redis connection closed");
+  // Delete cache
+  static async deleteCache(key: string): Promise<boolean> {
+    try {
+      await RedisManager.getInstance().redis.del(key);
+      return true;
+    } catch (error) {
+      console.error(`Error deleting cache for key ${key}:`, error);
+      return false;
     }
   }
 
-  public static isConnected(): boolean {
-    return this.instance !== null && this.instance.status === "ready";
+  // Clear all cache
+  static async clearAllCache(): Promise<boolean> {
+    try {
+      await RedisManager.getInstance().redis.flushall();
+      return true;
+    } catch (error) {
+      console.error("Error clearing all cache:", error);
+      return false;
+    }
   }
 }
+
+// Export individual functions for backward compatibility
+export const {
+  getConnection,
+  testConnection,
+  setCache,
+  getCache,
+  deleteCache,
+  clearAllCache,
+} = RedisManager;

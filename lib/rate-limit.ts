@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { RedisManager } from "./redis-manager";
+import { RedisManager } from "@/lib/redis-manager";
 
 interface RateLimitConfig {
   // Maximum number of requests allowed in the time window
@@ -97,7 +97,7 @@ export async function getRemainingRequests(key: string, limit: number) {
   try {
     const redis = await RedisManager.getConnection();
     const current = await redis.get(key);
-    return limit - (current ? parseInt(current, 10) : 0);
+    return limit - (current ? parseInt(current.toString(), 10) : 0);
   } catch (error) {
     console.error("Error getting remaining requests:", error);
     return 0;

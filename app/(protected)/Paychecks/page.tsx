@@ -113,151 +113,67 @@ function PaychecksContent() {
     async (skipCache: boolean = false) => {
       try {
         setIsLoading(true);
-        const monthStart = startOfMonth(selectedMonth);
-        const fetchStartTime = Date.now();
+        const monthKey = format(selectedMonth, "yyyy-MM");
 
-        console.log("Fetching payroll summary for:", {
-          month: format(selectedMonth, "yyyy-MM-dd"),
-          skipCache,
-        });
-
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-
-        if (!user) {
-          throw new Error("User not authenticated");
+        // Try to get from cache first
+        if (!skipCache) {
+          const cachedResult = await getClientCache(`payroll:${monthKey}`);
+          if (cachedResult && Array.isArray(cachedResult)) {
+            console.log("Using cached payroll data");
+            setSummaries(cachedResult);
+            setDataSource("cache");
+            setLastFetchTime(new Date());
+            setIsLoading(false);
+            return;
+          }
         }
 
-        const cacheKey = `payroll:summary:${format(monthStart, "yyyy-MM")}:${user.id}`;
-
-        if (skipCache) {
-          await deleteClientCache(cacheKey);
-          console.log("Cache invalidated before fetching fresh data");
-        }
-
-        const { data: cachedData, source } =
-          await getClientCache<MonthlyPayrollSummary[]>(cacheKey);
-
-        if (cachedData && !skipCache) {
-          console.log(
-            `Summaries loaded from ${source} in ${Date.now() - fetchStartTime}ms`
-          );
-          setSummaries(cachedData);
-          setDataSource(source);
-          setLastFetchTime(new Date());
-          setIsLoading(false);
-          setIsInvalidating(false);
-          return;
-        }
-
+        // Fetch from API
+        const startTime = performance.now();
         const response = await fetch(
-          `/api/payroll/monthly-summary?month=${format(selectedMonth, "yyyy-MM-dd")}&skipCache=${skipCache}`,
+          `/api/payroll/monthly-summary?month=${monthKey}`,
           {
             method: "GET",
             headers: {
               "Content-Type": "application/json",
             },
-            cache: skipCache ? "no-store" : "default",
           }
         );
 
         if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || "Failed to fetch payroll data");
+          throw new Error(`HTTP error! status: ${response.status}`);
         }
 
-        const result: PayrollApiResponse = await response.json();
-        const fetchEndTime = Date.now();
-        const fetchTime = fetchEndTime - fetchStartTime;
+        const result = await response.json();
+        const fetchTime = Math.round(performance.now() - startTime);
 
-        console.log(`Summaries loaded from API in ${fetchTime}ms:`, result);
-
-        // Check if the result contains data for the selected month
-        const selectedMonthStr = format(selectedMonth, "yyyy-MM");
-        const hasDataForSelectedMonth = result.data.some(
-          (summary) => summary.month === selectedMonthStr
-        );
-
-        console.log(
-          `Has data for ${selectedMonthStr}: ${hasDataForSelectedMonth}`
-        );
-
-        if (!hasDataForSelectedMonth) {
-          console.log(`No payroll data found for ${selectedMonthStr}`);
+        // Ensure result.data is an array before setting state
+        if (!Array.isArray(result.data)) {
+          console.error("Invalid data format received:", result);
+          setSummaries([]);
+        } else {
+          console.log(`Summaries loaded from API in ${fetchTime}ms:`, result);
+          setSummaries(result.data);
+          // Cache the data
+          await setClientCache(`payroll:${monthKey}`, result.data, 300);
         }
 
-        // Fetch additional user information (department and schedule)
-        if (result.data.length > 0) {
-          const userIds = result.data.map((summary) => summary.user_id);
-
-          // Fetch user departments
-          const { data: userData, error: userError } = await supabase
-            .from("users")
-            .select("id, department, role")
-            .in("id", userIds);
-
-          if (userError) {
-            console.error("Error fetching user departments:", userError);
-          }
-
-          // Fetch user schedules
-          const { data: scheduleData, error: scheduleError } = await supabase
-            .from("schedules")
-            .select("user_id, working_shift, off_days")
-            .in("user_id", userIds);
-
-          if (scheduleError) {
-            console.error("Error fetching user schedules:", scheduleError);
-          }
-
-          // Create lookup maps
-          const departmentMap = new Map();
-          const roleMap = new Map();
-          if (userData) {
-            userData.forEach((user) => {
-              departmentMap.set(user.id, user.department);
-              roleMap.set(user.id, user.role);
-            });
-          }
-
-          const scheduleMap = new Map();
-          if (scheduleData) {
-            scheduleData.forEach((schedule) => {
-              scheduleMap.set(schedule.user_id, {
-                working_shift: schedule.working_shift,
-                off_days: schedule.off_days,
-              });
-            });
-          }
-
-          // Enhance the payroll data with department and schedule information
-          result.data = result.data.map((summary) => ({
-            ...summary,
-            department: departmentMap.get(summary.user_id) || undefined,
-            role: roleMap.get(summary.user_id) || undefined,
-            schedule: scheduleMap.get(summary.user_id) || undefined,
-          }));
-        }
-
-        // Store in cache for 5 minutes (300 seconds)
-        await setClientCache(cacheKey, result.data, 300);
-        setDataSource(result.source);
-        setSummaries(result.data);
+        setDataSource("database");
         setLastFetchTime(new Date());
       } catch (error) {
         console.error("Error fetching monthly summary:", error);
         toast({
           title: "Error",
-          description: "Failed to fetch payroll data. Please try again.",
+          description: "Failed to fetch payroll data",
           variant: "destructive",
         });
+        // Ensure summaries is set to an empty array on error
+        setSummaries([]);
       } finally {
         setIsLoading(false);
-        setIsInvalidating(false);
       }
     },
-    [selectedMonth, supabase, toast]
+    [selectedMonth, toast]
   );
 
   // Invalidate cache and fetch fresh data
@@ -381,13 +297,16 @@ function PaychecksContent() {
 
   // Calculate summary statistics
   const calculateSummary = () => {
-    if (summaries.length === 0) return { total: 0, paid: 0, pending: 0 };
+    if (!Array.isArray(summaries) || summaries.length === 0) {
+      return { total: 0, paid: 0, pending: 0 };
+    }
 
     return summaries.reduce(
       (acc, summary) => {
-        acc.total += summary.total_amount;
-        acc.paid += summary.paid_amount;
-        acc.pending += summary.pending_amount;
+        if (!summary) return acc;
+        acc.total += summary.total_amount || 0;
+        acc.paid += summary.paid_amount || 0;
+        acc.pending += summary.pending_amount || 0;
         return acc;
       },
       { total: 0, paid: 0, pending: 0 }

@@ -1,10 +1,16 @@
 import { Role } from "@/types/role";
-import { setCache, getCache, deleteCache, getRedisClient } from "@/lib/redis";
+import {
+  setCache,
+  getCache,
+  deleteCache,
+  RedisManager,
+} from "@/lib/redis-manager";
 
 export interface PageData {
   path: string;
   data: any;
   lastFetched: string;
+  expiresAt?: number;
 }
 
 interface PageConfig {
@@ -48,6 +54,31 @@ export async function prefetchPageData(
   );
 }
 
+export async function getPageData(
+  userId: string,
+  path: string
+): Promise<PageData | null> {
+  const cacheKey = `${PAGE_CACHE_PREFIX}${userId}:${path}`;
+  const cachedData = await getCache(cacheKey);
+
+  if (!cachedData) {
+    return null;
+  }
+
+  try {
+    const pageData: PageData = JSON.parse(cachedData);
+    if (pageData.expiresAt && pageData.expiresAt < Date.now()) {
+      await deleteCache(cacheKey);
+      return null;
+    }
+    return pageData;
+  } catch (error) {
+    console.error("Error parsing cached data:", error);
+    await deleteCache(cacheKey);
+    return null;
+  }
+}
+
 export async function invalidatePageCache(
   userId: string,
   path?: string
@@ -59,16 +90,10 @@ export async function invalidatePageCache(
   } else {
     // Invalidate all pages for user
     const pattern = `${PAGE_CACHE_PREFIX}${userId}:*`;
-    const redis = await getRedisClient();
-    if (!redis) {
-      console.warn(
-        "Redis client not initialized, skipping pattern-based cache invalidation"
-      );
-      return;
-    }
+    const redis = await RedisManager.getConnection();
     const keys = await redis.keys(pattern);
     if (keys.length > 0) {
-      await Promise.all(keys.map((key) => deleteCache(key)));
+      await Promise.all(keys.map((key: string) => deleteCache(key)));
     }
   }
 }
@@ -78,9 +103,7 @@ export async function refreshPageData(
   role: Role,
   path: string
 ): Promise<void> {
-  const configs = pageConfigs[role] || [];
-  const config = configs.find((c) => c.path === path);
-
+  const config = pageConfigs[role]?.find((cfg) => cfg.path === path);
   if (!config) {
     throw new Error(`No configuration found for path: ${path}`);
   }
@@ -88,15 +111,16 @@ export async function refreshPageData(
   try {
     const data = await config.fetchFunction();
     const pageData: PageData = {
-      path: config.path,
+      path,
       data,
       lastFetched: new Date().toISOString(),
+      expiresAt: Date.now() + PAGE_CACHE_TTL * 1000,
     };
 
     const cacheKey = `${PAGE_CACHE_PREFIX}${userId}:${path}`;
     await setCache(cacheKey, JSON.stringify(pageData), PAGE_CACHE_TTL);
   } catch (error) {
-    console.error(`Error refreshing data for ${path}:`, error);
+    console.error(`Error refreshing page data for ${path}:`, error);
     throw error;
   }
 }

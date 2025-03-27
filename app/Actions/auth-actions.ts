@@ -113,6 +113,19 @@ export async function signIn(email: string, password: string) {
       throw signInError || new Error("No user returned from sign in");
     }
 
+    // Wait for session to be established
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    // Verify session is active
+    const {
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession();
+    if (sessionError || !session) {
+      console.error("Failed to verify session after sign in:", sessionError);
+      throw new Error("Failed to establish session");
+    }
+
     // Get user data from users table
     const { data: userData, error: userError } = await supabase
       .from("users")
@@ -135,7 +148,8 @@ export async function signIn(email: string, password: string) {
     console.log("Dashboard URL for role:", { role, dashboardUrl });
 
     // Prefetch data based on role
-    await prefetchData(supabase, role);
+    console.log("Starting data prefetch with verified session");
+    await prefetchData({ role: role }, user.id);
 
     return {
       success: true,

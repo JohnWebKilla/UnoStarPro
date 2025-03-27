@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { isRedisConnected } from "@/lib/redis";
+import { RedisManager } from "@/lib/redis-manager";
 
 export async function GET() {
   try {
-    const isConnected = isRedisConnected();
+    const isConnected = await RedisManager.testConnection();
 
     if (!isConnected) {
       return NextResponse.json(

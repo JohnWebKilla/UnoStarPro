@@ -1,84 +1,105 @@
-import { createClient } from "@/utils/supabase/server";
 import { NextResponse } from "next/server";
-import { getCache, setCache } from "@/lib/redis";
+import { createClient } from "@/utils/supabase/server";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const supabase = await createClient();
 
-    // Get current user's session
+    // Get the authenticated user
     const {
-      data: { session },
-      error: sessionError,
-    } = await supabase.auth.getSession();
-    if (sessionError || !session) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return new NextResponse(null, { status: 401 });
     }
 
-    // Get user's role
+    // Get user data including role
     const { data: userData, error: userError } = await supabase
       .from("users")
       .select("role")
-      .eq("id", session.user.id)
+      .eq("id", user.id)
       .single();
 
-    if (userError || !userData) {
-      return NextResponse.json(
-        { error: "Failed to fetch user data" },
-        { status: 500 }
-      );
+    if (userError) {
+      console.error("Error fetching user data:", userError);
+      return new NextResponse(null, { status: 401 });
     }
 
-    // Try to get data from cache first
-    const cacheKey = `dashboard:${session.user.id}`;
-    const cachedData = await getCache(cacheKey);
-    if (cachedData) {
-      return NextResponse.json(cachedData);
+    // Get counts for various entities
+    const [
+      { count: companiesCount },
+      { count: driversCount },
+      { count: usersCount },
+    ] = await Promise.all([
+      supabase.from("companies").select("*", { count: "exact", head: true }),
+      supabase
+        .from("users")
+        .select("*", { count: "exact", head: true })
+        .eq("role", "driver"),
+      supabase.from("users").select("*", { count: "exact", head: true }),
+    ]);
+
+    // Get recent activities
+    const { data: activities, error: activitiesError } = await supabase
+      .from("activities")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(5);
+
+    if (activitiesError) {
+      console.error("Error fetching activities:", activitiesError);
     }
 
-    const role = userData.role;
-    const data: any = {
-      stats: {},
-      recentActivity: [],
+    // Get current month's expenses
+    const currentDate = new Date();
+    const startOfMonth = new Date(
+      currentDate.getFullYear(),
+      currentDate.getMonth(),
+      1
+    );
+    const endOfMonth = new Date(
+      currentDate.getFullYear(),
+      currentDate.getMonth() + 1,
+      0
+    );
+
+    const { data: expenses, error: expensesError } = await supabase
+      .from("expenses")
+      .select("amount")
+      .gte("date", startOfMonth.toISOString())
+      .lt("date", endOfMonth.toISOString());
+
+    if (expensesError) {
+      console.error("Error fetching expenses:", expensesError);
+    }
+
+    const totalExpenses =
+      expenses?.reduce((sum, expense) => sum + expense.amount, 0) || 0;
+
+    // Prepare dashboard data based on user role
+    const dashboardData = {
+      stats: {
+        companies: companiesCount,
+        drivers: driversCount,
+        users: usersCount,
+        expenses: totalExpenses,
+      },
+      recentActivities: activities || [],
+      role: userData.role,
     };
 
-    // Fetch data based on role
-    switch (role) {
-      case "admin":
-      case "superadmin":
-        const { data: countData } = await supabase
-          .from("users")
-          .select("count", { count: "exact", head: true });
-        const { data: recentUsers } = await supabase
-          .from("users")
-          .select("*")
-          .order("created_at", { ascending: false })
-          .limit(5);
-
-        data.stats.totalUsers = countData || 0;
-        data.recentActivity = recentUsers;
-        break;
-
-      case "customer":
-      case "user":
-      case "driver":
-        const { data: profileData } = await supabase
-          .from("users")
-          .select("*")
-          .eq("id", session.user.id)
-          .single();
-        data.profile = profileData;
-        break;
-    }
-
-    // Cache the data for 5 minutes
-    await setCache(cacheKey, data, 300);
-
-    return NextResponse.json(data);
+    return new NextResponse(JSON.stringify(dashboardData), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
   } catch (error) {
     console.error("Dashboard API error:", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
+    return new NextResponse(
+      JSON.stringify({ error: "Internal server error" }),
       { status: 500 }
     );
   }
