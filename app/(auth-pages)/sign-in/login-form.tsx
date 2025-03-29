@@ -58,10 +58,77 @@ export default function LoginForm() {
   const [loadingMessage, setLoadingMessage] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [showEmailSuggestions, setShowEmailSuggestions] = useState(false);
+  const [showAtSuggestion, setShowAtSuggestion] = useState(false);
+  const [emailInput, setEmailInput] = useState("");
   const router = useRouter();
   const searchParams = useSearchParams();
   const { setUserRole, setUserName, setUserEmail } = useUser();
+  const [selectedIndex, setSelectedIndex] = useState(-1);
 
+  const emailDomains = ["gmail.com", "unostarsolutions.com"];
+
+  const handleEmailKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // Handle arrow keys, enter, and escape
+    if (showAtSuggestion || showEmailSuggestions) {
+      switch (e.key) {
+        case "ArrowDown":
+          e.preventDefault();
+          setSelectedIndex((prev) =>
+            showAtSuggestion ? 0 : Math.min(prev + 1, emailDomains.length - 1)
+          );
+          break;
+        case "ArrowUp":
+          e.preventDefault();
+          setSelectedIndex((prev) => Math.max(prev - 1, -1));
+          break;
+        case "Enter":
+          e.preventDefault();
+          if (showAtSuggestion && selectedIndex === 0) {
+            addAtSymbol();
+          } else if (showEmailSuggestions && selectedIndex >= 0) {
+            selectEmailDomain(emailDomains[selectedIndex]);
+          }
+          break;
+        case "Escape":
+          setShowAtSuggestion(false);
+          setShowEmailSuggestions(false);
+          setSelectedIndex(-1);
+          break;
+        case "@":
+          if (!emailInput.includes("@")) {
+            addAtSymbol();
+          }
+          break;
+      }
+    }
+  };
+
+  const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setEmailInput(value);
+    setSelectedIndex(-1); // Reset selection when input changes
+
+    // Show @ suggestion if there's text but no @ symbol yet
+    setShowAtSuggestion(value.length > 0 && !value.includes("@"));
+
+    // Show domain suggestions if there's an @ but no dot after it
+    setShowEmailSuggestions(
+      value.includes("@") && !value.includes(".", value.indexOf("@"))
+    );
+  };
+
+  const selectEmailDomain = (domain: string) => {
+    const baseEmail = emailInput.split("@")[0];
+    setEmailInput(`${baseEmail}@${domain}`);
+    setShowEmailSuggestions(false);
+  };
+
+  const addAtSymbol = () => {
+    setEmailInput(`${emailInput}@`);
+    setShowAtSuggestion(false);
+    setShowEmailSuggestions(true);
+  };
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsLoading(true);
@@ -197,15 +264,51 @@ export default function LoginForm() {
           <FadeIn delay={0.4} duration={0.5} className="space-y-6">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                name="email"
-                type="email"
-                placeholder="you@example.com"
-                required
-                className="w-full"
-                autoComplete="email"
-              />
+              <div className="relative">
+                <Input
+                  id="email"
+                  name="email"
+                  type="email"
+                  value={emailInput}
+                  onChange={handleEmailChange}
+                  onKeyDown={handleEmailKeyDown}
+                  placeholder="Enter your email"
+                  required
+                  className="w-full"
+                  autoComplete="email"
+                />
+                {showAtSuggestion && (
+                  <div className="absolute w-full mt-1 p-1 bg-background border rounded-md shadow-lg z-10">
+                    <button
+                      type="button"
+                      className={`w-full text-left px-3 py-2 rounded-sm ${
+                        selectedIndex === 0 ? "bg-muted" : "hover:bg-muted"
+                      }`}
+                      onClick={addAtSymbol}
+                    >
+                      Add @ symbol
+                    </button>
+                  </div>
+                )}
+                {showEmailSuggestions && (
+                  <div className="absolute w-full mt-1 p-1 bg-background border rounded-md shadow-lg z-10">
+                    {emailDomains.map((domain, index) => (
+                      <button
+                        key={domain}
+                        type="button"
+                        className={`w-full text-left px-3 py-2 rounded-sm ${
+                          selectedIndex === index
+                            ? "bg-muted"
+                            : "hover:bg-muted"
+                        }`}
+                        onClick={() => selectEmailDomain(domain)}
+                      >
+                        {domain}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="space-y-2">
@@ -225,6 +328,7 @@ export default function LoginForm() {
                   type={showPassword ? "text" : "password"}
                   required
                   className="w-full pr-10"
+                  placeholder="Enter your password"
                   autoComplete="current-password"
                 />
                 <button
