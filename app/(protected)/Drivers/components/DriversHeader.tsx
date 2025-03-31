@@ -69,7 +69,9 @@ export function DriversHeader() {
       return "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300";
     if (dataSource === "Redis Cache")
       return "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300";
-    if (dataSource === "Client Cache")
+    if (dataSource === "Client Cache (API)")
+      return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300";
+    if (dataSource === "Client Cache (Local)")
       return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300";
     return "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300";
   };
@@ -78,7 +80,7 @@ export function DriversHeader() {
     <>
       <div className="flex justify-between items-center mb-6">
         <div className="space-y-1">
-          <h1 className="text-3xl font-bold tracking-tight">Drivers</h1>
+          <h1 className="text-xl font-bold tracking-tight">Drivers</h1>
           <div className="flex items-center gap-2">
             <p className="text-muted-foreground">
               Manage your drivers and their documents
@@ -101,25 +103,11 @@ export function DriversHeader() {
         </div>
         <div className="flex gap-2">
           <Button
+            className="h-9 relative z-0"
             variant="outline"
-            size="sm"
-            onClick={() => handleRefresh(true)}
-            disabled={loading || refreshing}
-            className="flex items-center gap-1"
-          >
-            <RefreshCw
-              className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
-            />
-            Refresh
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
             onClick={() => clearCache()}
             disabled={loading || refreshing}
-            className="flex items-center gap-1 text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
           >
-            <Trash className="h-4 w-4" />
             Clear Cache
           </Button>
           <AddDriverDialog onDriverAdded={() => refreshDrivers(true)} />

@@ -39,9 +39,7 @@ export async function getDriversAction(): Promise<Driver[]> {
   console.log("Fetching drivers...");
 
   try {
-    const supabase = await createClient();
-
-    // Try to get from cache first
+    // Try to get from cache first - do this before creating supabase client to save time
     const cachedDrivers = await getCache<Driver[]>(DRIVER_LIST_KEY);
 
     if (cachedDrivers) {
@@ -50,6 +48,8 @@ export async function getDriversAction(): Promise<Driver[]> {
       console.log(`Drivers fetched from cache in ${endTime - startTime}ms`);
       return cachedDrivers;
     }
+
+    const supabase = await createClient();
 
     const {
       data: { user },
@@ -62,6 +62,7 @@ export async function getDriversAction(): Promise<Driver[]> {
     // Get drivers with their documents and company information
     const queryStartTime = Date.now();
 
+    // Load drivers with company data
     const { data: drivers, error: driversError } = await withRetry(
       async () => {
         return await supabase
@@ -85,53 +86,33 @@ export async function getDriversAction(): Promise<Driver[]> {
       throw driversError;
     }
 
-    // If we have drivers, try to fetch their documents
-    const driversWithDocs = await Promise.all(
-      drivers.map(async (driver) => {
-        try {
-          // Fetch licenses
-          const { data: licenses } = await supabase
-            .from("driver_licenses")
-            .select("*")
-            .eq("driver_id", driver.id)
-            .then((res) => res || { data: [] });
+    // Prepare driver IDs for batch document fetching
+    const driverIds = drivers.map((driver) => driver.id);
 
-          // Fetch medical cards
-          const { data: medicalCards } = await supabase
-            .from("medical_cards")
-            .select("*")
-            .eq("driver_id", driver.id)
-            .then((res) => res || { data: [] });
+    // Batch fetch all documents at once instead of per driver
+    const [
+      { data: allLicenses },
+      { data: allMedicalCards },
+      { data: allMvrRecords },
+    ] = await Promise.all([
+      supabase.from("driver_licenses").select("*").in("driver_id", driverIds),
+      supabase.from("medical_cards").select("*").in("driver_id", driverIds),
+      supabase.from("mvr_records").select("*").in("driver_id", driverIds),
+    ]);
 
-          // Fetch MVR records
-          const { data: mvrRecords } = await supabase
-            .from("mvr_records")
-            .select("*")
-            .eq("driver_id", driver.id)
-            .then((res) => res || { data: [] });
+    // Index the documents by driver_id for faster lookups
+    const licensesByDriverId = groupBy(allLicenses || [], "driver_id");
+    const medicalCardsByDriverId = groupBy(allMedicalCards || [], "driver_id");
+    const mvrRecordsByDriverId = groupBy(allMvrRecords || [], "driver_id");
 
-          return {
-            ...driver,
-            company_name: driver.companies?.name || "N/A",
-            driver_licenses: licenses || [],
-            medical_cards: medicalCards || [],
-            mvr_files: mvrRecords || [],
-          } as Driver;
-        } catch (error) {
-          console.error(
-            `Error fetching documents for driver ${driver.id}:`,
-            error
-          );
-          return {
-            ...driver,
-            company_name: driver.companies?.name || "N/A",
-            driver_licenses: [],
-            medical_cards: [],
-            mvr_files: [],
-          } as Driver;
-        }
-      })
-    );
+    // Map drivers with their documents (no more async calls inside the map)
+    const driversWithDocs = drivers.map((driver) => ({
+      ...driver,
+      company_name: driver.companies?.name || "N/A",
+      driver_licenses: licensesByDriverId[driver.id] || [],
+      medical_cards: medicalCardsByDriverId[driver.id] || [],
+      mvr_files: mvrRecordsByDriverId[driver.id] || [],
+    })) as Driver[];
 
     const queryEndTime = Date.now();
     console.log(`Database query took ${queryEndTime - queryStartTime}ms`);
@@ -149,6 +130,17 @@ export async function getDriversAction(): Promise<Driver[]> {
   }
 }
 
+// Helper function to group array items by a key
+function groupBy<T extends Record<string, any>>(
+  array: T[],
+  key: string
+): Record<string, T[]> {
+  return array.reduce((result: Record<string, T[]>, item: T) => {
+    (result[item[key]] = result[item[key]] || []).push(item);
+    return result;
+  }, {});
+}
+
 // Get a single driver with documents by ID
 export async function getDriverAction(
   driverId: number
@@ -157,9 +149,7 @@ export async function getDriverAction(
   console.log(`Fetching driver ${driverId}...`);
 
   try {
-    const supabase = await createClient();
-
-    // Try to get from cache first
+    // Try to get from cache first - do this before creating supabase client
     const cacheKey = DRIVER_DETAIL_KEY(driverId);
     const cachedDriver = await getCache<Driver>(cacheKey);
 
@@ -170,6 +160,8 @@ export async function getDriverAction(
       return cachedDriver;
     }
 
+    const supabase = await createClient();
+
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -178,10 +170,18 @@ export async function getDriverAction(
       throw new Error("Not authenticated");
     }
 
-    // Get driver by ID
+    // Get driver with company data in a single query
     const { data: driver, error } = await supabase
       .from("drivers")
-      .select("*")
+      .select(
+        `
+        *,
+        companies:company_id (
+          id,
+          name
+        )
+      `
+      )
       .eq("id", driverId)
       .single();
 
@@ -193,7 +193,7 @@ export async function getDriverAction(
       return null;
     }
 
-    // Fetch driver documents
+    // Fetch all documents in parallel
     const [{ data: licenses }, { data: medicalCards }, { data: mvrRecords }] =
       await Promise.all([
         supabase.from("driver_licenses").select("*").eq("driver_id", driverId),
@@ -203,6 +203,7 @@ export async function getDriverAction(
 
     const driverWithDocs = {
       ...driver,
+      company_name: driver.companies?.name || "N/A",
       driver_licenses: licenses || [],
       medical_cards: medicalCards || [],
       mvr_files: mvrRecords || [],

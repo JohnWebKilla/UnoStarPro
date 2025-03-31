@@ -59,6 +59,6 @@ export interface CacheResponse<T> {
   timing: {
     total: number;
     database?: number;
-    source: "client-cache" | "server";
+    source: "client-cache" | "server" | "local-storage";
   };
 }

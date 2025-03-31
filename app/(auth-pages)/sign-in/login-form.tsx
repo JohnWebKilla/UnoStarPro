@@ -17,7 +17,6 @@ import { useUser } from "@/contexts/UserContext";
 import type { Role } from "@/types/role";
 import { LoadingOverlay } from "@/components/ui/loading-overlay";
 import { InitialLoadingScreen } from "@/components/initial-loading-screen";
-import { ClientCacheManager } from "@/lib/client-cache-manager";
 
 interface UserData {
   role: Role;
@@ -69,7 +68,26 @@ export default function LoginForm() {
   const emailDomains = ["gmail.com", "unostarsolutions.com"];
 
   const handleEmailKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    // Handle arrow keys, enter, and escape
+    // Special case for @ key press
+    if (e.key === "@") {
+      // If there's already an @ in the input, don't do anything special
+      if (emailInput.includes("@")) {
+        return;
+      }
+
+      // If suggestions are not showing, just let the default behavior happen
+      // The change event will handle showing domain suggestions
+      if (!showAtSuggestion) {
+        return;
+      }
+
+      // If @ suggestion is showing, use our custom handler and prevent default
+      e.preventDefault();
+      addAtSymbol();
+      return;
+    }
+
+    // Handle other keys when suggestions are visible
     if (showAtSuggestion || showEmailSuggestions) {
       switch (e.key) {
         case "ArrowDown":
@@ -80,7 +98,7 @@ export default function LoginForm() {
           break;
         case "ArrowUp":
           e.preventDefault();
-          setSelectedIndex((prev) => Math.max(prev - 1, -1));
+          setSelectedIndex((prev) => Math.max(prev - 1, 0));
           break;
         case "Enter":
           e.preventDefault();
@@ -88,17 +106,25 @@ export default function LoginForm() {
             addAtSymbol();
           } else if (showEmailSuggestions && selectedIndex >= 0) {
             selectEmailDomain(emailDomains[selectedIndex]);
+          } else if (showEmailSuggestions) {
+            // If no selection but suggestions are shown, select first option
+            selectEmailDomain(emailDomains[0]);
+          }
+          break;
+        case "Tab":
+          e.preventDefault();
+          if (showAtSuggestion) {
+            addAtSymbol();
+          } else if (showEmailSuggestions) {
+            selectEmailDomain(
+              emailDomains[selectedIndex >= 0 ? selectedIndex : 0]
+            );
           }
           break;
         case "Escape":
           setShowAtSuggestion(false);
           setShowEmailSuggestions(false);
           setSelectedIndex(-1);
-          break;
-        case "@":
-          if (!emailInput.includes("@")) {
-            addAtSymbol();
-          }
           break;
       }
     }
@@ -107,27 +133,58 @@ export default function LoginForm() {
   const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     setEmailInput(value);
-    setSelectedIndex(-1); // Reset selection when input changes
 
     // Show @ suggestion if there's text but no @ symbol yet
-    setShowAtSuggestion(value.length > 0 && !value.includes("@"));
+    const shouldShowAtSymbol = value.length > 0 && !value.includes("@");
+    setShowAtSuggestion(shouldShowAtSymbol);
 
-    // Show domain suggestions if there's an @ but no dot after it
-    setShowEmailSuggestions(
-      value.includes("@") && !value.includes(".", value.indexOf("@"))
-    );
+    // Show domain suggestions if there's an @ but no complete domain
+    const hasAt = value.includes("@");
+    const afterAt = hasAt ? value.split("@")[1] : "";
+
+    if (hasAt) {
+      // Automatically select the first matching domain based on typing
+      const matchingDomains = emailDomains.filter((domain) =>
+        domain.startsWith(afterAt)
+      );
+
+      setShowEmailSuggestions(matchingDomains.length > 0);
+
+      // Set selectedIndex to the first matching domain if we just added @
+      if (afterAt === "" || afterAt.length === 1) {
+        setSelectedIndex(0);
+      } else if (matchingDomains.length === 0) {
+        // Hide suggestions if no matches
+        setShowEmailSuggestions(false);
+        setSelectedIndex(-1);
+      } else {
+        // Find index of first matching domain
+        const index = emailDomains.findIndex((domain) =>
+          domain.startsWith(afterAt)
+        );
+        setSelectedIndex(index >= 0 ? index : 0);
+      }
+    } else {
+      setShowEmailSuggestions(false);
+      setSelectedIndex(-1);
+    }
   };
 
   const selectEmailDomain = (domain: string) => {
-    const baseEmail = emailInput.split("@")[0];
+    // Extract the part before @ or use the whole input if no @ exists
+    const baseEmail = emailInput.includes("@")
+      ? emailInput.split("@")[0]
+      : emailInput;
     setEmailInput(`${baseEmail}@${domain}`);
     setShowEmailSuggestions(false);
+    setSelectedIndex(-1);
   };
 
   const addAtSymbol = () => {
     setEmailInput(`${emailInput}@`);
     setShowAtSuggestion(false);
     setShowEmailSuggestions(true);
+    setSelectedIndex(0); // Select first option by default
   };
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -156,71 +213,15 @@ export default function LoginForm() {
       // Store user data in localStorage
       localStorage.setItem("userData", JSON.stringify(result.userData));
 
-      setLoadingMessage("Preparing your workspace...");
+      setLoadingMessage("Redirecting to your dashboard...");
 
-      // Initialize cache manager
-      const cacheManager = new ClientCacheManager(result.userData.role);
+      // Check if there's a redirect URL in the search params
+      const redirectTo = searchParams.get("redirectTo");
 
-      try {
-        // Start prefetching and wait for completion
-        setLoadingMessage("Caching your data...");
-        await cacheManager.prefetchAllData();
-
-        // Verify cache is populated with required data
-        let retries = 0;
-        const maxRetries = 5;
-        const retryDelay = 1000; // 1 second
-        let isCacheReady = false;
-
-        while (retries < maxRetries && !isCacheReady) {
-          setLoadingMessage(
-            `Verifying data cache... (Attempt ${retries + 1}/${maxRetries})`
-          );
-
-          // Check if cache is complete
-          const isComplete = await cacheManager.isPrefetchComplete();
-          if (!isComplete) {
-            await new Promise((resolve) => setTimeout(resolve, retryDelay));
-            retries++;
-            continue;
-          }
-
-          // Verify essential data is cached
-          try {
-            const cacheStatus = await cacheManager.verifyCacheStatus();
-            if (cacheStatus.isReady) {
-              isCacheReady = true;
-              break;
-            }
-          } catch (verifyError) {
-            console.error("Cache verification error:", verifyError);
-          }
-
-          await new Promise((resolve) => setTimeout(resolve, retryDelay));
-          retries++;
-        }
-
-        if (!isCacheReady) {
-          console.warn(
-            "Cache verification incomplete, proceeding with caution"
-          );
-        }
-
-        setLoadingMessage("Redirecting to your dashboard...");
-
-        // Check if there's a redirect URL in the search params
-        const redirectTo = searchParams.get("redirectTo");
-
-        // Navigate to the redirect URL or dashboard
-        if (redirectTo && redirectTo.startsWith("/(protected)")) {
-          router.replace(redirectTo);
-        } else {
-          router.replace(result.dashboardUrl);
-        }
-      } catch (cacheError) {
-        console.error("Cache preparation error:", cacheError);
-        // Continue with navigation even if caching fails
-        setLoadingMessage("Proceeding with limited offline capability...");
+      // Navigate to the redirect URL or dashboard
+      if (redirectTo && redirectTo.startsWith("/(protected)")) {
+        router.replace(redirectTo);
+      } else {
         router.replace(result.dashboardUrl);
       }
     } catch (error) {
@@ -276,13 +277,16 @@ export default function LoginForm() {
                   required
                   className="w-full"
                   autoComplete="email"
+                  autoFocus
                 />
                 {showAtSuggestion && (
-                  <div className="absolute w-full mt-1 p-1 bg-background border rounded-md shadow-lg z-10">
+                  <div className="absolute w-full mt-1 p-1 bg-background border rounded-md shadow-lg z-10 animate-in fade-in-50 zoom-in-95">
                     <button
                       type="button"
                       className={`w-full text-left px-3 py-2 rounded-sm ${
-                        selectedIndex === 0 ? "bg-muted" : "hover:bg-muted"
+                        selectedIndex === 0
+                          ? "bg-primary/10 text-primary"
+                          : "hover:bg-muted"
                       }`}
                       onClick={addAtSymbol}
                     >
@@ -291,21 +295,35 @@ export default function LoginForm() {
                   </div>
                 )}
                 {showEmailSuggestions && (
-                  <div className="absolute w-full mt-1 p-1 bg-background border rounded-md shadow-lg z-10">
-                    {emailDomains.map((domain, index) => (
-                      <button
-                        key={domain}
-                        type="button"
-                        className={`w-full text-left px-3 py-2 rounded-sm ${
-                          selectedIndex === index
-                            ? "bg-muted"
-                            : "hover:bg-muted"
-                        }`}
-                        onClick={() => selectEmailDomain(domain)}
-                      >
-                        {domain}
-                      </button>
-                    ))}
+                  <div className="absolute w-full mt-1 p-1 bg-background border rounded-md shadow-lg z-10 animate-in fade-in-50 zoom-in-95">
+                    {emailDomains.map((domain, index) => {
+                      // Get the part after @ to highlight matched portion
+                      const afterAt = emailInput.includes("@")
+                        ? emailInput.split("@")[1]
+                        : "";
+                      const matchedPart = afterAt
+                        ? domain.substring(0, afterAt.length)
+                        : "";
+                      const remainingPart = domain.substring(afterAt.length);
+
+                      return (
+                        <button
+                          key={domain}
+                          type="button"
+                          className={`w-full text-left px-3 py-2 rounded-sm ${
+                            selectedIndex === index
+                              ? "bg-primary/10 text-primary"
+                              : "hover:bg-muted"
+                          }`}
+                          onClick={() => selectEmailDomain(domain)}
+                        >
+                          {matchedPart && (
+                            <span className="font-semibold">{matchedPart}</span>
+                          )}
+                          {remainingPart}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>

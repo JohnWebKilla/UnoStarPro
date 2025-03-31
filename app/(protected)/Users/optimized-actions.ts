@@ -6,34 +6,40 @@ import {
   deleteClientCache,
 } from "@/utils/client-cache";
 import {
-  getDriversAction,
-  getDriverAction,
-  createDriverAction,
-  updateDriverAction,
-  deleteDriverAction,
-  clearDriverCachesAction,
+  getUsersAction,
+  getUserAction,
+  clearUserCachesAction,
 } from "./server-actions";
-import { Driver, CacheResponse } from "./types";
-import { DRIVER_LIST_KEY } from "./redis-client";
+import { User } from "./types";
+import { USER_LIST_KEY } from "./redis-client";
 
-// Get drivers with client-side caching
-export async function getDrivers(
+// Define response type for cached data
+export interface CacheResponse<T> {
+  data: T;
+  source: "cache" | "database";
+  timing: {
+    total: number;
+    database?: number;
+    source: "client-cache" | "server" | "local-storage";
+  };
+}
+
+// Get users with multi-layer caching
+export async function getUsers(
   skipCache: boolean = false
-): Promise<CacheResponse<Driver[]>> {
+): Promise<CacheResponse<User[]>> {
   const startTime = performance.now();
 
   // Try to get from client cache if not skipping
   if (!skipCache) {
     try {
       // Check localStorage first for the fastest possible retrieval
-      const localData = localStorage.getItem("drivers:client-list");
+      const localData = localStorage.getItem("users:client-list");
       if (localData) {
         try {
           const parsedData = JSON.parse(localData);
           // Check if data is fresh (less than 5 minutes old)
-          const timestamp = localStorage.getItem(
-            "drivers:client-list:timestamp"
-          );
+          const timestamp = localStorage.getItem("users:client-list:timestamp");
           const dataAge = timestamp
             ? Date.now() - parseInt(timestamp, 10)
             : Infinity;
@@ -54,16 +60,16 @@ export async function getDrivers(
       }
 
       // If not in localStorage or too old, try API cache
-      const result = await getClientCache<Driver[]>("drivers:client-list");
+      const result = await getClientCache<User[]>("users:client-list");
       if (result.data) {
         // Update localStorage for next time
         try {
           localStorage.setItem(
-            "drivers:client-list",
+            "users:client-list",
             JSON.stringify(result.data)
           );
           localStorage.setItem(
-            "drivers:client-list:timestamp",
+            "users:client-list:timestamp",
             Date.now().toString()
           );
         } catch (e) {
@@ -85,18 +91,18 @@ export async function getDrivers(
 
   // Fetch from server (which may use Redis cache)
   const dbStartTime = performance.now();
-  const drivers = await getDriversAction();
+  const users = await getUsersAction();
 
   // Try to cache the data on client-side
   try {
     // Cache in API
-    await setClientCache("drivers:client-list", drivers);
+    await setClientCache("users:client-list", users);
 
     // Also cache in localStorage for faster retrieval next time
     try {
-      localStorage.setItem("drivers:client-list", JSON.stringify(drivers));
+      localStorage.setItem("users:client-list", JSON.stringify(users));
       localStorage.setItem(
-        "drivers:client-list:timestamp",
+        "users:client-list:timestamp",
         Date.now().toString()
       );
     } catch (e) {
@@ -108,7 +114,7 @@ export async function getDrivers(
 
   const endTime = performance.now();
   return {
-    data: drivers as Driver[],
+    data: users as User[],
     source: "database",
     timing: {
       total: endTime - startTime,
@@ -118,18 +124,18 @@ export async function getDrivers(
   };
 }
 
-// Get a single driver with client-side caching
-export async function getDriver(
-  driverId: number,
+// Get a single user with multi-layer caching
+export async function getUser(
+  userId: string,
   skipCache: boolean = false
-): Promise<CacheResponse<Driver | null>> {
+): Promise<CacheResponse<User | null>> {
   const startTime = performance.now();
 
   // Try to get from client cache if not skipping
   if (!skipCache) {
     try {
       // Check localStorage first for the fastest possible retrieval
-      const localKey = `driver:client-${driverId}`;
+      const localKey = `user:client-${userId}`;
       const localData = localStorage.getItem(localKey);
       if (localData) {
         try {
@@ -156,7 +162,7 @@ export async function getDriver(
       }
 
       // If not in localStorage or too old, try API cache
-      const result = await getClientCache<Driver>(`driver:client-${driverId}`);
+      const result = await getClientCache<User>(`user:client-${userId}`);
       if (result.data) {
         // Update localStorage for next time
         try {
@@ -181,19 +187,19 @@ export async function getDriver(
 
   // Fetch from server (which may use Redis cache)
   const dbStartTime = performance.now();
-  const driver = await getDriverAction(driverId);
+  const user = await getUserAction(userId);
 
   // Try to cache the data on client-side
-  if (driver) {
+  if (user) {
     try {
-      const localKey = `driver:client-${driverId}`;
+      const localKey = `user:client-${userId}`;
 
       // Cache in API
-      await setClientCache(localKey, driver);
+      await setClientCache(localKey, user);
 
       // Also cache in localStorage for faster retrieval next time
       try {
-        localStorage.setItem(localKey, JSON.stringify(driver));
+        localStorage.setItem(localKey, JSON.stringify(user));
         localStorage.setItem(`${localKey}:timestamp`, Date.now().toString());
       } catch (e) {
         console.error("Error saving to localStorage:", e);
@@ -205,7 +211,7 @@ export async function getDriver(
 
   const endTime = performance.now();
   return {
-    data: driver as Driver | null,
+    data: user as User | null,
     source: "database",
     timing: {
       total: endTime - startTime,
@@ -215,62 +221,40 @@ export async function getDriver(
   };
 }
 
-// Create a new driver
-export async function createDriver(
-  driverData: Partial<Driver>
-): Promise<Driver | null> {
-  const driver = await createDriverAction(driverData);
-
-  // Invalidate client caches
+// Clear all user caches (client and server)
+export async function clearUserCaches(): Promise<boolean> {
   try {
-    await deleteClientCache("drivers:client-list");
-  } catch (error) {
-    console.error("Error invalidating client cache:", error);
-  }
+    // Clear server-side caches
+    const result = await clearUserCachesAction();
 
-  return driver as Driver | null;
-}
+    // Clear client-side caches
+    try {
+      // Clear API cache
+      await deleteClientCache("users:client-list");
 
-// Update a driver
-export async function updateDriver(
-  driverId: number,
-  driverData: Partial<Driver>
-): Promise<Driver | null> {
-  const driver = await updateDriverAction(driverId, driverData);
+      // Clear localStorage
+      try {
+        localStorage.removeItem("users:client-list");
+        localStorage.removeItem("users:client-list:timestamp");
 
-  // Invalidate client caches
-  try {
-    await deleteClientCache("drivers:client-list");
-    await deleteClientCache(`driver:client-${driverId}`);
-  } catch (error) {
-    console.error("Error invalidating client cache:", error);
-  }
+        // Clear any individual user caches
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && key.startsWith("user:client-")) {
+            localStorage.removeItem(key);
+            localStorage.removeItem(`${key}:timestamp`);
+          }
+        }
+      } catch (e) {
+        console.error("Error clearing localStorage:", e);
+      }
+    } catch (error) {
+      console.error("Error clearing client caches:", error);
+    }
 
-  return driver as Driver | null;
-}
-
-// Delete a driver
-export async function deleteDriver(driverId: number): Promise<boolean> {
-  const result = await deleteDriverAction(driverId);
-
-  // Invalidate client caches
-  try {
-    await deleteClientCache("drivers:client-list");
-    await deleteClientCache(`driver:client-${driverId}`);
-  } catch (error) {
-    console.error("Error invalidating client cache:", error);
-  }
-
-  return result;
-}
-
-// Server-side cache clearing wrapper
-export async function clearDriverCaches(): Promise<boolean> {
-  try {
-    const result = await clearDriverCachesAction();
     return result;
   } catch (error) {
-    console.error("Error clearing Redis caches:", error);
+    console.error("Error clearing user caches:", error);
     return false;
   }
 }

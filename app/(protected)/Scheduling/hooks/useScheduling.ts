@@ -6,12 +6,15 @@ import {
 } from "@tanstack/react-query";
 import { startOfMonth, endOfMonth, format } from "date-fns";
 import {
-  getInitialSchedulingData,
   createAbsence,
   updateSchedule,
   deleteAbsence,
   getEmployeeSchedule,
 } from "../actions";
+import {
+  getSchedulingData,
+  clearSchedulingCaches,
+} from "../actions/client-actions";
 import type {
   AbsenceFormData,
   ScheduleFormData,
@@ -20,6 +23,7 @@ import type {
   Employee,
   Absence,
 } from "../types";
+import { useState, useCallback } from "react";
 
 // Query keys
 export const schedulingKeys = {
@@ -42,50 +46,113 @@ interface SchedulingData {
     created_at: string;
     updated_at: string;
   }[];
+  dataSource?: "cache" | "database";
+  timing?: {
+    total: number;
+    database?: number;
+    source?: string;
+  };
 }
 
 export function useSchedulingData(startDate?: Date, endDate?: Date) {
   const start = startDate || startOfMonth(new Date());
   const end = endDate || endOfMonth(new Date());
+  const [dataSource, setDataSource] = useState<"cache" | "database">(
+    "database"
+  );
+  const [timingInfo, setTimingInfo] = useState<{
+    total: number;
+    database?: number;
+    source?: string;
+  } | null>(null);
 
-  return useQuery({
+  const queryResult = useQuery({
     queryKey: schedulingKeys.overview(
       format(start, "yyyy-MM-dd"),
       format(end, "yyyy-MM-dd")
     ),
     queryFn: async () => {
-      const result = await getInitialSchedulingData(
-        format(start, "yyyy-MM-dd"),
-        format(end, "yyyy-MM-dd")
-      );
+      try {
+        // Use our client-side caching implementation
+        const result = await getSchedulingData(start, end, false);
 
-      if (result.error) {
-        throw new Error(result.error);
+        // Update state with timing and source information
+        setDataSource(result.source);
+        setTimingInfo(result.timing);
+
+        console.log(
+          `Loaded scheduling data from ${result.source} in ${result.timing.total.toFixed(0)}ms`
+        );
+
+        return {
+          ...result.data,
+          dataSource: result.source,
+          timing: result.timing,
+        };
+      } catch (error) {
+        console.error("Error in useSchedulingData:", error);
+        return {
+          stats: {
+            totalEmployees: 0,
+            activeShifts: 0,
+            todayAbsences: 0,
+            error: error instanceof Error ? error.message : String(error),
+          },
+          employees: [],
+          absences: [],
+          schedules: [],
+          dataSource: "database",
+          timing: null,
+        };
       }
-
-      // Log the raw data from the API
-      console.log("Raw API data - employees:", result.employees);
-      console.log("Raw API data - schedules:", result.schedules);
-
-      return {
-        stats: {
-          totalEmployees: result.stats?.totalEmployees ?? 0,
-          activeShifts: result.stats?.activeShifts ?? 0,
-          todayAbsences: result.stats?.todayAbsences ?? 0,
-          error: null,
-        },
-        employees: result.employees ?? [],
-        absences: result.absences ?? [],
-        schedules: result.schedules ?? [],
-        error: null,
-      };
     },
-    staleTime: 0, // Always fetch fresh data
-    gcTime: 0,
-    refetchOnMount: true,
-    refetchOnWindowFocus: true,
-    refetchOnReconnect: true,
+    staleTime: 1000 * 60, // 1 minute
+    gcTime: 1000 * 60 * 5, // 5 minutes
   });
+
+  const refetch = useCallback(
+    async (skipCache: boolean = false) => {
+      try {
+        // Use our client-side caching implementation with skipCache option
+        const result = await getSchedulingData(start, end, skipCache);
+
+        // Update state with timing and source information
+        setDataSource(result.source);
+        setTimingInfo(result.timing);
+
+        console.log(
+          `Refreshed scheduling data from ${result.source} in ${result.timing.total.toFixed(0)}ms`
+        );
+
+        // Tell React Query to refetch
+        await queryResult.refetch();
+
+        return result;
+      } catch (error) {
+        console.error("Error refreshing scheduling data:", error);
+        throw error;
+      }
+    },
+    [start, end, queryResult]
+  );
+
+  const clearCache = useCallback(async () => {
+    try {
+      await clearSchedulingCaches({ start, end });
+      return refetch(true);
+    } catch (error) {
+      console.error("Error clearing scheduling cache:", error);
+      throw error;
+    }
+  }, [start, end, refetch]);
+
+  return {
+    ...queryResult,
+    dataSource,
+    timingInfo,
+    refetch,
+    clearCache,
+  };
 }
 
 // New hook to get employees data

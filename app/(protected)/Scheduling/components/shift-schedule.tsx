@@ -29,6 +29,9 @@ import {
   Phone,
   Mail,
   Info,
+  Loader2,
+  Database,
+  RefreshCw,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -858,16 +861,32 @@ function ShiftGroup({
 
 export default function ShiftSchedule() {
   const [selectedDate, setSelectedDate] = useState(new Date());
+  const [filterDepartment, setFilterDepartment] = useState<string | undefined>(
+    "all"
+  );
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedDepartment, setSelectedDepartment] = useState<string>("all");
-  const { data, isLoading: dataLoading, error } = useSchedulingData();
-  const updateScheduleMutation = useUpdateSchedule();
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Updated hook usage to get dataSource and timingInfo
+  const {
+    data,
+    isLoading: isDataLoading,
+    isError,
+    error,
+    dataSource,
+    timingInfo,
+    refetch,
+    clearCache,
+  } = useSchedulingData();
+
+  // Employees and schedules data
   const employees = data?.employees ?? [];
+  const schedules = data?.schedules ?? [];
   const absences = data?.absences ?? [];
-  const schedules = (data?.schedules ?? []) as APISchedule[];
+  const updateScheduleMutation = useUpdateSchedule();
 
   // More detailed logging for debugging
-  console.log("ShiftSchedule - Data loading state:", dataLoading);
+  console.log("ShiftSchedule - Data loading state:", isDataLoading);
   console.log("ShiftSchedule - Data error:", error);
   console.log("ShiftSchedule - Raw data object:", data);
   console.log("ShiftSchedule - Employees count:", employees.length);
@@ -895,7 +914,8 @@ export default function ShiftSchedule() {
     return { ...employeeShifts, ...localEmployeeShifts };
   }, [employeeShifts, localEmployeeShifts]);
 
-  const isLoading = dataLoading || !employees;
+  // Set loading state
+  const isLoading = isDataLoading || !employees.length;
 
   if (isLoading) {
     console.log("ShiftSchedule - Showing loading state");
@@ -919,8 +939,7 @@ export default function ShiftSchedule() {
       employee.department?.toLowerCase().includes(searchTerm);
 
     const matchesDepartment =
-      selectedDepartment === "all" ||
-      employee.department === selectedDepartment;
+      filterDepartment === "all" || employee.department === filterDepartment;
 
     return matchesSearch && matchesDepartment;
   });
@@ -1027,76 +1046,191 @@ export default function ShiftSchedule() {
     }
   };
 
+  // Add this new function to render the data source indicator
+  const renderDataSourceIndicator = () => {
+    // If we're still loading or don't have timing info, don't show anything
+    if (isLoading || !timingInfo) {
+      return null;
+    }
+
+    // Get color based on data source
+    const getDataSourceColor = (source: string | undefined) => {
+      if (dataSource === "database")
+        return "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300";
+
+      if (timingInfo?.source === "server" && dataSource === "cache")
+        return "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300";
+
+      if (timingInfo?.source === "client-cache")
+        return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300";
+
+      if (timingInfo?.source === "local-storage")
+        return "bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-300";
+
+      return "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300";
+    };
+
+    // Get user-friendly name of the data source
+    const getDataSourceName = () => {
+      if (dataSource === "database") return "Database";
+
+      if (timingInfo?.source === "server" && dataSource === "cache")
+        return "Redis Cache";
+
+      if (timingInfo?.source === "client-cache") return "Client Cache (API)";
+
+      if (timingInfo?.source === "local-storage") return "Client Cache (Local)";
+
+      return dataSource;
+    };
+
+    return (
+      <Badge
+        variant="outline"
+        className={`${getDataSourceColor(dataSource)} flex items-center gap-1 mt-2`}
+      >
+        <Database className="h-3 w-3" />
+        {getDataSourceName()}
+        {timingInfo && (
+          <span className="ml-1 text-xs">
+            ({(timingInfo.total / 1000).toFixed(2)}s)
+          </span>
+        )}
+      </Badge>
+    );
+  };
+
+  // Function to refresh data and clear cache
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await clearCache();
+      toast.success("Scheduling data refreshed successfully");
+    } catch (error) {
+      toast.error("Failed to refresh scheduling data");
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">Shift Schedule</h2>
-          <p className="text-sm text-muted-foreground">
-            Manage employee shifts and absences
-          </p>
+    <div className="px-4 md:px-6 py-4 space-y-6 max-w-[100rem] mx-auto">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="space-y-4 col-span-1 lg:col-span-1">
+          <div className="space-y-2">
+            <div className="flex justify-between items-center">
+              <div className="space-y-1">
+                <h2 className="text-xl font-bold tracking-tight">
+                  Shift Scheduler
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  Manage employee shifts and absences
+                </p>
+                {isLoading ? (
+                  <div className="flex items-center gap-2 text-muted-foreground text-sm mt-1">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Loading data...
+                  </div>
+                ) : (
+                  renderDataSourceIndicator()
+                )}
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleRefresh}
+                disabled={isRefreshing}
+              >
+                {isRefreshing ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                )}
+                Refresh
+              </Button>
+            </div>
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          <Select
-            value={selectedDepartment}
-            onValueChange={setSelectedDepartment}
-          >
-            <SelectTrigger className="w-[160px]">
-              <SelectValue>
-                {selectedDepartment === "all" ? (
+        <div className="space-y-4 col-span-1 lg:col-span-1">
+          <div className="space-y-2">
+            <h3 className="text-sm font-medium">Filter by Department</h3>
+            <Select
+              value={filterDepartment}
+              onValueChange={(value) =>
+                setFilterDepartment(value as string | undefined)
+              }
+            >
+              <SelectTrigger className="w-[160px]">
+                <SelectValue>
+                  {filterDepartment === "all" ? (
+                    <span className="flex items-center">
+                      <Users className="h-4 w-4 mr-2 flex-shrink-0" />
+                      <span className="truncate">All Departments</span>
+                    </span>
+                  ) : (
+                    <span className="flex items-center">
+                      <span className="mr-2 flex-shrink-0">
+                        {
+                          DEPARTMENTS[
+                            filterDepartment as keyof typeof DEPARTMENTS
+                          ]?.icon
+                        }
+                      </span>
+                      <span className="truncate">{filterDepartment}</span>
+                    </span>
+                  )}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">
                   <span className="flex items-center">
                     <Users className="h-4 w-4 mr-2 flex-shrink-0" />
-                    <span className="truncate">All Departments</span>
-                  </span>
-                ) : (
-                  <span className="flex items-center">
-                    <span className="mr-2 flex-shrink-0">
-                      {
-                        DEPARTMENTS[
-                          selectedDepartment as keyof typeof DEPARTMENTS
-                        ]?.icon
-                      }
-                    </span>
-                    <span className="truncate">{selectedDepartment}</span>
-                  </span>
-                )}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">
-                <span className="flex items-center">
-                  <Users className="h-4 w-4 mr-2 flex-shrink-0" />
-                  <span>All Departments</span>
-                </span>
-              </SelectItem>
-              {Object.entries(DEPARTMENTS).map(([dept, { icon }]) => (
-                <SelectItem key={dept} value={dept}>
-                  <span className="flex items-center">
-                    <span className="mr-2 flex-shrink-0">{icon}</span>
-                    <span>{dept}</span>
+                    <span>All Departments</span>
                   </span>
                 </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <div className="relative w-[300px]">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-            <Input
-              placeholder="Search employees, roles, or departments..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9"
+                {Object.entries(DEPARTMENTS).map(([dept, { icon }]) => (
+                  <SelectItem key={dept} value={dept}>
+                    <span className="flex items-center">
+                      <span className="mr-2 flex-shrink-0">{icon}</span>
+                      <span>{dept}</span>
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <div className="space-y-4 col-span-1 lg:col-span-1">
+          <div className="space-y-2">
+            <h3 className="text-sm font-medium">Filter by Date</h3>
+            <WeekNavigation
+              selectedDate={selectedDate}
+              onDateChange={setSelectedDate}
             />
-            {searchQuery && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="absolute right-1 top-1/2 transform -translate-y-1/2 h-7 w-7 p-0"
-                onClick={() => setSearchQuery("")}
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            )}
+          </div>
+        </div>
+        <div className="space-y-4 col-span-1 lg:col-span-1">
+          <div className="space-y-2">
+            <h3 className="text-sm font-medium">Search Employees</h3>
+            <div className="relative w-[300px]">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
+              <Input
+                placeholder="Search employees, roles, or departments..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9"
+              />
+              {searchQuery && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="absolute right-1 top-1/2 transform -translate-y-1/2 h-7 w-7 p-0"
+                  onClick={() => setSearchQuery("")}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       </div>

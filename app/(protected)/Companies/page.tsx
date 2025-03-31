@@ -5,12 +5,24 @@ import { DataTable } from "./data-table";
 import { columns } from "./columns";
 import { Company } from "./types";
 import { Button } from "@/components/ui/button";
-import { PlusCircle, RefreshCw, Trash2, Loader2, Plus } from "lucide-react";
+import {
+  PlusCircle,
+  RefreshCw,
+  Trash2,
+  Loader2,
+  Plus,
+  Database,
+} from "lucide-react";
 import { CompanyDialog } from "./company-dialog";
 import { StripeDialog } from "./stripe-dialog";
 import { CompanySideDialog } from "./company-side-dialog";
 import { useToast } from "@/components/ui/use-toast";
-import { getCompanies, createCompany, updateCompany } from "./actions";
+import {
+  getCompanies,
+  createCompany,
+  updateCompany,
+  clearCompanyCache,
+} from "./actions";
 import { syncStripeCustomers, syncStripeCustomer } from "./stripe-actions";
 import { createClient } from "@/utils/supabase/client";
 import { RealtimeChannel } from "@supabase/supabase-js";
@@ -21,6 +33,7 @@ import { SummaryCards } from "./summary-cards";
 import { syncStripeCustomer as getStripeSubscriptionDetails } from "./stripe-actions";
 import { subscriptionDetailsCache, CACHE_TTL } from "./cache";
 import { DeactivationDialog } from "./components/deactivation-dialog";
+import { Badge } from "@/components/ui/badge";
 
 interface ToggleStatusOptions {
   cancelSubscription?: boolean;
@@ -51,6 +64,10 @@ export default function CompaniesPage() {
     Company | undefined
   >();
   const { toast } = useToast();
+  const [timingInfo, setTimingInfo] = useState<{
+    total: number;
+    source?: string;
+  } | null>(null);
 
   useEffect(() => {
     let channel: RealtimeChannel;
@@ -110,10 +127,15 @@ export default function CompaniesPage() {
   const fetchCompanies = useCallback(async (skipCache = false) => {
     try {
       console.log("Fetching companies, skipCache:", skipCache);
+      // Don't show any data source initially when loading
+      setDataSource("database");
+      setTimingInfo(null);
+
       const result = await getCompanies(skipCache);
       setCompanies(result.data);
       setDataSource(result.source);
       setLastFetchTime(new Date());
+      setTimingInfo(result.timing);
       console.log(
         `Loaded ${result.data.length} companies from ${result.source} in ${result.timing.total.toFixed(
           0
@@ -281,25 +303,21 @@ export default function CompaniesPage() {
   const handleClearCompanyCache = async () => {
     try {
       setIsSyncing(true);
-      const response = await fetch("/api/cache/clear", {
-        method: "POST",
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to clear cache");
+      const result = await clearCompanyCache();
+      if (result.success) {
+        toast({
+          title: "Success",
+          description: "Company cache cleared successfully",
+        });
+        await fetchCompanies(true);
+      } else {
+        throw new Error(result.error || "Failed to clear cache");
       }
-
-      await fetchCompanies(true);
-      toast({
-        title: "Success",
-        description: "Cache cleared successfully",
-      });
     } catch (error) {
-      console.error("Error clearing cache:", error);
+      console.error("Error clearing company cache:", error);
       toast({
         title: "Error",
-        description:
-          error instanceof Error ? error.message : "Failed to clear cache",
+        description: "Failed to clear company cache",
         variant: "destructive",
       });
     } finally {
@@ -419,26 +437,77 @@ export default function CompaniesPage() {
     }
   };
 
+  const renderDataSourceIndicator = () => {
+    // If we're still loading or don't have timing info, don't show anything
+    if (isInitialLoading || !timingInfo) {
+      return null;
+    }
+
+    const getDataSourceColor = () => {
+      if (dataSource === "database")
+        return "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300";
+
+      if (timingInfo?.source === "server" && dataSource === "cache")
+        return "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300";
+
+      if (timingInfo?.source === "client-cache")
+        return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300";
+
+      if (timingInfo?.source === "local-storage")
+        return "bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-300";
+
+      return "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300";
+    };
+
+    const getDataSourceName = () => {
+      if (dataSource === "database") return "Database";
+
+      if (timingInfo?.source === "server" && dataSource === "cache")
+        return "Redis Cache";
+
+      if (timingInfo?.source === "client-cache") return "Client Cache (API)";
+
+      if (timingInfo?.source === "local-storage") return "Client Cache (Local)";
+
+      return dataSource;
+    };
+
+    return (
+      <Badge
+        variant="outline"
+        className={`${getDataSourceColor()} flex items-center gap-1 ml-2`}
+      >
+        <Database className="h-3 w-3" />
+        {getDataSourceName()}
+        {lastFetchTime && timingInfo && (
+          <span className="ml-1 text-xs">
+            ({(timingInfo.total / 1000).toFixed(2)}s)
+          </span>
+        )}
+      </Badge>
+    );
+  };
+
   return (
     <div className="px-4 py-6 space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Companies</h1>
-          <p className="text-muted-foreground">
-            Manage your companies and their Stripe integrations
-            {lastFetchTime && (
-              <span className="ml-2 text-xs">
-                Last updated: {lastFetchTime.toLocaleTimeString()} ({dataSource}
-                )
-              </span>
+          <h1 className="text-xl font-bold tracking-tight">Companies</h1>
+          <div className="flex items-center">
+            <p className="text-muted-foreground">
+              Manage your companies and their Stripe integrations
+            </p>
+            {isInitialLoading ? (
+              <div className="flex items-center gap-2 text-muted-foreground text-sm ml-2">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Loading data...
+              </div>
+            ) : (
+              renderDataSourceIndicator()
             )}
-          </p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button onClick={() => setDialogOpen(true)} className="h-9">
-            <PlusCircle className="mr-2 h-4 w-4" />
-            Add Company
-          </Button>
           <Button
             variant="outline"
             onClick={handleSyncAllStripe}
@@ -459,12 +528,11 @@ export default function CompaniesPage() {
             disabled={isSyncing}
             className="h-9 relative z-0"
           >
-            {isSyncing ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Trash2 className="mr-2 h-4 w-4" />
-            )}
             Clear Cache
+          </Button>
+          <Button onClick={() => setDialogOpen(true)} className="h-9">
+            <PlusCircle className="mr-2 h-4 w-4" />
+            Add Company
           </Button>
         </div>
       </div>

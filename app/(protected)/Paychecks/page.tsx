@@ -6,10 +6,12 @@ import { columns } from "./columns";
 import { Button } from "@/components/ui/button";
 import {
   Plus,
+  PlusCircle,
   RefreshCw,
   Loader2,
   CalendarIcon,
   Calculator,
+  Database,
 } from "lucide-react";
 import { PayrollDialog } from "./components/payroll-dialog";
 import { useToast } from "@/components/ui/use-toast";
@@ -47,6 +49,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  getMonthlyPayrollSummaries,
+  clearPayrollCaches,
+} from "./actions/client-actions";
 
 // Add this type for payment status
 type OverallStatus = "paid" | "partially_paid" | "pending" | "unpaid";
@@ -82,7 +88,9 @@ interface PayrollApiResponse {
 export default function PaychecksPage() {
   return (
     <ErrorBoundary>
-      <PaychecksContent />
+      <div>
+        <PaychecksContent />
+      </div>
     </ErrorBoundary>
   );
 }
@@ -107,68 +115,59 @@ function PaychecksContent() {
   const supabase = createClient();
   const [isAdvancedPayrollDialogOpen, setIsAdvancedPayrollDialogOpen] =
     useState(false);
+  const [timingInfo, setTimingInfo] = useState<{
+    total: number;
+    database?: number;
+    source?: string;
+  } | null>(null);
 
   // Fetch monthly summaries for the selected month
   const fetchMonthlySummary = useCallback(
     async (skipCache: boolean = false) => {
       try {
         setIsLoading(true);
-        const monthKey = format(selectedMonth, "yyyy-MM");
 
-        // Try to get from cache first
-        if (!skipCache) {
-          const cachedResult = await getClientCache(`payroll:${monthKey}`);
-          if (cachedResult) {
-            console.log("Using cached payroll data:", cachedResult);
-            // Handle both array and PayrollApiResponse formats
-            const payrollData = Array.isArray(cachedResult)
-              ? cachedResult
-              : cachedResult.data;
-
-            if (Array.isArray(payrollData)) {
-              setSummaries(payrollData);
-              setDataSource("cache");
-              setLastFetchTime(new Date());
-              setIsLoading(false);
-              return;
-            } else {
-              console.warn("Invalid cached payroll data format:", payrollData);
-            }
-          }
-        }
-
-        // Fetch from API
-        const startTime = performance.now();
-        const response = await fetch(
-          `/api/payroll/monthly-summary?month=${monthKey}`,
-          {
-            method: "GET",
-            headers: {
-              "Content-Type": "application/json",
-            },
-          }
+        // Use our new client action with multi-layer caching
+        const result = await getMonthlyPayrollSummaries(
+          selectedMonth,
+          skipCache
         );
 
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        const result = await response.json();
-        const fetchTime = Math.round(performance.now() - startTime);
-
-        // Ensure result.data is an array before setting state
-        if (!Array.isArray(result.data)) {
-          console.error("Invalid data format received:", result);
+        // Ensure result data is valid and is an array
+        if (!result || !result.data) {
+          console.error(
+            "Invalid response from getMonthlyPayrollSummaries:",
+            result
+          );
           setSummaries([]);
-        } else {
-          console.log(`Summaries loaded from API in ${fetchTime}ms:`, result);
-          setSummaries(result.data);
-          // Cache the data
-          await setClientCache(`payroll:${monthKey}`, result, 300);
+          toast({
+            title: "Error",
+            description: "Received invalid payroll data",
+            variant: "destructive",
+          });
+          return;
         }
 
-        setDataSource("database");
+        if (!Array.isArray(result.data)) {
+          console.error("Expected array but got:", result.data);
+          setSummaries([]);
+          toast({
+            title: "Error",
+            description: "Received invalid payroll data format",
+            variant: "destructive",
+          });
+          return;
+        }
+
+        // Update state with the response data
+        setSummaries(result.data);
+        setDataSource(result.source);
+        setTimingInfo(result.timing);
         setLastFetchTime(new Date());
+
+        console.log(
+          `Loaded ${result.data.length} payroll summaries from ${result.source} in ${result.timing.total.toFixed(0)}ms`
+        );
       } catch (error) {
         console.error("Error fetching monthly summary:", error);
         toast({
@@ -185,7 +184,7 @@ function PaychecksContent() {
     [selectedMonth, toast]
   );
 
-  // Invalidate cache and fetch fresh data
+  // Update the invalidateCache function
   const invalidateCache = async () => {
     try {
       setIsInvalidating(true);
@@ -194,6 +193,11 @@ function PaychecksContent() {
         description: "Fetching fresh data from the database...",
       });
 
+      // Clear the cache for the current month
+      const monthKey = format(selectedMonth, "yyyy-MM");
+      await clearPayrollCaches(monthKey);
+
+      // Fetch fresh data
       await fetchMonthlySummary(true);
 
       toast({
@@ -207,6 +211,7 @@ function PaychecksContent() {
         description: "Failed to refresh data",
         variant: "destructive",
       });
+    } finally {
       setIsInvalidating(false);
     }
   };
@@ -324,68 +329,128 @@ function PaychecksContent() {
 
   const summary = calculateSummary();
 
+  // Add a function to render the data source indicator with badge
+  const renderDataSourceIndicator = () => {
+    // Match the style from Users and Companies pages
+    const getDataSourceColor = () => {
+      if (dataSource === "database")
+        return "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300";
+
+      if (timingInfo?.source === "server" && dataSource === "cache")
+        return "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300";
+
+      if (timingInfo?.source === "client-cache")
+        return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300";
+
+      if (timingInfo?.source === "local-storage")
+        return "bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-300";
+
+      return "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300";
+    };
+
+    // Get user-friendly name of the data source
+    const getDataSourceName = () => {
+      if (dataSource === "database") return "Database";
+
+      if (timingInfo?.source === "server" && dataSource === "cache")
+        return "Redis Cache";
+
+      if (timingInfo?.source === "client-cache") return "Client Cache (API)";
+
+      if (timingInfo?.source === "local-storage") return "Client Cache (Local)";
+
+      return dataSource;
+    };
+
+    return (
+      <Badge
+        variant="outline"
+        className={`${getDataSourceColor()} flex items-center gap-1 ml-2`}
+      >
+        <Database className="h-3 w-3" />
+        {getDataSourceName()}
+        {lastFetchTime && timingInfo && (
+          <span className="ml-1 text-xs">
+            ({(timingInfo.total / 1000).toFixed(2)}s)
+          </span>
+        )}
+      </Badge>
+    );
+  };
+
+  // Ensure summaries is always an array before passing to DataTable
+  const ensureArray = (data: any): MonthlyPayrollSummary[] => {
+    if (!data) return [];
+    if (!Array.isArray(data)) {
+      console.error("Expected array but got:", data);
+      return [];
+    }
+    return data;
+  };
+
   return (
-    <div className=" py-4 px-4">
+    <div className="p-6 space-y-6">
       {/* Header Section */}
-      <Card className="mb-6">
-        <CardHeader className="pb-3">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <div>
-              <CardTitle className="text-2xl">Paychecks</CardTitle>
-              <CardDescription>
-                Manage employee payroll transactions
-              </CardDescription>
-              <div className="text-xs text-muted-foreground mt-1">
-                Data source: {dataSource === "cache" ? "Cache" : "Database"}
-                {lastFetchTime && (
-                  <span className="ml-2">
-                    • Last updated: {lastFetchTime.toLocaleTimeString()}
-                  </span>
-                )}
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2 items-center">
-              <MonthPicker
-                selected={selectedMonth}
-                onMonthChange={handleMonthChange}
-              />
-              <Button
-                variant="outline"
-                onClick={invalidateCache}
-                disabled={isInvalidating || isLoading}
-                className="min-w-[100px]"
-              >
-                {isInvalidating ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Refreshing...
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="mr-2 h-4 w-4" />
-                    Refresh
-                  </>
-                )}
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => setIsAdvancedPayrollDialogOpen(true)}
-                disabled={isLoading}
-              >
-                <Calculator className="h-4 w-4 mr-2" />
-                Generate Payroll
-              </Button>
-              <Button onClick={() => setIsPayrollDialogOpen(true)}>
-                <Plus className="h-4 w-4 mr-2" />
-                New Transaction
-              </Button>
-            </div>
+      <div className="flex justify-between items-center">
+        <div className="space-y-0.5">
+          <h2 className="text-2xl font-bold tracking-tight">Paychecks</h2>
+          <div className="flex items-center">
+            <p className="text-muted-foreground">
+              Manage employee payroll transactions
+            </p>
+            {!isLoading && renderDataSourceIndicator()}
           </div>
-        </CardHeader>
-      </Card>
+        </div>
+        <div className="flex items-center gap-2">
+          <MonthPicker
+            selected={selectedMonth}
+            onMonthChange={handleMonthChange}
+          />
+          <Button
+            variant="outline"
+            onClick={invalidateCache}
+            className="h-9 relative z-0"
+            disabled={isInvalidating}
+          >
+            {isInvalidating ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="mr-2 h-4 w-4" />
+            )}
+            Clear Cache
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-9 relative z-0"
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel>Actions</DropdownMenuLabel>
+              <DropdownMenuItem
+                onClick={() => setIsAdvancedPayrollDialogOpen(true)}
+              >
+                <Calculator className="mr-2 h-4 w-4" />
+                Generate Payroll
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button
+            onClick={() => setIsPayrollDialogOpen(true)}
+            className="h-9 relative z-0"
+          >
+            <PlusCircle className="mr-2 h-4 w-4" />
+            Add Transaction
+          </Button>
+        </div>
+      </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -437,7 +502,7 @@ function PaychecksContent() {
       {/* Data Table */}
       <DataTable
         columns={columns}
-        data={summaries}
+        data={ensureArray(summaries)}
         isLoading={isLoading || isInvalidating}
         onViewTransactions={handleViewTransactions}
         lastUpdatedUserId={lastUpdatedUserId}

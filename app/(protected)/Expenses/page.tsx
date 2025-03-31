@@ -5,6 +5,7 @@ import { DataTable } from "./components/data-table";
 import { Button } from "@/components/ui/button";
 import {
   Plus,
+  PlusCircle,
   Trash2,
   FileEdit,
   AlertTriangle,
@@ -12,6 +13,9 @@ import {
   BanknoteIcon,
   CircleDollarSign,
   CalendarIcon,
+  Database,
+  RefreshCw,
+  Loader2,
 } from "lucide-react";
 import { ExpenseDialog } from "./components/expense-dialog";
 import { useToast } from "@/components/ui/use-toast";
@@ -70,6 +74,12 @@ import {
   setClientCache,
   deleteClientCache,
 } from "@/utils/client-cache";
+import { Badge } from "@/components/ui/badge";
+import {
+  getMonthlyExpenses,
+  getExpensesChartData,
+  clearExpenseCaches,
+} from "./actions/client-actions";
 
 interface Expense {
   id: number;
@@ -128,6 +138,17 @@ function ExpensesContent(): React.ReactNode {
   const [chartDataSource, setChartDataSource] = useState<"cache" | "database">(
     "database"
   );
+  const [isInvalidatingCache, setIsInvalidatingCache] = useState(false);
+  const [timingInfo, setTimingInfo] = useState<{
+    total: number;
+    database?: number;
+    source?: string;
+  } | null>(null);
+  const [chartTimingInfo, setChartTimingInfo] = useState<{
+    total: number;
+    database?: number;
+    source?: string;
+  } | null>(null);
 
   const statuses = [
     {
@@ -175,7 +196,15 @@ function ExpensesContent(): React.ReactNode {
         description: "Expense deleted successfully",
       });
 
-      fetchExpenses();
+      // Refresh data and clear cache
+      if (user) {
+        const monthKey = format(selectedMonth, "yyyy-MM");
+        await clearExpenseCaches(user.id, monthKey, true);
+      }
+
+      await fetchExpenses(true);
+      await fetchChartData(true);
+
       setDeleteDialogOpen(false);
     } catch (error) {
       console.error("Error deleting expense:", error);
@@ -351,161 +380,76 @@ function ExpensesContent(): React.ReactNode {
     },
   });
 
-  const fetchExpenses = useCallback(async () => {
-    try {
-      setIsLoadingData(true);
-      const monthStart = startOfMonth(selectedMonth);
-      const monthEnd = endOfMonth(selectedMonth);
+  const fetchExpenses = useCallback(
+    async (skipCache: boolean = false) => {
+      try {
+        setIsLoadingData(true);
+        // Don't show any data source initially when loading
+        setDataSource("database");
+        setTimingInfo(null);
 
-      if (!user) return;
+        if (!user) return;
 
-      // Create a cache key based on the month and user
-      const cacheKey = `expenses:${format(monthStart, "yyyy-MM")}:${user.id}`;
+        const result = await getMonthlyExpenses(
+          selectedMonth,
+          user.id,
+          supabase,
+          skipCache
+        );
 
-      // Try to get data from cache first using client-side cache utility
-      const { data: cachedData, source } =
-        await getClientCache<Expense[]>(cacheKey);
+        // Update state with the response data
+        setExpenses(result.data);
+        setDataSource(result.source);
+        setTimingInfo(result.timing);
 
-      if (cachedData) {
-        setExpenses(cachedData);
-        setDataSource(source);
+        console.log(
+          `Loaded ${result.data.length} expenses from ${result.source} in ${result.timing.total.toFixed(0)}ms`
+        );
+      } catch (error) {
+        console.error("Error fetching expenses:", error);
+        toast({
+          title: "Error",
+          description: "Failed to load expenses",
+          variant: "destructive",
+        });
+      } finally {
         setIsLoadingData(false);
         setIsInitializing(false);
-        return;
       }
+    },
+    [selectedMonth, user, supabase, toast]
+  );
 
-      // First, ensure payroll expenses are up to date
-      await supabase.rpc("sync_monthly_payroll", {
-        month_date: monthStart.toISOString(),
-        user_id: user.id,
-      });
+  const fetchChartData = useCallback(
+    async (skipCache: boolean = false) => {
+      try {
+        // Don't show any chart data source initially when loading
+        setChartDataSource("database");
+        setChartTimingInfo(null);
 
-      // Then fetch all expenses including payroll
-      const { data: expensesData, error: expensesError } = await supabase
-        .from("expenses")
-        .select(
-          `
-          *,
-          expense_categories (name),
-          created_by_user:users(email, first_name, last_name),
-          updated_by_user:users(email, first_name, last_name)
-        `
-        )
-        .gte("expense_date", monthStart.toISOString())
-        .lt("expense_date", monthEnd.toISOString())
-        .order("expense_date", { ascending: false });
+        if (!user) return;
 
-      if (expensesError) throw expensesError;
+        const result = await getExpensesChartData(
+          dateRange,
+          user.id,
+          supabase,
+          skipCache
+        );
 
-      const formattedData =
-        expensesData?.map((expense) => ({
-          ...expense,
-          amount:
-            typeof expense.amount === "string"
-              ? parseFloat(expense.amount)
-              : expense.amount,
-        })) || [];
+        // Update state with the response data
+        setChartData(result.data);
+        setChartDataSource(result.source);
+        setChartTimingInfo(result.timing);
 
-      // Store in cache for 5 minutes (300 seconds) using client-side cache utility
-      await setClientCache(cacheKey, formattedData, 300);
-      setDataSource("database");
-      setExpenses(formattedData);
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to load expenses",
-        variant: "destructive",
-      });
-    } finally {
-      setIsLoadingData(false);
-      setIsInitializing(false);
-    }
-  }, [selectedMonth, user, supabase, toast]);
-
-  const fetchChartData = useCallback(async () => {
-    try {
-      if (!user) return;
-
-      // Create a cache key based on the date range and user
-      const cacheKey = `expenses:chart:${format(dateRange.start, "yyyy-MM")}:${format(dateRange.end, "yyyy-MM")}:${user.id}`;
-
-      // Try to get data from cache first using client-side cache utility
-      const { data: cachedData, source } =
-        await getClientCache<any[]>(cacheKey);
-
-      if (cachedData) {
-        setChartData(cachedData);
-        setChartDataSource(source);
-        return;
+        console.log(
+          `Loaded ${result.data.length} chart data points from ${result.source} in ${result.timing.total.toFixed(0)}ms`
+        );
+      } catch (error) {
+        console.error("Error fetching chart data:", error);
       }
-
-      interface ExpenseWithCategory {
-        amount: number;
-        currency: "USD" | "UZS";
-        amount_uzs: number | null;
-        expense_date: string;
-        expense_categories: {
-          name: string;
-        };
-      }
-
-      const { data, error } = await supabase
-        .from("expenses")
-        .select(
-          "amount, currency, amount_uzs, expense_date, expense_categories!inner(name)"
-        )
-        .gte("expense_date", dateRange.start.toISOString())
-        .lte("expense_date", dateRange.end.toISOString())
-        .returns<ExpenseWithCategory[]>();
-
-      if (error) throw error;
-
-      interface ChartDataPoint {
-        date: string;
-        total: number;
-        payroll: number;
-        other: number;
-      }
-
-      const groupedData = data?.reduce(
-        (acc: Record<string, ChartDataPoint>, curr) => {
-          const date = format(new Date(curr.expense_date), "MMM yyyy");
-          const category = curr.expense_categories.name;
-          const amount = curr.amount;
-
-          if (!acc[date]) {
-            acc[date] = {
-              date,
-              total: 0,
-              payroll: 0,
-              other: 0,
-            };
-          }
-
-          acc[date].total += amount;
-          if (category === "Payroll") {
-            acc[date].payroll += amount;
-          } else {
-            acc[date].other += amount;
-          }
-
-          return acc;
-        },
-        {}
-      );
-
-      const chartData = Object.values(groupedData || {}).sort((a, b) => {
-        return new Date(a.date).getTime() - new Date(b.date).getTime();
-      });
-
-      // Store in cache for 5 minutes (300 seconds) using client-side cache utility
-      await setClientCache(cacheKey, chartData, 300);
-      setChartDataSource("database");
-      setChartData(chartData);
-    } catch (error) {
-      console.error("Error fetching chart data:", error);
-    }
-  }, [dateRange, supabase, user]);
+    },
+    [dateRange, supabase, user]
+  );
 
   useEffect(() => {
     const getCurrentUser = async () => {
@@ -530,19 +474,37 @@ function ExpensesContent(): React.ReactNode {
         expense.id === updatedExpense.id ? updatedExpense : expense
       )
     );
-    invalidateExpensesCache();
+    // Clear cache to ensure next fetch gets fresh data
+    if (user) {
+      const monthKey = format(selectedMonth, "yyyy-MM");
+      clearExpenseCaches(user.id, monthKey, true).catch((err) =>
+        console.error("Error clearing cache after update:", err)
+      );
+    }
   };
 
   const addExpenseInPlace = (newExpense: Expense) => {
     setExpenses((currentExpenses) => [newExpense, ...currentExpenses]);
-    invalidateExpensesCache();
+    // Clear cache to ensure next fetch gets fresh data
+    if (user) {
+      const monthKey = format(selectedMonth, "yyyy-MM");
+      clearExpenseCaches(user.id, monthKey, true).catch((err) =>
+        console.error("Error clearing cache after add:", err)
+      );
+    }
   };
 
   const removeExpenseInPlace = (expenseId: number) => {
     setExpenses((currentExpenses) =>
       currentExpenses.filter((expense) => expense.id !== expenseId)
     );
-    invalidateExpensesCache();
+    // Clear cache to ensure next fetch gets fresh data
+    if (user) {
+      const monthKey = format(selectedMonth, "yyyy-MM");
+      clearExpenseCaches(user.id, monthKey, true).catch((err) =>
+        console.error("Error clearing cache after remove:", err)
+      );
+    }
   };
 
   useEffect(() => {
@@ -727,26 +689,127 @@ function ExpensesContent(): React.ReactNode {
     });
   };
 
-  // Update the invalidateExpensesCache function to use client-side cache utility
   const invalidateExpensesCache = useCallback(async () => {
     if (!user) return;
-    const monthStart = startOfMonth(selectedMonth);
-    const cacheKey = `expenses:${format(monthStart, "yyyy-MM")}:${user.id}`;
 
-    // Use client-side cache utility to delete cache
-    await deleteClientCache(cacheKey);
+    try {
+      const monthKey = format(selectedMonth, "yyyy-MM");
+      await clearExpenseCaches(user.id, monthKey, true);
+    } catch (error) {
+      console.error("Error clearing cache:", error);
+    }
+  }, [selectedMonth, user]);
 
-    // Also invalidate chart data cache
-    const chartCacheKey = `expenses:chart:${format(dateRange.start, "yyyy-MM")}:${format(dateRange.end, "yyyy-MM")}:${user.id}`;
-    await deleteClientCache(chartCacheKey);
-  }, [selectedMonth, dateRange, user]);
+  const invalidateCache = async () => {
+    if (!user) return;
 
-  // Add data source indicators to the UI
+    try {
+      setIsInvalidatingCache(true);
+      toast({
+        title: "Refreshing",
+        description: "Fetching fresh data from the database...",
+      });
+
+      // Clear the cache using our new function
+      const monthKey = format(selectedMonth, "yyyy-MM");
+      await clearExpenseCaches(user.id, monthKey, true);
+
+      // Fetch fresh data
+      await fetchExpenses(true);
+      await fetchChartData(true);
+
+      toast({
+        title: "Success",
+        description: "Data refreshed successfully",
+      });
+    } catch (error) {
+      console.error("Error refreshing data:", error);
+      toast({
+        title: "Error",
+        description: "Failed to refresh data",
+        variant: "destructive",
+      });
+    } finally {
+      setIsInvalidatingCache(false);
+    }
+  };
+
   const renderDataSourceIndicator = () => {
+    // If we're still loading or don't have timing info, don't show anything
+    if (isLoadingData || !timingInfo) {
+      return null;
+    }
+
+    // Match the style from the other pages
+    const getDataSourceColor = (
+      source: string | undefined,
+      type: "data" | "chart"
+    ) => {
+      const dataSourceValue = type === "data" ? dataSource : chartDataSource;
+      const sourceInfo =
+        type === "data" ? timingInfo?.source : chartTimingInfo?.source;
+
+      if (dataSourceValue === "database")
+        return "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300";
+
+      if (sourceInfo === "server" && dataSourceValue === "cache")
+        return "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300";
+
+      if (sourceInfo === "client-cache")
+        return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300";
+
+      if (sourceInfo === "local-storage")
+        return "bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-300";
+
+      return "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300";
+    };
+
+    // Get user-friendly name of the data source
+    const getDataSourceName = (sourceType: "data" | "chart") => {
+      const dataSourceValue =
+        sourceType === "data" ? dataSource : chartDataSource;
+      const sourceInfo =
+        sourceType === "data" ? timingInfo?.source : chartTimingInfo?.source;
+
+      if (dataSourceValue === "database") return "Database";
+
+      if (sourceInfo === "server" && dataSourceValue === "cache")
+        return "Redis Cache";
+
+      if (sourceInfo === "client-cache") return "Client Cache (API)";
+
+      if (sourceInfo === "local-storage") return "Client Cache (Local)";
+
+      return dataSourceValue;
+    };
+
     return (
-      <div className="text-xs text-muted-foreground mb-2">
-        Data source: {dataSource === "cache" ? "Cache" : "Database"} | Chart
-        data: {chartDataSource === "cache" ? "Cache" : "Database"}
+      <div className="flex items-center gap-2">
+        <Badge
+          variant="outline"
+          className={`${getDataSourceColor("data", "data")} flex items-center gap-1`}
+        >
+          <Database className="h-3 w-3" />
+          {getDataSourceName("data")}
+          {timingInfo && (
+            <span className="ml-1 text-xs">
+              ({(timingInfo.total / 1000).toFixed(2)}s)
+            </span>
+          )}
+        </Badge>
+
+        {chartTimingInfo && (
+          <Badge
+            variant="outline"
+            className={`${getDataSourceColor("chart", "chart")} flex items-center gap-1`}
+          >
+            <Database className="h-3 w-3" />
+            Chart: {getDataSourceName("chart")}
+            <span className="ml-1 text-xs">
+              ({(chartTimingInfo.total / 1000).toFixed(2)}s)
+            </span>
+          </Badge>
+        )}
       </div>
     );
   };
@@ -760,7 +823,14 @@ function ExpensesContent(): React.ReactNode {
           <p className="text-muted-foreground">
             Manage and track your business expenses
           </p>
-          {renderDataSourceIndicator()}
+          {isLoadingData ? (
+            <div className="flex items-center gap-2 text-muted-foreground text-sm mt-1">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Loading data...
+            </div>
+          ) : (
+            renderDataSourceIndicator()
+          )}
         </div>
         <div className="flex flex-col sm:flex-row gap-3">
           <MonthPicker
@@ -770,13 +840,29 @@ function ExpensesContent(): React.ReactNode {
           <div className="flex gap-3">
             <Button
               variant="outline"
+              onClick={invalidateCache}
+              disabled={isInvalidatingCache}
+              className="h-9 relative z-0"
+            >
+              {isInvalidatingCache ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Clear Cache
+            </Button>
+            <Button
+              variant="outline"
               onClick={() => setCategoryManagementOpen(true)}
-              className="flex-1 sm:flex-none"
+              className="flex-1 sm:flex-none h-9 relative z-0"
             >
               Manage Categories
             </Button>
-            <Button onClick={handleAddNew} className="flex-1 sm:flex-none">
-              <Plus className="h-4 w-4 mr-2" />
+            <Button
+              onClick={handleAddNew}
+              className="flex-1 sm:flex-none h-9 relative z-0"
+            >
+              <PlusCircle className="h-4 w-4 mr-2" />
               New Expense
             </Button>
           </div>

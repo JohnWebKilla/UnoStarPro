@@ -65,19 +65,32 @@ export function DriversProvider({ children }: { children: React.ReactNode }) {
       // If skipCache is true, clear all caches first
       if (skipCache) {
         await clearDriverCaches();
+
+        // Also clear localStorage
+        try {
+          localStorage.removeItem("drivers:client-list");
+          localStorage.removeItem("drivers:client-list:timestamp");
+        } catch (e) {
+          console.error("Error clearing localStorage:", e);
+        }
       }
 
-      // Use the new action with Redis cache
+      // Use the action with multi-layer caching
       const result = await getDrivers(skipCache);
 
       setDrivers(result.data);
+
+      // Set correct data source display based on source and location
       setDataSource(
         result.source === "cache"
           ? result.timing.source === "client-cache"
-            ? "Client Cache"
-            : "Redis Cache"
+            ? "Client Cache (API)"
+            : result.timing.source === "local-storage"
+              ? "Client Cache (Local)"
+              : "Redis Cache"
           : "Database"
       );
+
       setTimingInfo(result.timing);
     } catch (err) {
       console.error("Error fetching drivers:", err);
@@ -113,6 +126,23 @@ export function DriversProvider({ children }: { children: React.ReactNode }) {
     try {
       // Clear both client and server caches
       await clearDriverCaches();
+
+      // Also clear localStorage
+      try {
+        localStorage.removeItem("drivers:client-list");
+        localStorage.removeItem("drivers:client-list:timestamp");
+
+        // Clear any individual driver caches
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && key.startsWith("driver:client-")) {
+            localStorage.removeItem(key);
+            localStorage.removeItem(`${key}:timestamp`);
+          }
+        }
+      } catch (e) {
+        console.error("Error clearing localStorage:", e);
+      }
 
       toast({
         title: "Cache Cleared",

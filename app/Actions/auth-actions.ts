@@ -7,10 +7,8 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getDashboardForRole } from "@/utils/protected";
 import type { Role } from "@/types/role";
-import { ClientCacheManager } from "@/lib/client-cache-manager";
 import { revalidatePath } from "next/cache";
 import { getDashboardUrl } from "@/lib/get-dashboard-url";
-import { prefetchData } from "@/lib/prefetch-data";
 
 export async function signUpAction(formData: FormData) {
   const supabase = await createClient();
@@ -113,9 +111,6 @@ export async function signIn(email: string, password: string) {
       throw signInError || new Error("No user returned from sign in");
     }
 
-    // Wait for session to be established
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-
     // Verify session is active
     const {
       data: { session },
@@ -146,10 +141,6 @@ export async function signIn(email: string, password: string) {
     const role = userData.role || "customer";
     const dashboardUrl = getDashboardUrl(role);
     console.log("Dashboard URL for role:", { role, dashboardUrl });
-
-    // Prefetch data based on role
-    console.log("Starting data prefetch with verified session");
-    await prefetchData({ role: role }, user.id);
 
     return {
       success: true,

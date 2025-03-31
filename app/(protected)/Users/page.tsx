@@ -5,15 +5,15 @@ import { DataTable } from "./data-table";
 import { columns } from "./columns";
 import { User, UserRole } from "./types";
 import { Button } from "@/components/ui/button";
-import { PlusCircle, Loader2 } from "lucide-react";
+import { PlusCircle, Loader2, RefreshCw, Database, Trash } from "lucide-react";
 import { UserDialog } from "./user-dialog";
 import { useToast } from "@/components/ui/use-toast";
 import {
   getUsers,
-  updateUser,
-  updateUserStatus,
-  updateUserCompanyAccess,
-} from "./actions";
+  getUser,
+  clearUserCaches,
+  CacheResponse,
+} from "./optimized-actions";
 import { createClient } from "@/utils/supabase/client";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { CompanyManagement } from "./company-management";
@@ -24,22 +24,18 @@ import {
   deleteClientCache,
 } from "@/utils/client-cache";
 import { getEmployeeSchedule } from "../Scheduling/actions";
+import {
+  updateUser,
+  updateUserStatus,
+  updateUserCompanyAccess,
+} from "./actions";
 
-// Add this interface for the API response
-interface UsersApiResponse {
-  data: User[];
-  source: "cache" | "database";
-  timing?: {
-    total: number;
-    database?: number;
-    source?: string;
-  };
-}
+// Update the UsersApiResponse type to match our new CacheResponse type
+interface UsersApiResponse extends CacheResponse<User[]> {}
 
 export default function UsersPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const { toast } = useToast();
   const [companyDialogOpen, setCompanyDialogOpen] = useState(false);
@@ -50,11 +46,10 @@ export default function UsersPage() {
   const [lastUpdatedUserId, setLastUpdatedUserId] = useState<string | null>(
     null
   );
-  const [dataSource, setDataSource] = useState<"cache" | "database">(
-    "database"
-  );
+  const [dataSource, setDataSource] = useState<string>("database");
   const [isInvalidating, setIsInvalidating] = useState(false);
   const [lastFetchTime, setLastFetchTime] = useState<Date | null>(null);
+  const [timingInfo, setTimingInfo] = useState<{ total: number } | null>(null);
 
   // Define invalidateUsersCache before the helper functions that use it
   const invalidateUsersCache = useCallback(async () => {
@@ -318,71 +313,29 @@ export default function UsersPage() {
   const fetchUsers = async (skipCache: boolean = false) => {
     try {
       setIsLoading(true);
-      const fetchStartTime = Date.now();
-      const supabase = createClient();
-
       console.log("Fetching users data:", { skipCache });
 
-      // Get the current user
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      // Use our new optimized getUsers function
+      const result = await getUsers(skipCache);
 
-      if (!user) {
-        throw new Error("User not authenticated");
-      }
+      setUsers(result.data);
 
-      // Create a cache key based on the user
-      const cacheKey = `users:list:${user.id}`;
+      // Set the data source based on the cache location
+      setDataSource(
+        result.source === "cache"
+          ? result.timing.source === "client-cache"
+            ? "Client Cache (API)"
+            : result.timing.source === "local-storage"
+              ? "Client Cache (Local)"
+              : "Redis Cache"
+          : "Database"
+      );
 
-      // If skipCache is true, invalidate the cache first
-      if (skipCache) {
-        await deleteClientCache(cacheKey);
-        console.log("Cache invalidated before fetching fresh data");
-      }
-
-      // Try to get data from cache first using client-side cache utility
-      const { data: cachedData, source } =
-        await getClientCache<User[]>(cacheKey);
-
-      if (cachedData && !skipCache) {
-        console.log(
-          `Users loaded from ${source} in ${Date.now() - fetchStartTime}ms`
-        );
-        setUsers(cachedData);
-        setDataSource(source);
-        setLastFetchTime(new Date());
-        setIsLoading(false);
-        setIsInvalidating(false);
-        return;
-      }
-
-      // If no cache or skipCache is true, fetch from API
-      const response = await fetch(`/api/users`, {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        cache: "no-store",
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to fetch users data");
-      }
-
-      const usersData = await response.json();
-      const fetchEndTime = Date.now();
-      const fetchTime = fetchEndTime - fetchStartTime;
-
-      console.log(`Users loaded from database in ${fetchTime}ms`);
-
-      // Store in cache for 5 minutes (300 seconds)
-      await setClientCache(cacheKey, usersData, 300);
-
-      setUsers(usersData);
-      setDataSource("database");
       setLastFetchTime(new Date());
+      setTimingInfo(result.timing);
+      console.log(
+        `Users loaded from ${result.source} (${result.timing.source}) in ${result.timing.total.toFixed(2)}ms`
+      );
     } catch (error) {
       console.error("Error fetching users:", error);
       toast({
@@ -404,7 +357,11 @@ export default function UsersPage() {
         description: "Fetching fresh data from the database...",
       });
 
-      // Use the updated fetchUsers function which handles cache invalidation
+      // Clear all caches first
+      await clearUserCaches();
+      console.log("All user caches cleared");
+
+      // Then fetch fresh data
       await fetchUsers(true);
 
       toast({
@@ -425,11 +382,7 @@ export default function UsersPage() {
   // Handle edit user
   const handleEdit = useCallback((user: User) => {
     console.log("Edit user:", user);
-
-    // No need to fetch additional data - we already have everything we need
-    // Just set the selected user and open the dialog
     setSelectedUser(user);
-    setDialogOpen(true);
   }, []);
 
   const handleToggleStatus = async (user: User) => {
@@ -548,16 +501,6 @@ export default function UsersPage() {
       });
     }
   };
-
-  const handleDialogClose = useCallback((open: boolean) => {
-    if (!open) {
-      setDialogOpen(false);
-      // Wait for the dialog to animate out before clearing the selected user
-      setTimeout(() => {
-        setSelectedUser(null);
-      }, 300);
-    }
-  }, []);
 
   // Helper function to transform user data
   const transformUserData = useCallback((userData: any): User => {
@@ -715,80 +658,111 @@ export default function UsersPage() {
 
   const handleDialogSuccess = useCallback(
     async (updatedUser?: User) => {
-      if (!updatedUser) {
-        setDialogOpen(false);
-        return;
-      }
+      console.log("Dialog success with user:", updatedUser);
+      setSelectedUser(null);
 
-      console.log("Dialog success with updated user:", updatedUser);
-
-      // Log schedule information specifically
-      console.log("Updated user schedule data:", {
-        working_shift: updatedUser.working_shift,
-        off_days: updatedUser.off_days,
-      });
-
-      // Close dialog immediately
-      setDialogOpen(false);
-
-      // Use the helper function to update the user in place
-      // This will update just the specific user in the table without a full refresh
-      await updateUserInPlace(updatedUser);
-
-      // No need to invalidate cache immediately - we'll let the realtime subscription
-      // handle that in the background to avoid a full table refresh
-      setTimeout(() => {
-        invalidateUsersCache().then(() => {
-          console.log("Cache invalidated in background after user update");
+      if (updatedUser) {
+        // Log schedule information specifically
+        console.log("Updated user schedule data:", {
+          working_shift: updatedUser.working_shift,
+          off_days: updatedUser.off_days,
         });
-      }, 1000);
+
+        // Use the helper function to update the user in place
+        await updateUserInPlace(updatedUser);
+
+        // Invalidate the cache
+        await invalidateUsersCache();
+
+        // Show a toast notification
+        toast({
+          title: "Success",
+          description: `User ${updatedUser.email} was ${
+            selectedUser ? "updated" : "created"
+          }`,
+        });
+
+        // Highlight the updated row briefly
+        setLastUpdatedUserId(updatedUser.id);
+        setTimeout(() => {
+          setLastUpdatedUserId(null);
+        }, 1000);
+      }
     },
-    [updateUserInPlace, invalidateUsersCache]
+    [updateUserInPlace, invalidateUsersCache, toast, selectedUser]
   );
 
-  // Add a function to render the data source indicator
+  // Add a refresh function similar to the Drivers page
+  const handleRefresh = async (useCache: boolean = true) => {
+    try {
+      setIsInvalidating(true);
+      // Use skipCache = !useCache to match the Drivers pattern
+      await fetchUsers(!useCache);
+    } finally {
+      setIsInvalidating(false);
+    }
+  };
+
+  // Add a function to render the data source indicator with badge
   const renderDataSourceIndicator = () => {
+    // Match the style from DriversHeader component
+    const getDataSourceColor = () => {
+      if (dataSource === "Database")
+        return "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300";
+      if (dataSource === "Redis Cache")
+        return "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300";
+      if (dataSource === "Client Cache (API)")
+        return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300";
+      if (dataSource === "Client Cache (Local)")
+        return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300";
+      return "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300";
+    };
+
     return (
-      <div className="text-xs text-muted-foreground mt-1">
-        Data source: {dataSource === "cache" ? "Cache" : "Database"}
-        {lastFetchTime && (
-          <span className="ml-2">
-            • Last updated: {lastFetchTime.toLocaleTimeString()}
+      <Badge
+        variant="outline"
+        className={`${getDataSourceColor()} flex items-center gap-1 ml-2`}
+      >
+        <Database className="h-3 w-3" />
+        {dataSource}
+        {lastFetchTime && timingInfo && (
+          <span className="ml-1 text-xs">
+            ({(timingInfo.total / 1000).toFixed(2)}s)
           </span>
         )}
-      </div>
+      </Badge>
     );
   };
 
   return (
-    <div className="px-2 py-10">
+    <div className="p-6 space-y-6">
       <div className="flex justify-between items-center mb-6">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Users</h1>
-          <p className="text-muted-foreground">
-            Manage user accounts and permissions
-          </p>
-          {renderDataSourceIndicator()}
+          <div className="flex items-center gap-2">
+            <p className="text-muted-foreground">
+              Manage user accounts and permissions
+            </p>
+            {!isLoading && renderDataSourceIndicator()}
+          </div>
         </div>
         <div className="flex gap-2">
           <Button
             variant="outline"
+            className="h-9 relative z-0"
             onClick={invalidateCache}
-            disabled={isInvalidating}
+            disabled={isInvalidating || isLoading}
           >
-            {isInvalidating ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Refreshing...
-              </>
-            ) : (
-              "Refresh Data"
-            )}
+            Clear Cache
           </Button>
-          <Button onClick={() => setDialogOpen(true)}>
-            <PlusCircle className="h-4 w-4 mr-2" />
-            Add User
-          </Button>
+          {/* Always render the UserDialog */}
+          <UserDialog
+            key={selectedUser?.id || "new"}
+            user={selectedUser || undefined}
+            onSuccess={handleDialogSuccess}
+            companies={companies}
+            onUserAdded={() => fetchUsers(true)}
+          />
         </div>
       </div>
 
@@ -804,15 +778,6 @@ export default function UsersPage() {
           onManageCompanies: handleManageCompanies,
           companies,
         }}
-      />
-
-      <UserDialog
-        key={selectedUser?.id || "new"}
-        open={dialogOpen}
-        onOpenChange={handleDialogClose}
-        user={selectedUser || undefined}
-        onSuccess={handleDialogSuccess}
-        companies={companies}
       />
 
       {userForCompanies && (
