@@ -11,10 +11,18 @@ const PROTECTED_ROUTES = [
   "/Reports",
   "/Notifications",
   "/Profile",
+  "/Tickets",
+  "/Companies",
+  "/Users",
+  "/Paychecks",
+  "/Expenses",
+  "/Performance",
+  "/Scheduling",
 ] as const;
 
 export async function middleware(request: NextRequest) {
-  let response = NextResponse.next({
+  // Create a response early with default values
+  const response = NextResponse.next({
     request: {
       headers: request.headers,
     },
@@ -30,19 +38,24 @@ export async function middleware(request: NextRequest) {
           return request.cookies.get(name)?.value;
         },
         set(name: string, value: string, options: CookieOptions) {
+          // Set cookie on the response
           response.cookies.set({
             name,
             value,
             ...options,
-            sameSite: options.sameSite as "lax" | "strict" | "none" | undefined,
+            sameSite: "lax",
+            secure: process.env.NODE_ENV === "production",
+            path: "/",
           });
         },
         remove(name: string, options: CookieOptions) {
+          // Remove cookie from the response
           response.cookies.set({
             name,
             value: "",
             ...options,
             maxAge: 0,
+            path: "/",
           });
         },
       },
@@ -53,31 +66,63 @@ export async function middleware(request: NextRequest) {
     // Get session
     const {
       data: { session },
+      error: sessionError,
     } = await supabase.auth.getSession();
+
+    if (sessionError) {
+      throw sessionError;
+    }
+
+    // Check if trying to access auth pages while authenticated
+    if (session) {
+      if (
+        request.nextUrl.pathname === "/sign-in" ||
+        request.nextUrl.pathname === "/sign-up"
+      ) {
+        return NextResponse.redirect(new URL("/Dashboard", request.url));
+      }
+      return response;
+    }
 
     // Check if the current path is a protected route
     const isProtectedRoute = PROTECTED_ROUTES.some((route) =>
       request.nextUrl.pathname.startsWith(route)
     );
 
-    if (isProtectedRoute && !session) {
+    if (isProtectedRoute) {
       // Store the original URL to redirect back after login
       const redirectUrl = new URL("/sign-in", request.url);
       redirectUrl.searchParams.set("redirectTo", request.nextUrl.pathname);
+      const redirectResponse = NextResponse.redirect(redirectUrl);
 
-      return NextResponse.redirect(redirectUrl);
+      // Copy all cookies from the response to the redirect
+      response.cookies.getAll().forEach((cookie) => {
+        redirectResponse.cookies.set(cookie);
+      });
+
+      return redirectResponse;
     }
 
     return response;
   } catch (error) {
     console.error("Auth middleware error:", error);
 
+    // If there's an error and we're on a protected route, redirect to sign-in
     if (
       PROTECTED_ROUTES.some((route) =>
         request.nextUrl.pathname.startsWith(route)
       )
     ) {
-      return NextResponse.redirect(new URL("/sign-in", request.url));
+      const redirectResponse = NextResponse.redirect(
+        new URL("/sign-in", request.url)
+      );
+
+      // Copy all cookies from the response to the redirect
+      response.cookies.getAll().forEach((cookie) => {
+        redirectResponse.cookies.set(cookie);
+      });
+
+      return redirectResponse;
     }
 
     return response;
@@ -93,6 +138,13 @@ export const config = {
     "/Reports/:path*",
     "/Notifications/:path*",
     "/Profile/:path*",
+    "/Tickets/:path*",
+    "/Companies/:path*",
+    "/Users/:path*",
+    "/Paychecks/:path*",
+    "/Expenses/:path*",
+    "/Performance/:path*",
+    "/Scheduling/:path*",
     "/sign-in",
     "/sign-up",
     "/api/cache",

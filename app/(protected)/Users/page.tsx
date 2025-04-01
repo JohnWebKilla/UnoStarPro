@@ -31,7 +31,9 @@ import {
 } from "./actions";
 
 // Update the UsersApiResponse type to match our new CacheResponse type
-interface UsersApiResponse extends CacheResponse<User[]> {}
+interface UsersApiResponse extends CacheResponse<User[]> {
+  error?: string;
+}
 
 export default function UsersPage() {
   const [users, setUsers] = useState<User[]>([]);
@@ -72,32 +74,53 @@ export default function UsersPage() {
   }, []);
 
   useEffect(() => {
+    let mounted = true;
     let channel: RealtimeChannel;
 
     const initialize = async () => {
       try {
         console.log("Initializing Users page...");
+        if (!mounted) return;
+
+        setIsLoading(true);
         await fetchUsers();
+
+        // Only set up realtime if the component is still mounted
+        if (!mounted) return;
         channel = await setupRealtimeSubscription();
         console.log("Real-time subscription initialized successfully");
       } catch (error) {
         console.error("Error initializing Users page:", error);
-        toast({
-          title: "Error",
-          description: "Failed to initialize real-time updates",
-          variant: "destructive",
-        });
+        if (mounted) {
+          toast({
+            title: "Error",
+            description: "Failed to initialize real-time updates",
+            variant: "destructive",
+          });
+        }
+      } finally {
+        if (mounted) {
+          setIsLoading(false);
+        }
       }
     };
 
     initialize();
 
-    // Cleanup subscription on unmount
+    // Cleanup subscription and prevent memory leaks
     return () => {
+      mounted = false;
       if (channel) {
         console.log("Cleaning up real-time subscription");
         const supabase = createClient();
-        supabase.removeChannel(channel);
+        supabase
+          .removeChannel(channel)
+          .then(() => {
+            console.log("Channel removed successfully");
+          })
+          .catch((error) => {
+            console.error("Error removing channel:", error);
+          });
       }
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -123,229 +146,51 @@ export default function UsersPage() {
   }, []);
 
   const setupRealtimeSubscription = async () => {
-    try {
-      const supabase = createClient();
+    const supabase = createClient();
+    console.log("Setting up real-time subscription for users table");
 
-      // Log that we're setting up the subscription
-      console.log(
-        "Setting up real-time subscription for users and user_companies tables"
-      );
-
-      const channel = supabase
-        .channel("users-channel")
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "users",
-          },
-          async (payload: any) => {
-            console.log("Users change received!", payload);
-
-            try {
-              // Invalidate the cache immediately when any change occurs
-              await invalidateUsersCache();
-              console.log("Cache invalidated due to realtime update");
-
-              // After invalidating cache, fetch fresh data
-              if (payload.eventType !== "DELETE") {
-                // For UPDATE and INSERT, fetch the specific user and update in place
-                const { data: updatedUser, error } = await supabase
-                  .from("users")
-                  .select(
-                    `
-                    *,
-                    user_companies (
-                      companies (
-                        id,
-                        name,
-                        status
-                      )
-                    )
-                  `
-                  )
-                  .eq("id", payload.new.id)
-                  .single();
-
-                if (error) {
-                  console.error("Error fetching updated user:", error);
-                  // If we can't fetch the specific user, refresh the whole list
-                  fetchUsers(true);
-                  return;
-                }
-
-                if (updatedUser) {
-                  console.log("Updating user in place:", updatedUser);
-                  if (payload.eventType === "INSERT") {
-                    await addUserInPlace(updatedUser);
-                  } else {
-                    await updateUserInPlace(updatedUser);
-                  }
-                }
-              } else {
-                // For DELETE, remove the user from the local state
-                console.log("Removing user from local state:", payload.old.id);
-                await removeUserInPlace(payload.old.id);
-              }
-            } catch (error) {
-              console.error("Error handling user change:", error);
-              // If there's an error, refresh the whole list
-              fetchUsers(true);
-            }
-          }
-        )
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "user_companies",
-          },
-          async (payload: any) => {
-            console.log("User companies change received!", payload);
-
-            try {
-              // Invalidate the cache immediately when any change occurs
-              await invalidateUsersCache();
-              console.log("Cache invalidated due to user companies update");
-
-              // After invalidating cache, fetch the affected user
-              if (payload.eventType !== "DELETE" && payload.new.user_id) {
-                const { data: updatedUser, error } = await supabase
-                  .from("users")
-                  .select(
-                    `
-                    *,
-                    user_companies (
-                      companies (
-                        id,
-                        name,
-                        status
-                      )
-                    )
-                  `
-                  )
-                  .eq("id", payload.new.user_id)
-                  .single();
-
-                if (error) {
-                  console.error(
-                    "Error fetching user after company update:",
-                    error
-                  );
-                  // If we can't fetch the specific user, refresh the whole list
-                  fetchUsers(true);
-                  return;
-                }
-
-                if (updatedUser) {
-                  console.log(
-                    "Updating user after company change:",
-                    updatedUser
-                  );
-                  await updateUserInPlace(updatedUser);
-                }
-              } else if (
-                payload.eventType === "DELETE" &&
-                payload.old.user_id
-              ) {
-                // For DELETE, we need to fetch the user to get the updated companies list
-                const { data: updatedUser, error } = await supabase
-                  .from("users")
-                  .select(
-                    `
-                    *,
-                    user_companies (
-                      companies (
-                        id,
-                        name,
-                        status
-                      )
-                    )
-                  `
-                  )
-                  .eq("id", payload.old.user_id)
-                  .single();
-
-                if (error) {
-                  console.error(
-                    "Error fetching user after company removal:",
-                    error
-                  );
-                  // If we can't fetch the specific user, refresh the whole list
-                  fetchUsers(true);
-                  return;
-                }
-
-                if (updatedUser) {
-                  console.log(
-                    "Updating user after company removal:",
-                    updatedUser
-                  );
-                  await updateUserInPlace(updatedUser);
-                }
-              }
-            } catch (error) {
-              console.error("Error handling user companies change:", error);
-              // If there's an error, refresh the whole list
-              fetchUsers(true);
-            }
-          }
-        )
-        .subscribe((status) => {
-          console.log("Supabase real-time subscription status:", status);
-        });
-
-      // Return the channel directly instead of a cleanup function
-      return channel;
-    } catch (error) {
-      console.error("Error setting up real-time subscription:", error);
-      toast({
-        title: "Error",
-        description: "Failed to set up real-time updates",
-        variant: "destructive",
+    return supabase
+      .channel("users-channel")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "users",
+        },
+        async (payload: any) => {
+          console.log("Users change received!", payload);
+          // Simplified update logic - just refetch data
+          await fetchUsers(true);
+        }
+      )
+      .subscribe((status) => {
+        console.log("Realtime subscription status:", status);
       });
-      throw error;
-    }
   };
 
   const fetchUsers = async (skipCache: boolean = false) => {
     try {
       setIsLoading(true);
-      console.log("Fetching users data:", { skipCache });
+      const response = (await getUsers(skipCache)) as UsersApiResponse;
 
-      // Use our new optimized getUsers function
-      const result = await getUsers(skipCache);
+      if (response.error) {
+        throw new Error(response.error);
+      }
 
-      setUsers(result.data);
-
-      // Set the data source based on the cache location
-      setDataSource(
-        result.source === "cache"
-          ? result.timing.source === "client-cache"
-            ? "Client Cache (API)"
-            : result.timing.source === "local-storage"
-              ? "Client Cache (Local)"
-              : "Redis Cache"
-          : "Database"
-      );
-
+      setUsers(response.data || []);
+      setDataSource(response.source);
+      setTimingInfo(response.timing);
       setLastFetchTime(new Date());
-      setTimingInfo(result.timing);
-      console.log(
-        `Users loaded from ${result.source} (${result.timing.source}) in ${result.timing.total.toFixed(2)}ms`
-      );
     } catch (error) {
       console.error("Error fetching users:", error);
       toast({
         title: "Error",
-        description: "Failed to fetch users",
+        description: "Failed to load users",
         variant: "destructive",
       });
     } finally {
       setIsLoading(false);
-      setIsInvalidating(false);
     }
   };
 

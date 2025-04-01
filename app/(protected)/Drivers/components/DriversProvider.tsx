@@ -6,6 +6,7 @@ import { getDrivers, clearDriverCaches } from "../actions";
 import { Driver, CacheResponse } from "../types";
 import { deleteClientCache } from "@/utils/client-cache";
 import { DRIVER_LIST_KEY } from "../redis-client";
+import { useRouter } from "next/navigation";
 
 interface DriversContextType {
   drivers: Driver[];
@@ -25,6 +26,7 @@ interface DriversContextType {
 const DriversContext = createContext<DriversContextType | undefined>(undefined);
 
 export function DriversProvider({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -108,8 +110,8 @@ export function DriversProvider({ children }: { children: React.ReactNode }) {
           description: "Please log in again to continue.",
           variant: "destructive",
         });
-        // Redirect to login page
-        window.location.href = "/login";
+        // Use Next.js router instead of window.location
+        router.push("/login");
       } else {
         toast({
           title: "Error",

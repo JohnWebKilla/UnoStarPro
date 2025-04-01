@@ -83,18 +83,20 @@ export async function signUpAction(formData: FormData) {
 type SignInResult =
   | {
       success: true;
-      role: string;
-      dashboardUrl: string;
-      user: {
-        name: string;
-        role: string;
-        email: string;
+      userData: {
+        role: Role;
+        first_name: string;
+        last_name: string;
       };
+      dashboardUrl: string;
     }
-  | { error: string; success?: never }
+  | { success: false; error: string }
   | undefined;
 
-export async function signIn(email: string, password: string) {
+export async function signIn(
+  email: string,
+  password: string
+): Promise<SignInResult> {
   console.log("Attempting sign in for email:", email);
 
   try {
@@ -108,7 +110,10 @@ export async function signIn(email: string, password: string) {
     });
 
     if (signInError || !user) {
-      throw signInError || new Error("No user returned from sign in");
+      return {
+        success: false,
+        error: signInError?.message || "No user returned from sign in",
+      };
     }
 
     // Verify session is active
@@ -118,7 +123,10 @@ export async function signIn(email: string, password: string) {
     } = await supabase.auth.getSession();
     if (sessionError || !session) {
       console.error("Failed to verify session after sign in:", sessionError);
-      throw new Error("Failed to establish session");
+      return {
+        success: false,
+        error: "Failed to establish session",
+      };
     }
 
     // Get user data from users table
@@ -128,19 +136,29 @@ export async function signIn(email: string, password: string) {
       .eq("id", user.id)
       .single();
 
-    if (userError) {
+    if (userError || !userData) {
       console.error("Error fetching user data:", userError);
-      throw userError;
-    }
-
-    if (!userData) {
-      console.error("No user data found");
-      throw new Error("No user data found");
+      return {
+        success: false,
+        error: userError?.message || "No user data found",
+      };
     }
 
     const role = userData.role || "customer";
     const dashboardUrl = getDashboardUrl(role);
     console.log("Dashboard URL for role:", { role, dashboardUrl });
+
+    // Cache nav data immediately
+    const navData = {
+      userRole: role as Role,
+      userName: `${userData.first_name} ${userData.last_name}`,
+      userEmail: session.user.email || null,
+    };
+
+    // Only access localStorage in browser environment
+    if (typeof window !== "undefined") {
+      localStorage.setItem("navData", JSON.stringify(navData));
+    }
 
     return {
       success: true,
@@ -153,7 +171,10 @@ export async function signIn(email: string, password: string) {
     };
   } catch (error) {
     console.error("Sign in error:", error);
-    return { success: false, error: "Invalid credentials" };
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Invalid credentials",
+    };
   }
 }
 

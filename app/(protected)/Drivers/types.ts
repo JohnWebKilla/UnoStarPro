@@ -30,7 +30,10 @@ export interface Driver {
   company_id: number;
   company_name?: string;
   subscription_amount: number;
+  subscription_frequency: SubscriptionFrequency;
   stripe_product_id: string | null;
+  stripe_price_id: string | null;
+  stripe_connect_account_id: string | null;
   hire_date: string;
   terminated_date: string | null;
   created_at: string;
@@ -51,6 +54,11 @@ export const DRIVER_STATUS_OPTIONS = [
 
 // Driver team options
 export const DRIVER_TEAM_OPTIONS = ["Solo", "Team"];
+
+// Subscription frequency options
+export const SUBSCRIPTION_FREQUENCY_OPTIONS = ["weekly", "monthly"] as const;
+export type SubscriptionFrequency =
+  (typeof SUBSCRIPTION_FREQUENCY_OPTIONS)[number];
 
 // Cache-related response types
 export interface CacheResponse<T> {

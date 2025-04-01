@@ -28,6 +28,8 @@ import {
   Trash,
   Upload,
   Phone,
+  Loader2,
+  RefreshCw,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EditDriverDialog } from "./EditDriverDialog";
@@ -52,6 +54,9 @@ import {
 } from "@/components/ui/dialog";
 import { UploadDocumentDialog } from "./UploadDocumentDialog";
 import { useToast } from "@/components/ui/use-toast";
+import { StripeConnectButton } from "./StripeConnectButton";
+import { SubscriptionFrequency } from "../types";
+import { syncStripeConnectAccountAction } from "../stripe-server-actions";
 
 interface Document {
   id: number;
@@ -80,7 +85,10 @@ interface Driver {
   mvr_files: Document[];
   company_id: number;
   subscription_amount: number;
+  subscription_frequency: SubscriptionFrequency;
   stripe_product_id: string | null;
+  stripe_price_id: string | null;
+  stripe_connect_account_id: string | null;
   hire_date: string;
   terminated_date: string | null;
   created_at: string;
@@ -100,6 +108,7 @@ export function DriversTable() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [editingDriver, setEditingDriver] = useState<Driver | null>(null);
   const [viewingDocuments, setViewingDocuments] = useState<Driver | null>(null);
+  const [deletingDriver, setDeletingDriver] = useState<Driver | null>(null);
   const [uploadingDocument, setUploadingDocument] = useState<{
     driver: Driver;
     type: "license" | "medical_card" | "mvr";
@@ -111,6 +120,11 @@ export function DriversTable() {
   } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [dialogKey, setDialogKey] = useState(0);
+  const [syncingRowIds, setSyncingRowIds] = useState<Record<number, number>>(
+    {}
+  );
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [loadingRows, setLoadingRows] = useState<Record<number, boolean>>({});
 
   const getExpiringDocuments = (driver: Driver): DocumentWithType[] => {
     const sevenDaysFromNow = new Date();
@@ -198,6 +212,96 @@ export function DriversTable() {
     });
   };
 
+  const handleDriverDeleted = async () => {
+    await refreshDrivers();
+  };
+
+  const handleSyncAllStripe = async () => {
+    try {
+      setIsSyncing(true);
+      const response = await fetch("/api/drivers/sync", {
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to sync with Stripe");
+      }
+
+      await refreshDrivers();
+      toast({
+        title: "Success",
+        description: "All drivers synced with Stripe successfully",
+      });
+    } catch (error) {
+      console.error("Error syncing drivers with Stripe:", error);
+      toast({
+        title: "Error",
+        description:
+          error instanceof Error ? error.message : "Failed to sync with Stripe",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleSyncStripe = async (driver: Driver) => {
+    try {
+      // Check if this driver was synced recently (within 10 seconds)
+      const lastSyncTime = syncingRowIds[driver.id];
+      const currentTime = Date.now();
+
+      if (lastSyncTime && currentTime - lastSyncTime < 10000) {
+        console.log(
+          `Skipping sync for ${driver.name} - already synced recently`
+        );
+        toast({
+          title: "Info",
+          description:
+            "This driver was synced recently. Please wait a moment before syncing again.",
+        });
+        return;
+      }
+
+      // Record sync time and set loading state
+      setSyncingRowIds((prev) => ({ ...prev, [driver.id]: currentTime }));
+      setLoadingRows((prev) => ({ ...prev, [driver.id]: true }));
+
+      const result = await syncStripeConnectAccountAction(driver.id);
+
+      if (result.success) {
+        await refreshDrivers();
+        toast({
+          title: "Success",
+          description: `Driver synced with Stripe successfully (Product ID: ${result.productId})`,
+        });
+      } else {
+        throw new Error(result.error);
+      }
+    } catch (error) {
+      console.error("Error syncing driver with Stripe:", error);
+      toast({
+        title: "Error",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Failed to sync driver with Stripe",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingRows((prev) => ({ ...prev, [driver.id]: false }));
+
+      // After 10 seconds, remove the driver from the syncing list
+      setTimeout(() => {
+        setSyncingRowIds((prev) => {
+          const newState = { ...prev };
+          delete newState[driver.id];
+          return newState;
+        });
+      }, 10000);
+    }
+  };
+
   if (error) {
     return (
       <Card className="border-destructive">
@@ -230,6 +334,24 @@ export function DriversTable() {
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleSyncAllStripe}
+              disabled={isSyncing}
+            >
+              {isSyncing ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Syncing...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Sync All
+                </>
+              )}
+            </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -261,18 +383,18 @@ export function DriversTable() {
         </div>
       </CardHeader>
       <CardContent>
-        <ScrollArea className="rounded-md border">
+        <ScrollArea className="h-[600px]">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>
-                <TableHead>Company</TableHead>
                 <TableHead>Phone</TableHead>
                 <TableHead>Truck #</TableHead>
                 <TableHead>Type</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Documents</TableHead>
-                <TableHead>Edit</TableHead>
+                <TableHead>Subscription</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -291,23 +413,27 @@ export function DriversTable() {
               ) : (
                 filteredDrivers.map((driver) => {
                   const expiringDocs = getExpiringDocuments(driver);
+                  const isLoading = loadingRows[driver.id];
                   return (
                     <TableRow key={driver.id}>
-                      <TableCell>{driver.name}</TableCell>
-                      <TableCell>{driver.company_name}</TableCell>
+                      <TableCell className="font-medium">
+                        {driver.name}
+                      </TableCell>
                       <TableCell>
-                        <a
-                          href={`tel:${driver.phone_number}`}
-                          className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 flex items-center gap-2"
+                          onClick={() =>
+                            window.open(`tel:${driver.phone_number}`)
+                          }
                         >
-                          <Phone className="h-3.5 w-3.5" />
+                          <Phone className="h-4 w-4" />
                           {driver.phone_number}
-                        </a>
+                        </Button>
                       </TableCell>
                       <TableCell>{driver.truck_number}</TableCell>
-                      <TableCell className="capitalize">
-                        {driver.solo_or_team}
-                      </TableCell>
+                      <TableCell>{driver.solo_or_team}</TableCell>
                       <TableCell>
                         <Badge
                           variant={
@@ -321,26 +447,60 @@ export function DriversTable() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="flex items-center gap-2"
+                          className="h-8"
                           onClick={() => setViewingDocuments(driver)}
                         >
-                          <FileText className="h-4 w-4" />
+                          <FileText className="h-4 w-4 mr-2" />
                           View
                           {expiringDocs.length > 0 && (
-                            <Badge variant="destructive" className="ml-2">
+                            <Badge
+                              variant="destructive"
+                              className="ml-2 h-5 w-5 p-0 flex items-center justify-center"
+                            >
                               {expiringDocs.length}
                             </Badge>
                           )}
                         </Button>
                       </TableCell>
                       <TableCell>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setEditingDriver(driver)}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
+                        <StripeConnectButton
+                          driver={driver}
+                          onUpdate={refreshDrivers}
+                          onSync={() => handleSyncStripe(driver)}
+                          isLoading={isLoading}
+                        />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" className="h-8 w-8 p-0">
+                              <span className="sr-only">Open menu</span>
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              onClick={() => setEditingDriver(driver)}
+                            >
+                              <Pencil className="h-4 w-4 mr-2" />
+                              Edit driver
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => handleSyncStripe(driver)}
+                              disabled={isLoading}
+                            >
+                              <RefreshCw className="h-4 w-4 mr-2" />
+                              Sync with Stripe
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="text-destructive"
+                              onClick={() => setDeletingDriver(driver)}
+                            >
+                              <Trash className="h-4 w-4 mr-2" />
+                              Delete driver
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </TableCell>
                     </TableRow>
                   );
@@ -899,6 +1059,15 @@ export function DriversTable() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+      )}
+      {deletingDriver && (
+        <DeleteDriverDialog
+          driverId={deletingDriver.id}
+          driverName={deletingDriver.name}
+          onDriverDeleted={handleDriverDeleted}
+          open={!!deletingDriver}
+          onOpenChange={(open) => !open && setDeletingDriver(null)}
+        />
       )}
     </Card>
   );

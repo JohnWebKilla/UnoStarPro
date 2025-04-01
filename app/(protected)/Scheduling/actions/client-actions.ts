@@ -61,8 +61,6 @@ export async function getSchedulingData(
         const localData = localStorage.getItem(cacheKey);
         if (localData) {
           const parsedData = JSON.parse(localData);
-
-          // Check if data is fresh (less than 5 minutes old)
           const timestamp = localStorage.getItem(`${cacheKey}:timestamp`);
           const dataAge = timestamp
             ? Date.now() - parseInt(timestamp, 10)
@@ -80,74 +78,64 @@ export async function getSchedulingData(
                 source: "local-storage",
               },
             };
+          } else {
+            // If data is stale, remove it
+            localStorage.removeItem(cacheKey);
+            localStorage.removeItem(`${cacheKey}:timestamp`);
           }
         }
       } catch (e) {
-        // Silently continue if localStorage access fails
         console.log("localStorage access failed, continuing to API cache");
       }
 
       // Only check API cache if localStorage failed or had stale data
-      try {
-        const result = await getClientCache(cacheKey);
-        if (result.data) {
-          // Ensure the data contains all required properties
-          const cachedData = result.data as {
-            stats: SchedulingStats;
-            employees: Employee[];
-            absences: Absence[];
-            schedules: {
-              id: number;
-              user_id: string;
-              working_shift: string;
-              off_days: string[];
-              created_at: string;
-              updated_at: string;
-            }[];
-          };
+      const cacheResult = await getClientCache(cacheKey);
+      if (cacheResult.data) {
+        const cachedData = cacheResult.data as {
+          stats: SchedulingStats;
+          employees: Employee[];
+          absences: Absence[];
+          schedules: {
+            id: number;
+            user_id: string;
+            working_shift: string;
+            off_days: string[];
+            created_at: string;
+            updated_at: string;
+          }[];
+        };
 
-          // Update localStorage for next time
-          try {
-            localStorage.setItem(cacheKey, JSON.stringify(cachedData));
-            localStorage.setItem(
-              `${cacheKey}:timestamp`,
-              Date.now().toString()
-            );
-          } catch (e) {
-            console.error("Error saving to localStorage:", e);
-          }
-
-          const endTime = performance.now();
-          console.log("Using scheduling data from client API cache");
-          return {
-            data: cachedData,
-            source: "cache",
-            timing: {
-              total: endTime - startTime,
-              source: "client-cache",
-            },
-          };
+        // Update localStorage for next time
+        try {
+          localStorage.setItem(cacheKey, JSON.stringify(cachedData));
+          localStorage.setItem(`${cacheKey}:timestamp`, Date.now().toString());
+        } catch (e) {
+          console.error("Error saving to localStorage:", e);
         }
-      } catch (cacheError) {
-        console.error("Client API cache error:", cacheError);
+
+        const endTime = performance.now();
+        console.log("Using scheduling data from client API cache");
+        return {
+          data: cachedData,
+          source: "cache",
+          timing: {
+            total: endTime - startTime,
+            source: "client-cache",
+          },
+        };
       }
     } catch (cacheError) {
-      console.error("Client cache error:", cacheError);
+      console.error("Cache error:", cacheError);
       // Continue to server fetch if cache fails
     }
   }
 
-  // Fetch from API
+  // Fetch from API if cache miss or skip cache
   const dbStartTime = performance.now();
   try {
-    // Fetch scheduling data from the server
     const result = await getInitialSchedulingData(startFormatted, endFormatted);
+    if (result.error) throw new Error(result.error);
 
-    if (result.error) {
-      throw new Error(result.error);
-    }
-
-    // Prepare the data for caching
     const data = {
       stats: {
         totalEmployees: result.stats?.totalEmployees ?? 0,
@@ -160,27 +148,28 @@ export async function getSchedulingData(
       schedules: result.schedules ?? [],
     };
 
-    // Cache the data
+    // Cache the fresh data
     try {
-      // Cache in API
-      await setClientCache(cacheKey, data, 300);
-
-      // Also cache in localStorage for faster retrieval next time
-      try {
-        localStorage.setItem(cacheKey, JSON.stringify(data));
-        localStorage.setItem(`${cacheKey}:timestamp`, Date.now().toString());
-      } catch (e) {
-        console.error("Error saving to localStorage:", e);
-      }
+      await Promise.all([
+        setClientCache(cacheKey, data, 300),
+        new Promise<void>((resolve) => {
+          try {
+            localStorage.setItem(cacheKey, JSON.stringify(data));
+            localStorage.setItem(
+              `${cacheKey}:timestamp`,
+              Date.now().toString()
+            );
+          } catch (e) {
+            console.error("Error saving to localStorage:", e);
+          }
+          resolve();
+        }),
+      ]);
     } catch (cacheError) {
-      console.error("Failed to set client cache:", cacheError);
+      console.error("Failed to set cache:", cacheError);
     }
 
     const endTime = performance.now();
-    console.log(
-      `Scheduling data loaded from API in ${endTime - dbStartTime}ms`
-    );
-
     return {
       data,
       source: "database",
@@ -192,27 +181,7 @@ export async function getSchedulingData(
     };
   } catch (error) {
     console.error("Error fetching scheduling data:", error);
-    const endTime = performance.now();
-
-    return {
-      data: {
-        stats: {
-          totalEmployees: 0,
-          activeShifts: 0,
-          todayAbsences: 0,
-          error: error instanceof Error ? error.message : String(error),
-        },
-        employees: [],
-        absences: [],
-        schedules: [],
-      },
-      source: "database",
-      timing: {
-        total: endTime - startTime,
-        database: endTime - dbStartTime,
-        source: "server",
-      },
-    };
+    throw error;
   }
 }
 

@@ -11,6 +11,7 @@ import {
   DRIVER_DOCUMENTS_KEY,
   CACHE_EXPIRATION,
 } from "./constants";
+import { updateDriverInStripe } from "./stripe-actions";
 
 // Helper function for retrying database operations
 async function withRetry<T>(
@@ -272,44 +273,54 @@ export async function createDriverAction(
 
 // Update a driver
 export async function updateDriverAction(
-  driverId: number,
+  id: number,
   driverData: Partial<Driver>
-): Promise<Driver | null> {
-  try {
-    const supabase = await createClient();
+): Promise<Driver> {
+  const supabase = await createClient();
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+  // First, get the current driver data
+  const { data: existingDriver, error: fetchError } = await supabase
+    .from("drivers")
+    .select()
+    .eq("id", id)
+    .single();
 
-    if (!user) {
-      throw new Error("Not authenticated");
+  if (fetchError) throw fetchError;
+
+  // Update in database
+  const { data, error } = await supabase
+    .from("drivers")
+    .update({
+      ...driverData,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) throw error;
+
+  // If driver has Stripe connection and relevant fields were updated, sync with Stripe
+  if (data.stripe_connect_account_id) {
+    const relevantFields = ["name", "email", "phone_number", "status"];
+
+    const hasRelevantChanges = Object.keys(driverData).some(
+      (key) =>
+        relevantFields.includes(key) &&
+        driverData[key as keyof Driver] !== existingDriver[key as keyof Driver]
+    );
+
+    if (hasRelevantChanges) {
+      try {
+        await updateDriverInStripe(data);
+      } catch (stripeError) {
+        console.error("Failed to sync driver with Stripe:", stripeError);
+      }
     }
-
-    // Update driver
-    const { data, error } = await supabase
-      .from("drivers")
-      .update(driverData)
-      .eq("id", driverId)
-      .select()
-      .single();
-
-    if (error) {
-      throw error;
-    }
-
-    // Clear caches
-    await clearDriverCache(driverId);
-    await clearDriverListCache();
-
-    // Revalidate the drivers page
-    revalidatePath("/Drivers");
-
-    return data as Driver;
-  } catch (error) {
-    console.error(`Error updating driver ${driverId}:`, error);
-    return null;
   }
+
+  revalidatePath("/Drivers");
+  return data;
 }
 
 // Delete a driver
