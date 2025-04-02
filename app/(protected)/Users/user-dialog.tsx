@@ -57,6 +57,8 @@ interface UserDialogProps {
   onSuccess?: (user?: User) => void;
   companies: Array<{ id: number; name: string }>;
   onUserAdded?: () => void;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 const SHIFTS = [
@@ -98,21 +100,33 @@ function formatUser(supabaseUser: import("@supabase/auth-js").User): User {
   };
 }
 
+interface DialogState {
+  isSubmitting: boolean;
+  companyDialogOpen: boolean;
+  shouldReset: boolean;
+}
+
 export function UserDialog({
   user,
   onSuccess,
   companies,
   onUserAdded,
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
 }: UserDialogProps) {
   const { toast } = useToast();
   const formRef = useRef<HTMLFormElement>(null);
-  const [open, setOpen] = useState(false);
-  const [dialogState, setDialogState] = useState({
+  const [internalOpen, setInternalOpen] = useState(false);
+  const [dialogState, setDialogState] = useState<DialogState>({
     isSubmitting: false,
     companyDialogOpen: false,
     shouldReset: false,
   });
   const [createdUser, setCreatedUser] = useState<User | null>(null);
+
+  // Use controlled or uncontrolled open state
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = controlledOnOpenChange ?? setInternalOpen;
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -130,14 +144,24 @@ export function UserDialog({
     },
   });
 
-  // Reset form when user changes
+  const handleDialogChange = useCallback(
+    (newOpen: boolean) => {
+      if (dialogState.isSubmitting) return;
+
+      if (!newOpen) {
+        setDialogState((prev: DialogState) => ({ ...prev, shouldReset: true }));
+      }
+      setOpen(newOpen);
+    },
+    [dialogState.isSubmitting, setOpen]
+  );
+
+  // Reset form when dialog opens
   useEffect(() => {
     if (user && open) {
       const formattedDate = user.dob
         ? new Date(user.dob).toISOString().split("T")[0]
         : "";
-
-      console.log("Resetting form with user data:", user);
 
       // Ensure we have working_shift and off_days with proper defaults
       const working_shift = user.working_shift || "1";
@@ -145,9 +169,6 @@ export function UserDialog({
         Array.isArray(user.off_days) && user.off_days.length > 0
           ? user.off_days
           : ["saturday", "sunday"];
-
-      console.log("Working shift:", working_shift);
-      console.log("Off days:", off_days);
 
       form.reset({
         first_name: user.first_name || "",
@@ -160,36 +181,34 @@ export function UserDialog({
         working_shift: working_shift,
         off_days: off_days,
       });
+    } else if (!user && open) {
+      form.reset({
+        first_name: "",
+        last_name: "",
+        email: "",
+        phone_number: "",
+        role: "user",
+        department: undefined,
+        password: "",
+        dob: "",
+        working_shift: "1",
+        off_days: ["saturday", "sunday"],
+      });
     }
   }, [user, open, form]);
 
-  // Handle dialog state changes
+  // Handle dialog state cleanup
   useEffect(() => {
-    if (!open) {
-      if (dialogState.shouldReset) {
-        form.reset();
-        setDialogState((prev) => ({
-          ...prev,
-          isSubmitting: false,
-          companyDialogOpen: false,
-          shouldReset: false,
-        }));
-        setCreatedUser(null);
-      }
+    if (!open && dialogState.shouldReset) {
+      setDialogState((prev: DialogState) => ({
+        ...prev,
+        isSubmitting: false,
+        companyDialogOpen: false,
+        shouldReset: false,
+      }));
+      setCreatedUser(null);
     }
-  }, [open, form, dialogState.shouldReset]);
-
-  const handleDialogChange = useCallback(
-    (newOpen: boolean) => {
-      if (dialogState.isSubmitting) return;
-
-      if (!newOpen) {
-        setDialogState((prev) => ({ ...prev, shouldReset: true }));
-      }
-      setOpen(newOpen);
-    },
-    [dialogState.isSubmitting]
-  );
+  }, [open, dialogState.shouldReset]);
 
   const handleSubmit = useCallback(
     async (values: z.infer<typeof formSchema>) => {

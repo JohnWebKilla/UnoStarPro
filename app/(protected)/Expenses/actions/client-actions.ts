@@ -5,7 +5,7 @@ import {
   setClientCache,
   deleteClientCache,
 } from "@/utils/client-cache";
-import { format } from "date-fns";
+import { format, parseISO } from "date-fns";
 
 // Define the Expense type
 export interface Expense {
@@ -341,6 +341,7 @@ export async function getExpensesChartData(
       amount: number;
       currency: "USD" | "UZS";
       amount_uzs: number | null;
+      exchange_rate: number | null;
       expense_date: string;
       expense_categories: {
         name: string;
@@ -350,18 +351,27 @@ export async function getExpensesChartData(
     const { data, error } = await supabase
       .from("expenses")
       .select(
-        "amount, currency, amount_uzs, expense_date, expense_categories!inner(name)"
+        "amount, currency, amount_uzs, exchange_rate, expense_date, expense_categories!inner(name)"
       )
       .gte("expense_date", dateRange.start.toISOString())
       .lte("expense_date", dateRange.end.toISOString());
 
     if (error) throw error;
 
-    const groupedData = data?.reduce(
-      (acc: Record<string, ChartDataPoint>, curr: ExpenseWithCategory) => {
-        const date = format(new Date(curr.expense_date), "MMM yyyy");
-        const category = curr.expense_categories.name;
-        const amount = curr.amount;
+    interface GroupedData {
+      [key: string]: ChartDataPoint;
+    }
+
+    const groupedData = ((data as ExpenseWithCategory[]) || []).reduce(
+      (acc: GroupedData, expense: ExpenseWithCategory) => {
+        const date = format(parseISO(expense.expense_date), "yyyy-MM-dd");
+        const amount =
+          expense.currency === "USD"
+            ? expense.amount
+            : (expense.amount_uzs || 0) / (expense.exchange_rate || 1);
+        const isPayroll = expense.expense_categories.name
+          .toLowerCase()
+          .includes("payroll");
 
         if (!acc[date]) {
           acc[date] = {
@@ -373,7 +383,7 @@ export async function getExpensesChartData(
         }
 
         acc[date].total += amount;
-        if (category === "Payroll") {
+        if (isPayroll) {
           acc[date].payroll += amount;
         } else {
           acc[date].other += amount;
@@ -381,14 +391,12 @@ export async function getExpensesChartData(
 
         return acc;
       },
-      {}
+      {} as GroupedData
     );
 
-    const chartData: ChartDataPoint[] = Object.values(groupedData || {}).sort(
-      (a, b) => {
-        return new Date(a.date).getTime() - new Date(b.date).getTime();
-      }
-    );
+    const chartData = (
+      Object.values(groupedData || {}) as ChartDataPoint[]
+    ).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
     // Cache the chart data
     try {

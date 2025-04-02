@@ -63,14 +63,29 @@ export async function middleware(request: NextRequest) {
   );
 
   try {
-    // Get session
-    const {
-      data: { session },
-      error: sessionError,
-    } = await supabase.auth.getSession();
+    // Get session with retry logic
+    let session;
+    let retryCount = 0;
+    const maxRetries = 3;
 
-    if (sessionError) {
-      throw sessionError;
+    while (retryCount < maxRetries) {
+      const {
+        data: { session: currentSession },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+
+      if (sessionError) {
+        console.error(`Session error attempt ${retryCount + 1}:`, sessionError);
+        retryCount++;
+        if (retryCount < maxRetries) {
+          await new Promise((resolve) => setTimeout(resolve, 100 * retryCount));
+          continue;
+        }
+        throw sessionError;
+      }
+
+      session = currentSession;
+      break;
     }
 
     // Check if trying to access auth pages while authenticated

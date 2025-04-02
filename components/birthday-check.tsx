@@ -11,43 +11,59 @@ export function BirthdayCheck() {
 
   useEffect(() => {
     const checkBirthday = async () => {
-      console.log("🎂 Starting birthday check...");
-
       try {
         const supabase = createClient();
+
+        // Get current user
         const {
           data: { user },
+          error: userError,
         } = await supabase.auth.getUser();
 
+        if (userError) {
+          console.error("Error getting user:", userError);
+          return;
+        }
+
         if (!user) {
-          console.log("❌ No user found");
+          console.log("No user found");
           return;
         }
 
         // Check if we've already shown the birthday today
         const todayString = new Date().toDateString();
         const storageKey = `birthdayShown_${user.id}`;
-        const hasShownToday = localStorage.getItem(storageKey) === todayString;
 
-        if (hasShownToday) {
-          console.log("🎈 Already shown birthday overlay today for this user");
-          return;
+        try {
+          const hasShownToday =
+            localStorage.getItem(storageKey) === todayString;
+          if (hasShownToday) {
+            console.log("Already shown birthday overlay today");
+            return;
+          }
+        } catch (storageError) {
+          console.error("LocalStorage error:", storageError);
+          // Continue execution even if localStorage fails
         }
 
-        const { data: userData, error } = await supabase
+        // Get user data
+        const { data: userData, error: dbError } = await supabase
           .from("users")
           .select("first_name, dob")
           .eq("id", user.id)
           .single();
 
-        console.log("📅 User data:", userData);
-        console.log("❌ Error if any:", error);
-
-        if (!userData?.dob) {
-          console.log("❌ No DOB found for user");
+        if (dbError) {
+          console.error("Error fetching user data:", dbError);
           return;
         }
 
+        if (!userData?.dob) {
+          console.log("No DOB found for user");
+          return;
+        }
+
+        // Check if today is user's birthday
         const today = new Date();
         const birthday = new Date(userData.dob);
 
@@ -55,15 +71,20 @@ export function BirthdayCheck() {
           today.getMonth() === birthday.getMonth() &&
           today.getDate() === birthday.getDate();
 
-        console.log("🎉 Is Birthday?", isBirthday);
-
-        if (isBirthday) {
-          console.log("🎈 Setting birthday state for:", userData.first_name);
+        if (isBirthday && userData.first_name) {
           setUserName(userData.first_name);
           setShowBirthday(true);
+
+          // Mark as shown for today
+          try {
+            localStorage.setItem(storageKey, todayString);
+          } catch (storageError) {
+            console.error("Error setting localStorage:", storageError);
+            // Continue execution even if localStorage fails
+          }
         }
       } catch (error) {
-        console.error("Error checking birthday:", error);
+        console.error("Birthday check error:", error);
       } finally {
         setIsChecking(false);
       }
@@ -73,18 +94,10 @@ export function BirthdayCheck() {
   }, []);
 
   const handleClose = () => {
-    const supabase = createClient();
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) {
-        const todayString = new Date().toDateString();
-        localStorage.setItem(`birthdayShown_${user.id}`, todayString);
-      }
-    });
     setShowBirthday(false);
   };
 
-  if (isChecking) return null;
-  if (!showBirthday) return null;
+  if (isChecking || !showBirthday) return null;
 
   return <BirthdayOverlay userName={userName} onClose={handleClose} />;
 }
