@@ -32,6 +32,8 @@ import {
   Loader2,
   Database,
   RefreshCw,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -63,27 +65,24 @@ const DEPARTMENTS = {
 const SHIFTS = {
   1: {
     label: "Morning Shift",
-    shortLabel: "Morning",
     time: "06:00-14:00",
-    color:
-      "bg-blue-100 dark:bg-blue-900/50 border-blue-200 dark:border-blue-800",
     icon: "🌅",
+    color: "bg-blue-50 dark:bg-blue-950/50",
+    border: "border-blue-100 dark:border-blue-900",
   },
   2: {
     label: "Afternoon Shift",
-    shortLabel: "Afternoon",
     time: "14:00-22:00",
-    color:
-      "bg-orange-100 dark:bg-orange-900/50 border-orange-200 dark:border-orange-800",
     icon: "🌞",
+    color: "bg-orange-50 dark:bg-orange-950/50",
+    border: "border-orange-100 dark:border-orange-900",
   },
   3: {
     label: "Night Shift",
-    shortLabel: "Night",
     time: "22:00-06:00",
-    color:
-      "bg-indigo-100 dark:bg-indigo-900/50 border-indigo-200 dark:border-indigo-800",
     icon: "🌙",
+    color: "bg-indigo-50 dark:bg-indigo-950/50",
+    border: "border-indigo-100 dark:border-indigo-900",
   },
 } as const;
 
@@ -106,7 +105,7 @@ function WeekNavigation({
 }) {
   const { data } = useSchedulingData();
   const absences = data?.absences ?? [];
-  const weekStart = startOfWeek(selectedDate);
+  const weekStart = startOfWeek(selectedDate, { weekStartsOn: 0 });
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
 
   // Count absences for each day
@@ -125,109 +124,63 @@ function WeekNavigation({
   const today = format(new Date(), "yyyy-MM-dd");
 
   return (
-    <Card className="border border-border/40 shadow-sm overflow-hidden">
-      <div className="bg-muted/30 px-4 py-3 border-b flex items-center justify-between">
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
         <Button
           variant="outline"
           size="sm"
-          onClick={() => onDateChange(addDays(weekStart, -7))}
-          className="h-8 text-xs font-medium"
+          onClick={() => onDateChange(addDays(selectedDate, -7))}
         >
-          <Calendar className="h-3.5 w-3.5 mr-1.5" />
+          <ChevronLeft className="h-4 w-4 mr-1" />
           Previous
         </Button>
-        <div className="text-center">
-          <h3 className="text-sm font-medium flex items-center">
-            <Badge variant="secondary" className="font-normal px-2 py-0.5">
-              Week
-            </Badge>
-            <span className="mx-2">
-              {format(weekStart, "MMM d")} -{" "}
-              {format(addDays(weekStart, 6), "MMM d, yyyy")}
-            </span>
-          </h3>
+        <div className="text-sm font-medium">
+          Week {format(weekStart, "MMM d")} -{" "}
+          {format(addDays(weekStart, 6), "MMM d, yyyy")}
         </div>
         <Button
           variant="outline"
           size="sm"
-          onClick={() => onDateChange(addDays(weekStart, 7))}
-          className="h-8 text-xs font-medium"
+          onClick={() => onDateChange(addDays(selectedDate, 7))}
         >
           Next
-          <Calendar className="h-3.5 w-3.5 ml-1.5" />
+          <ChevronRight className="h-4 w-4 ml-1" />
         </Button>
       </div>
+      <div className="grid grid-cols-7 gap-1">
+        {["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"].map((day, i) => (
+          <div
+            key={day}
+            className="text-center text-xs font-medium text-muted-foreground"
+          >
+            {day}
+          </div>
+        ))}
+        {weekDays.map((date) => {
+          const dateStr = format(date, "yyyy-MM-dd");
+          const absenceCount = absencesByDay[dateStr] || 0;
+          const isSelected =
+            format(date, "yyyy-MM-dd") === format(selectedDate, "yyyy-MM-dd");
+          const isToday = dateStr === today;
+          const isWeekend = [0, 6].includes(date.getDay());
 
-      <div className="p-3">
-        {/* Day headers */}
-        <div className="grid grid-cols-7 gap-2 mb-2">
-          {weekDays.map((day) => (
-            <div
-              key={`header-${day.toISOString()}`}
-              className="text-center text-xs font-semibold text-muted-foreground"
+          return (
+            <button
+              key={date.toString()}
+              onClick={() => onDateChange(date)}
+              className={`
+                p-2 text-sm rounded-md transition-colors
+                ${isSelected ? "bg-primary text-primary-foreground" : ""}
+                ${isToday && !isSelected ? "bg-muted" : ""}
+                ${!isSelected && !isToday ? "hover:bg-muted" : ""}
+              `}
             >
-              {format(day, "EEE").toUpperCase()}
-            </div>
-          ))}
-        </div>
-
-        {/* Day cells */}
-        <div className="grid grid-cols-7 gap-2">
-          {weekDays.map((day) => {
-            const dateStr = format(day, "yyyy-MM-dd");
-            const absenceCount = absencesByDay[dateStr] || 0;
-            const isSelected =
-              format(day, "yyyy-MM-dd") === format(selectedDate, "yyyy-MM-dd");
-            const isToday = dateStr === today;
-            const isWeekend = [0, 6].includes(day.getDay());
-
-            return (
-              <button
-                key={day.toISOString()}
-                onClick={() => onDateChange(day)}
-                className={`
-                  relative rounded-md cursor-pointer transition-all h-10
-                  flex items-center justify-center
-                  ${
-                    isSelected
-                      ? "bg-primary text-primary-foreground shadow-sm"
-                      : isToday
-                        ? "bg-accent text-accent-foreground shadow-sm"
-                        : isWeekend
-                          ? "bg-muted/50 hover:bg-muted"
-                          : "bg-background hover:bg-muted/40 border border-border/30"
-                  }
-                `}
-              >
-                <div className="flex items-center">
-                  <span
-                    className={`text-base ${isSelected || isToday ? "font-semibold" : "font-medium"}`}
-                  >
-                    {format(day, "d")}
-                  </span>
-                  {absenceCount > 0 && (
-                    <div
-                      className={`
-                        ml-1 text-[10px] font-bold rounded-full 
-                        min-w-[16px] h-4 flex items-center justify-center px-1 
-                        ${
-                          isSelected
-                            ? "bg-primary-foreground text-primary"
-                            : "bg-destructive text-destructive-foreground"
-                        } 
-                        shadow-sm
-                      `}
-                    >
-                      {absenceCount}
-                    </div>
-                  )}
-                </div>
-              </button>
-            );
-          })}
-        </div>
+              {format(date, "d")}
+            </button>
+          );
+        })}
       </div>
-    </Card>
+    </div>
   );
 }
 
@@ -307,11 +260,7 @@ function EmployeeCard({
   shift: ShiftType;
   onShiftChange: (newShift: ShiftType) => void;
 }) {
-  // Log employee information
-  console.log("Employee in EmployeeCard:", employee);
-
-  const currentShift = SHIFTS[shift];
-  const { data } = useSchedulingData();
+  const { data, refetch } = useSchedulingData();
   const absences = data?.absences ?? [];
   const [absenceError, setAbsenceError] = useState<string | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -336,75 +285,79 @@ function EmployeeCard({
     onShiftChange(shiftType);
   };
 
-  const handleAbsenceSubmit = (reason: string) => {
+  const handleAbsenceSubmit = async (reason: string) => {
     if (!reason.trim()) {
       setAbsenceError("Please provide a reason for the absence");
       return;
     }
 
-    // Show loading toast
     const toastId = toast.loading(
       `Recording absence for ${employee.first_name}...`
     );
 
-    createAbsenceMutation.mutate(
-      {
+    try {
+      const result = await createAbsenceMutation.mutateAsync({
         userId: employee.id,
         date: format(selectedDate, "yyyy-MM-dd"),
         reason: reason.trim(),
-      },
-      {
-        onSuccess: (response) => {
-          if (response.error) {
-            setAbsenceError(response.error);
-            if (response.code !== "DUPLICATE_ABSENCE") {
-              setIsDialogOpen(false);
-            }
-            toast.error(response.error, { id: toastId });
-          } else {
-            setAbsenceError(null);
-            setIsDialogOpen(false);
-            toast.success("Absence has been recorded successfully.", {
-              id: toastId,
-            });
-          }
-        },
-        onError: (error) => {
-          setAbsenceError(error.message || "Failed to create absence");
-          toast.error(error.message || "Failed to create absence", {
-            id: toastId,
-          });
-        },
+      });
+
+      if (result.error) {
+        setAbsenceError(result.error);
+        if (result.code !== "DUPLICATE_ABSENCE") {
+          setIsDialogOpen(false);
+        }
+        toast.error(result.error, { id: toastId });
+      } else {
+        setAbsenceError(null);
+        setIsDialogOpen(false);
+        await refetch(); // Refetch data after successful creation
+        toast.success("Absence has been recorded successfully.", {
+          id: toastId,
+        });
       }
-    );
+    } catch (error) {
+      setAbsenceError(
+        error instanceof Error ? error.message : "Failed to create absence"
+      );
+      toast.error(
+        error instanceof Error ? error.message : "Failed to create absence",
+        {
+          id: toastId,
+        }
+      );
+    }
   };
 
-  const handleAbsenceDelete = () => {
+  const handleAbsenceDelete = async () => {
     if (currentAbsence?.id) {
       const toastId = toast.loading("Deleting absence...");
 
-      deleteAbsenceMutation.mutate(currentAbsence.id, {
-        onSuccess: (response) => {
-          if (response.error) {
-            toast.error(`Failed to delete absence: ${response.error}`, {
-              id: toastId,
-            });
-          } else {
-            setIsAbsenceDetailsOpen(false);
-            toast.success("Absence deleted successfully", {
-              id: toastId,
-            });
+      try {
+        const result = await deleteAbsenceMutation.mutateAsync(
+          currentAbsence.id
+        );
+        if (result.error) {
+          toast.error(`Failed to delete absence: ${result.error}`, {
+            id: toastId,
+          });
+        } else {
+          setIsAbsenceDetailsOpen(false);
+          await refetch(); // Refetch data after successful deletion
+          toast.success("Absence deleted successfully", {
+            id: toastId,
+          });
+        }
+      } catch (error) {
+        toast.error(
+          `Failed to delete absence: ${
+            error instanceof Error ? error.message : "Unknown error"
+          }`,
+          {
+            id: toastId,
           }
-        },
-        onError: (error) => {
-          toast.error(
-            `Failed to delete absence: ${error.message || "Unknown error"}`,
-            {
-              id: toastId,
-            }
-          );
-        },
-      });
+        );
+      }
     }
   };
 
@@ -428,11 +381,13 @@ function EmployeeCard({
       });
   };
 
+  const currentShiftInfo = SHIFTS[shift];
+
   return (
     <Card className="p-3 hover:shadow-md transition-all dark:border-gray-800">
       <div className="flex items-center gap-3">
         <div
-          className={`h-10 w-10 rounded-full ${currentShift.color} flex items-center justify-center border-2 dark:border-gray-700 flex-shrink-0 cursor-pointer`}
+          className={`h-10 w-10 rounded-full ${currentShiftInfo.color} flex items-center justify-center border-2 dark:border-gray-700 flex-shrink-0 cursor-pointer`}
           onClick={() => setIsUserDetailsOpen(true)}
         >
           <span className="text-sm font-semibold">
@@ -639,10 +594,10 @@ function EmployeeCard({
                     <SelectValue>
                       <span className="flex items-center">
                         <span className="mr-2 flex-shrink-0">
-                          {SHIFTS[shift as ShiftType].icon}
+                          {currentShiftInfo.icon}
                         </span>
                         <span className="truncate">
-                          {SHIFTS[shift as ShiftType].shortLabel}
+                          {currentShiftInfo.label}
                         </span>
                       </span>
                     </SelectValue>
@@ -683,7 +638,7 @@ function EmployeeCard({
           <div className="space-y-4 pt-4">
             <div className="flex items-center gap-4">
               <div
-                className={`h-16 w-16 rounded-full ${currentShift.color} flex items-center justify-center border-2 dark:border-gray-700`}
+                className={`h-16 w-16 rounded-full ${currentShiftInfo.color} flex items-center justify-center border-2 dark:border-gray-700`}
               >
                 <span className="text-xl font-semibold">
                   {employee.first_name[0]}
@@ -751,8 +706,8 @@ function EmployeeCard({
                 <div className="flex-1">
                   <p className="text-sm text-muted-foreground">Current Shift</p>
                   <p className="font-medium flex items-center">
-                    <span className="mr-2">{SHIFTS[shift].icon}</span>
-                    {SHIFTS[shift].label} ({SHIFTS[shift].time})
+                    <span className="mr-2">{currentShiftInfo.icon}</span>
+                    {currentShiftInfo.label} ({currentShiftInfo.time})
                   </p>
                 </div>
               </div>
@@ -1114,53 +1069,51 @@ export default function ShiftSchedule() {
   };
 
   return (
-    <div className="px-4 md:px-6 py-4 space-y-6 max-w-[100rem] mx-auto">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="space-y-4 col-span-1 lg:col-span-1">
-          <div className="space-y-2">
-            <div className="flex justify-between items-center">
-              <div className="space-y-1">
-                <h2 className="text-xl font-bold tracking-tight">
-                  Shift Scheduler
-                </h2>
-                <p className="text-sm text-muted-foreground">
-                  Manage employee shifts and absences
-                </p>
-                {isLoading ? (
-                  <div className="flex items-center gap-2 text-muted-foreground text-sm mt-1">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    Loading data...
-                  </div>
-                ) : (
-                  renderDataSourceIndicator()
-                )}
+    <div className="p-4 space-y-6">
+      <div className="flex flex-col md:flex-row justify-between items-start gap-4">
+        <div className="flex items-center justify-between w-full md:w-auto gap-4">
+          <div>
+            <h2 className="text-2xl font-bold tracking-tight">
+              Shift Scheduler
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              Manage employee shifts and absences
+            </p>
+            {isLoading ? (
+              <div className="flex items-center gap-2 text-muted-foreground text-sm mt-1">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Loading data...
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleRefresh}
-                disabled={isRefreshing}
-              >
-                {isRefreshing ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="mr-2 h-4 w-4" />
-                )}
-                Refresh
-              </Button>
-            </div>
+            ) : (
+              renderDataSourceIndicator()
+            )}
           </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className="md:hidden"
+          >
+            {isRefreshing ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="mr-2 h-4 w-4" />
+            )}
+            Refresh
+          </Button>
         </div>
-        <div className="space-y-4 col-span-1 lg:col-span-1">
-          <div className="space-y-2">
-            <h3 className="text-sm font-medium">Filter by Department</h3>
+
+        <div className="flex flex-col sm:flex-row items-start gap-4 w-full md:w-auto">
+          <div>
+            <h3 className="text-sm font-medium mb-2">Filter by Department</h3>
             <Select
               value={filterDepartment}
               onValueChange={(value) =>
                 setFilterDepartment(value as string | undefined)
               }
             >
-              <SelectTrigger className="w-[160px]">
+              <SelectTrigger className="w-[200px]">
                 <SelectValue>
                   {filterDepartment === "all" ? (
                     <span className="flex items-center">
@@ -1199,26 +1152,16 @@ export default function ShiftSchedule() {
               </SelectContent>
             </Select>
           </div>
-        </div>
-        <div className="space-y-4 col-span-1 lg:col-span-1">
-          <div className="space-y-2">
-            <h3 className="text-sm font-medium">Filter by Date</h3>
-            <WeekNavigation
-              selectedDate={selectedDate}
-              onDateChange={setSelectedDate}
-            />
-          </div>
-        </div>
-        <div className="space-y-4 col-span-1 lg:col-span-1">
-          <div className="space-y-2">
-            <h3 className="text-sm font-medium">Search Employees</h3>
-            <div className="relative w-[300px]">
+
+          <div>
+            <h3 className="text-sm font-medium mb-2">Search Employees</h3>
+            <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
               <Input
                 placeholder="Search employees, roles, or departments..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9"
+                className="pl-9 w-[300px]"
               />
               {searchQuery && (
                 <Button
@@ -1232,6 +1175,21 @@ export default function ShiftSchedule() {
               )}
             </div>
           </div>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className="hidden md:flex self-end mb-[2px]"
+          >
+            {isRefreshing ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="mr-2 h-4 w-4" />
+            )}
+            Refresh
+          </Button>
         </div>
       </div>
 

@@ -22,13 +22,13 @@ import {
   UserCog,
 } from "lucide-react";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-import { updateUserStatus } from "./actions";
+import { updateUserStatus } from "../lib/actions/actions";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { User, UserRole } from "./types";
+import { User } from "../lib/types/types";
 
 interface Company {
   id: number;

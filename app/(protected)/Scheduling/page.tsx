@@ -1,7 +1,7 @@
 "use client";
 
 import { QueryClientProvider, QueryClient } from "@tanstack/react-query";
-import CachedShiftSchedule from "./components/cached-shift-schedule";
+import ShiftSchedule from "./components/shift-schedule";
 
 // Create a client with appropriate stale time
 const queryClient = new QueryClient({
@@ -18,7 +18,7 @@ export default function SchedulingPage() {
   return (
     <QueryClientProvider client={queryClient}>
       <div className="py-2">
-        <CachedShiftSchedule />
+        <ShiftSchedule />
       </div>
     </QueryClientProvider>
   );

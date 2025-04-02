@@ -1,5 +1,12 @@
 "use client";
 
+import React, {
+  useState,
+  useCallback,
+  useRef,
+  useEffect,
+  useMemo,
+} from "react";
 import {
   ColumnDef,
   flexRender,
@@ -21,7 +28,6 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useState, useMemo, useCallback, useEffect } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   ChevronDown,
@@ -56,11 +62,11 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
+  TooltipProvider,
 } from "@/components/ui/tooltip";
-import { getBirthdayStatus } from "./columns"; // Only import getBirthdayStatus
-import { User } from "./types"; // Import User from types
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { UserDialog } from "./user-dialog";
+import { getBirthdayStatus } from "../../config/columns";
+import { User } from "../../lib/types/types";
+import { UserDialog } from "../dialogs/user-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const variantMap = {

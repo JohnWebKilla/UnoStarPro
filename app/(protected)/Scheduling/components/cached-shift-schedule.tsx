@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -36,17 +36,20 @@ export default function CachedShiftSchedule() {
   } | null>(null);
 
   // Date range for data fetching
-  const dateRange = {
-    start: startOfMonth(selectedDate),
-    end: endOfMonth(selectedDate),
-  };
+  const dateRange = useMemo(
+    () => ({
+      start: startOfMonth(selectedDate),
+      end: endOfMonth(selectedDate),
+    }),
+    [selectedDate]
+  );
 
   const fetchSchedulingData = useCallback(
     async (skipCache: boolean = false) => {
+      if (!dateRange.start || !dateRange.end) return;
+
       try {
         setIsLoading(true);
-
-        // Don't show any data source initially when loading
         setDataSource("database");
         setTimingInfo(null);
 
@@ -56,7 +59,6 @@ export default function CachedShiftSchedule() {
           skipCache
         );
 
-        // Update state with the response data
         setEmployees(result.data.employees);
         setAbsences(result.data.absences);
         setSchedules(result.data.schedules);
@@ -73,12 +75,24 @@ export default function CachedShiftSchedule() {
         setIsLoading(false);
       }
     },
-    [dateRange.start, dateRange.end]
+    [dateRange]
   );
 
   // Initialize data
   useEffect(() => {
-    fetchSchedulingData();
+    let mounted = true;
+
+    const loadData = async () => {
+      if (mounted) {
+        await fetchSchedulingData();
+      }
+    };
+
+    loadData();
+
+    return () => {
+      mounted = false;
+    };
   }, [fetchSchedulingData]);
 
   // Handle date change

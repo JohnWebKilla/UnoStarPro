@@ -20,8 +20,8 @@ import {
   SelectSeparator,
 } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
-import { updateUserCompanyAccess } from "./actions";
-import { UserRole } from "./types";
+import { updateUserCompanyAccess } from "../../lib/actions/actions";
+import { UserRole } from "../../lib/types/types";
 import { Building, Info } from "lucide-react";
 import {
   Card,

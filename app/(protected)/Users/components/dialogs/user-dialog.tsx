@@ -31,9 +31,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
-import { createUser, updateUser } from "./actions";
-import { CompanyManagement } from "./company-management";
-import { User, UserRole } from "./types";
+import { createUser, updateUser } from "../../lib/actions/actions";
+import { CompanyManagement } from "../features/company-management";
+import { User, UserRole } from "../../lib/types/types";
 import { Building, PlusCircle } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 
