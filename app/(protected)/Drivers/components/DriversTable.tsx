@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import {
   Table,
   TableBody,
@@ -30,11 +30,14 @@ import {
   Phone,
   Loader2,
   RefreshCw,
+  ChevronLeft,
+  ChevronRight,
+  Check,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EditDriverDialog } from "./EditDriverDialog";
 import { DeleteDriverDialog } from "./DeleteDriverDialog";
-import { useDrivers } from "./DriversProvider";
+import { useDrivers } from "../hooks/useDrivers";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import {
@@ -44,19 +47,37 @@ import {
   endOfDay,
   startOfDay,
 } from "date-fns";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { UploadDocumentDialog } from "./UploadDocumentDialog";
+import dynamic from "next/dynamic";
 import { useToast } from "@/components/ui/use-toast";
-import { StripeConnectButton } from "./StripeConnectButton";
-import { SubscriptionFrequency } from "../types";
-import { syncStripeConnectAccountAction } from "../stripe-server-actions";
+import { Driver } from "../types";
+import { createClient } from "@/utils/supabase/client";
+import { UploadDocumentDialog } from "./UploadDocumentDialog";
+
+// Dynamically import Dialog components with no SSR
+const Dialog = dynamic(
+  () => import("@/components/ui/dialog").then((mod) => mod.Dialog),
+  { ssr: false }
+);
+const DialogContent = dynamic(
+  () => import("@/components/ui/dialog").then((mod) => mod.DialogContent),
+  { ssr: false }
+);
+const DialogHeader = dynamic(
+  () => import("@/components/ui/dialog").then((mod) => mod.DialogHeader),
+  { ssr: false }
+);
+const DialogFooter = dynamic(
+  () => import("@/components/ui/dialog").then((mod) => mod.DialogFooter),
+  { ssr: false }
+);
+const DialogTitle = dynamic(
+  () => import("@/components/ui/dialog").then((mod) => mod.DialogTitle),
+  { ssr: false }
+);
+const DialogDescription = dynamic(
+  () => import("@/components/ui/dialog").then((mod) => mod.DialogDescription),
+  { ssr: false }
+);
 
 interface Document {
   id: number;
@@ -73,39 +94,18 @@ interface Document {
   url?: string;
 }
 
-interface Driver {
-  id: number;
-  name: string;
-  phone_number: string;
-  truck_number: string;
-  solo_or_team: string;
-  status: string;
-  driver_licenses: Document[];
-  medical_cards: Document[];
-  mvr_files: Document[];
-  company_id: number;
-  subscription_amount: number;
-  subscription_frequency: SubscriptionFrequency;
-  stripe_product_id: string | null;
-  stripe_price_id: string | null;
-  stripe_connect_account_id: string | null;
-  hire_date: string;
-  terminated_date: string | null;
-  created_at: string;
-  updated_at: string;
-  company_name?: string;
-}
-
 interface DocumentWithType extends Document {
   type: "license" | "medical" | "mvr";
   name: string;
 }
 
-export function DriversTable() {
-  const { drivers, loading, error, refreshDrivers } = useDrivers();
+export default function DriversTable() {
+  const { drivers, error, refreshDrivers } = useDrivers();
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [currentPage, setCurrentPage] = useState(1);
+  const driversPerPage = 5;
   const [editingDriver, setEditingDriver] = useState<Driver | null>(null);
   const [viewingDocuments, setViewingDocuments] = useState<Driver | null>(null);
   const [deletingDriver, setDeletingDriver] = useState<Driver | null>(null);
@@ -120,11 +120,34 @@ export function DriversTable() {
   } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [dialogKey, setDialogKey] = useState(0);
-  const [syncingRowIds, setSyncingRowIds] = useState<Record<number, number>>(
-    {}
-  );
   const [isSyncing, setIsSyncing] = useState(false);
   const [loadingRows, setLoadingRows] = useState<Record<number, boolean>>({});
+  const supabase = createClient();
+
+  // Set up realtime subscription
+  useEffect(() => {
+    const channel = supabase
+      .channel("drivers_changes")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "drivers",
+        },
+        async (payload) => {
+          const metadata = payload.new as { webhook_update?: boolean };
+          if (!metadata?.webhook_update) {
+            await refreshDrivers();
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [refreshDrivers, supabase]);
 
   const getExpiringDocuments = (driver: Driver): DocumentWithType[] => {
     const sevenDaysFromNow = new Date();
@@ -133,10 +156,12 @@ export function DriversTable() {
     const expiringDocs: DocumentWithType[] = [];
 
     const checkAndAddDocs = (
-      docs: Document[],
+      docs: Document[] | undefined,
       type: "license" | "medical" | "mvr",
       name: string
     ) => {
+      if (!docs) return;
+
       docs.forEach((doc) => {
         const expDate = parseISO(doc.expiration_date);
         const currentDate = new Date();
@@ -175,6 +200,14 @@ export function DriversTable() {
 
     return matchesSearch && matchesStatus;
   });
+
+  // Calculate pagination
+  const totalPages = Math.ceil(filteredDrivers.length / driversPerPage);
+  const startIndex = (currentPage - 1) * driversPerPage;
+  const paginatedDrivers = filteredDrivers.slice(
+    startIndex,
+    startIndex + driversPerPage
+  );
 
   const updateDriverDocuments = async () => {
     // First refresh the drivers data
@@ -223,17 +256,38 @@ export function DriversTable() {
         method: "POST",
       });
 
+      const result = await response.json();
+
       if (!response.ok) {
-        throw new Error("Failed to sync with Stripe");
+        throw new Error(result.error || "Failed to sync with Stripe");
       }
 
       await refreshDrivers();
+
+      // Show success toast with details
       toast({
-        title: "Success",
-        description: "All drivers synced with Stripe successfully",
+        title: "Sync Complete",
+        description: (
+          <div className="flex flex-col gap-2">
+            <p>{result.message}</p>
+            {result.errors.length > 0 && (
+              <div className="mt-2">
+                <p className="font-semibold text-destructive">Errors:</p>
+                <ul className="list-disc pl-4">
+                  {result.errors.map((error: string, index: number) => (
+                    <li key={index} className="text-sm">
+                      {error}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        ),
+        duration: result.errors.length > 0 ? 10000 : 5000, // Show longer if there are errors
       });
     } catch (error) {
-      console.error("Error syncing drivers with Stripe:", error);
+      console.error("Error syncing all drivers with Stripe:", error);
       toast({
         title: "Error",
         description:
@@ -247,58 +301,82 @@ export function DriversTable() {
 
   const handleSyncStripe = async (driver: Driver) => {
     try {
-      // Check if this driver was synced recently (within 10 seconds)
-      const lastSyncTime = syncingRowIds[driver.id];
-      const currentTime = Date.now();
-
-      if (lastSyncTime && currentTime - lastSyncTime < 10000) {
-        console.log(
-          `Skipping sync for ${driver.name} - already synced recently`
-        );
-        toast({
-          title: "Info",
-          description:
-            "This driver was synced recently. Please wait a moment before syncing again.",
-        });
-        return;
-      }
-
-      // Record sync time and set loading state
-      setSyncingRowIds((prev) => ({ ...prev, [driver.id]: currentTime }));
       setLoadingRows((prev) => ({ ...prev, [driver.id]: true }));
 
-      const result = await syncStripeConnectAccountAction(driver.id);
+      const response = await fetch(`/api/drivers/${driver.id}/sync`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: driver.name,
+          subscription_amount: driver.subscription_amount,
+          subscription_frequency: driver.subscription_frequency,
+        }),
+      });
 
-      if (result.success) {
-        await refreshDrivers();
-        toast({
-          title: "Success",
-          description: `Driver synced with Stripe successfully (Product ID: ${result.productId})`,
-        });
+      let result;
+      const contentType = response.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) {
+        result = await response.json();
       } else {
-        throw new Error(result.error);
+        // Handle non-JSON response
+        const text = await response.text();
+        throw new Error(
+          `Invalid response format. Expected JSON, got: ${text.substring(0, 100)}...`
+        );
       }
+
+      if (!response.ok) {
+        throw new Error(
+          result?.error ||
+            `Failed to sync driver with Stripe (Status: ${response.status})`
+        );
+      }
+
+      await refreshDrivers();
+      toast({
+        title: "Success",
+        description: `Driver ${driver.name} synced with Stripe successfully`,
+      });
     } catch (error) {
       console.error("Error syncing driver with Stripe:", error);
+      // Get more detailed error information
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : "Failed to sync driver with Stripe";
+
       toast({
-        title: "Error",
-        description:
-          error instanceof Error
-            ? error.message
-            : "Failed to sync driver with Stripe",
+        title: "Stripe Sync Failed",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
       setLoadingRows((prev) => ({ ...prev, [driver.id]: false }));
+    }
+  };
 
-      // After 10 seconds, remove the driver from the syncing list
-      setTimeout(() => {
-        setSyncingRowIds((prev) => {
-          const newState = { ...prev };
-          delete newState[driver.id];
-          return newState;
-        });
-      }, 10000);
+  const handleDriverEdited = async () => {
+    try {
+      // First refresh the drivers data
+      await refreshDrivers();
+
+      // Show success toast
+      toast({
+        title: "Success",
+        description: "Driver information updated successfully",
+      });
+
+      // Close the edit dialog
+      setEditingDriver(null);
+    } catch (error) {
+      console.error("Error updating driver:", error);
+      toast({
+        title: "Error",
+        description: "Failed to update driver information",
+        variant: "destructive",
+      });
     }
   };
 
@@ -307,9 +385,7 @@ export function DriversTable() {
       <Card className="border-destructive">
         <CardContent className="pt-6">
           <div className="text-center space-y-4">
-            <div className="text-destructive text-lg font-medium">
-              Error: {error}
-            </div>
+            <div className="text-destructive text-lg font-medium">{error}</div>
             <Button onClick={() => refreshDrivers()} variant="outline">
               Retry
             </Button>
@@ -383,7 +459,7 @@ export function DriversTable() {
         </div>
       </CardHeader>
       <CardContent>
-        <ScrollArea className="h-[600px]">
+        <ScrollArea className="h-[400px]">
           <Table>
             <TableHeader>
               <TableRow>
@@ -398,22 +474,16 @@ export function DriversTable() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {loading ? (
+              {paginatedDrivers.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8">
-                    Loading drivers...
-                  </TableCell>
-                </TableRow>
-              ) : filteredDrivers.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8">
+                  <TableCell colSpan={8} className="text-center py-8">
                     No drivers found.
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredDrivers.map((driver) => {
+                paginatedDrivers.map((driver) => {
                   const expiringDocs = getExpiringDocuments(driver);
-                  const isLoading = loadingRows[driver.id];
+                  const isConnected = !!driver.stripe_product_id;
                   return (
                     <TableRow key={driver.id}>
                       <TableCell className="font-medium">
@@ -463,12 +533,35 @@ export function DriversTable() {
                         </Button>
                       </TableCell>
                       <TableCell>
-                        <StripeConnectButton
-                          driver={driver}
-                          onUpdate={refreshDrivers}
-                          onSync={() => handleSyncStripe(driver)}
-                          isLoading={isLoading}
-                        />
+                        <div className="flex flex-col gap-1">
+                          {isConnected ? (
+                            <>
+                              <div className="flex items-center gap-2">
+                                <Badge
+                                  variant="default"
+                                  className="bg-green-500"
+                                >
+                                  <Check className="h-3 w-3 mr-1" />
+                                  Connected
+                                </Badge>
+                              </div>
+                              <div className="text-sm text-muted-foreground">
+                                ${driver.subscription_amount}/
+                                {driver.subscription_frequency}
+                              </div>
+                            </>
+                          ) : (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleSyncStripe(driver)}
+                              className="w-[140px]"
+                            >
+                              <RefreshCw className="mr-2 h-4 w-4" />
+                              Connect Stripe
+                            </Button>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell className="text-right">
                         <DropdownMenu>
@@ -484,13 +577,6 @@ export function DriversTable() {
                             >
                               <Pencil className="h-4 w-4 mr-2" />
                               Edit driver
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() => handleSyncStripe(driver)}
-                              disabled={isLoading}
-                            >
-                              <RefreshCw className="h-4 w-4 mr-2" />
-                              Sync with Stripe
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               className="text-destructive"
@@ -509,6 +595,39 @@ export function DriversTable() {
             </TableBody>
           </Table>
         </ScrollArea>
+
+        {/* Pagination Controls */}
+        {filteredDrivers.length > 0 && (
+          <div className="flex items-center justify-between space-x-2 py-4">
+            <div className="text-sm text-muted-foreground">
+              Showing {startIndex + 1} to{" "}
+              {Math.min(startIndex + driversPerPage, filteredDrivers.length)} of{" "}
+              {filteredDrivers.length} drivers
+            </div>
+            <div className="flex items-center space-x-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                disabled={currentPage === 1}
+              >
+                <ChevronLeft className="h-4 w-4" />
+                Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  setCurrentPage((prev) => Math.min(totalPages, prev + 1))
+                }
+                disabled={currentPage === totalPages}
+              >
+                Next
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        )}
       </CardContent>
 
       {/* Dialogs */}
@@ -517,7 +636,7 @@ export function DriversTable() {
           driver={editingDriver}
           open={!!editingDriver}
           onOpenChange={(open) => !open && setEditingDriver(null)}
-          onDriverUpdated={refreshDrivers}
+          onDriverUpdated={handleDriverEdited}
         />
       )}
 
@@ -544,7 +663,8 @@ export function DriversTable() {
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <h3 className="font-semibold">Driver License</h3>
-                  {viewingDocuments.driver_licenses.length === 0 && (
+                  {(!viewingDocuments.driver_licenses ||
+                    viewingDocuments.driver_licenses.length === 0) && (
                     <Button
                       variant="outline"
                       size="sm"
@@ -559,7 +679,7 @@ export function DriversTable() {
                     </Button>
                   )}
                 </div>
-                {viewingDocuments.driver_licenses.length > 0 ? (
+                {viewingDocuments.driver_licenses?.length > 0 ? (
                   <div className="space-y-2">
                     {viewingDocuments.driver_licenses.map((doc) => {
                       const expDate = parseISO(doc.expiration_date);
@@ -676,7 +796,7 @@ export function DriversTable() {
                     Upload New
                   </Button>
                 </div>
-                {viewingDocuments.medical_cards.length > 0 ? (
+                {viewingDocuments.medical_cards?.length > 0 ? (
                   <div className="space-y-2">
                     {viewingDocuments.medical_cards.map((doc) => {
                       const expDate = parseISO(doc.expiration_date);
@@ -791,7 +911,7 @@ export function DriversTable() {
                     Upload New
                   </Button>
                 </div>
-                {viewingDocuments.mvr_files.length > 0 ? (
+                {viewingDocuments.mvr_files?.length > 0 ? (
                   <div className="space-y-2">
                     {viewingDocuments.mvr_files.map((doc) => {
                       const expDate = parseISO(doc.expiration_date);

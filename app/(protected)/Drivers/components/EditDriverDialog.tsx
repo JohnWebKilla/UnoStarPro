@@ -174,6 +174,7 @@ export function EditDriverDialog({
         hire_date: data.hire_date.toISOString(),
       };
 
+      // Update driver information
       const response = await fetch(`/api/drivers/${driver.id}`, {
         method: "PATCH",
         headers: {
@@ -188,6 +189,20 @@ export function EditDriverDialog({
         throw new Error(result.error || "Failed to update driver");
       }
 
+      // If subscription amount changed or driver has a Stripe product, sync with Stripe
+      if (
+        driver.subscription_amount !== driverData.subscription_amount ||
+        driver.stripe_product_id
+      ) {
+        const syncResponse = await fetch(`/api/drivers/${driver.id}/sync`, {
+          method: "POST",
+        });
+
+        if (!syncResponse.ok) {
+          throw new Error("Failed to sync changes with Stripe");
+        }
+      }
+
       // Clear both client and server caches
       await clearDriverCaches();
 
@@ -196,19 +211,21 @@ export function EditDriverDialog({
 
       toast({
         title: "Success",
-        description: "Driver updated successfully",
+        description: "Driver and Stripe product updated successfully",
       });
 
+      // Close the dialog
       handleOpenChange(false);
+
+      // Call the onDriverUpdated callback
+      await onDriverUpdated();
     } catch (error) {
-      console.error("Error:", error);
+      console.error("Error updating driver:", error);
       toast({
-        variant: "destructive",
         title: "Error",
         description:
-          error instanceof Error
-            ? error.message
-            : "An unexpected error occurred",
+          error instanceof Error ? error.message : "Failed to update driver",
+        variant: "destructive",
       });
     } finally {
       setIsLoading(false);

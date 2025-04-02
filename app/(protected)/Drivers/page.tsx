@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { DriversTable } from "./components/DriversTable";
+import DriversTable from "./components/DriversTable";
 import { DriversHeader } from "./components/DriversHeader";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { DriversProvider } from "./components/DriversProvider";

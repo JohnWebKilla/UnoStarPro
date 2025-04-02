@@ -4,10 +4,22 @@ import { createClient } from "@/utils/supabase/server";
 // GET - fetch companies (with optional userId filter for user's companies)
 export async function GET(request: NextRequest): Promise<Response> {
   try {
+    const supabase = await createClient();
+
+    // Check authentication first
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      console.error("Authentication error:", authError);
+      return Response.json({ error: "Not authenticated" }, { status: 401 });
+    }
+
     const searchParams = request.nextUrl.searchParams;
     const userId = searchParams.get("userId");
     const companyId = searchParams.get("companyId");
-    const supabase = await createClient();
 
     // If companyId is provided, fetch specific company
     if (companyId) {
@@ -18,7 +30,11 @@ export async function GET(request: NextRequest): Promise<Response> {
         .single();
 
       if (error) {
-        return Response.json({ error: "Company not found" }, { status: 404 });
+        console.error("Error fetching company:", error);
+        return Response.json(
+          { error: "Company not found", details: error.message },
+          { status: 404 }
+        );
       }
 
       return Response.json(company);
@@ -27,25 +43,33 @@ export async function GET(request: NextRequest): Promise<Response> {
     // If userId is provided, fetch user's companies
     if (userId) {
       // First get user's access level
-      const { data: user, error: userError } = await supabase
+      const { data: userData, error: userError } = await supabase
         .from("users")
         .select("has_all_access, role")
         .eq("id", userId)
         .single();
 
       if (userError) {
-        return Response.json({ error: "User not found" }, { status: 404 });
+        console.error("Error fetching user:", userError);
+        return Response.json(
+          { error: "User not found", details: userError.message },
+          { status: 404 }
+        );
       }
 
       // If user has all access, return all active companies
-      if (user.has_all_access) {
+      if (userData.has_all_access) {
         const { data: companies, error: companiesError } = await supabase
           .from("companies")
           .select("*")
           .eq("status", "active")
           .order("name");
 
-        if (companiesError) throw companiesError;
+        if (companiesError) {
+          console.error("Error fetching companies:", companiesError);
+          throw companiesError;
+        }
+
         return Response.json({ companies, single: false });
       }
 
@@ -56,7 +80,10 @@ export async function GET(request: NextRequest): Promise<Response> {
         .eq("user_id", userId)
         .eq("companies.status", "active");
 
-      if (userCompaniesError) throw userCompaniesError;
+      if (userCompaniesError) {
+        console.error("Error fetching user companies:", userCompaniesError);
+        throw userCompaniesError;
+      }
 
       const companies = userCompanies
         .map((uc: any) => uc.companies)
@@ -71,13 +98,19 @@ export async function GET(request: NextRequest): Promise<Response> {
       .select("*")
       .order("name");
 
-    if (error) throw error;
+    if (error) {
+      console.error("Error fetching all companies:", error);
+      throw error;
+    }
 
     return Response.json(companies);
   } catch (error: any) {
-    console.error("Error fetching companies:", error);
+    console.error("Error in companies API:", error);
     return Response.json(
-      { error: "Failed to fetch companies" },
+      {
+        error: "Failed to fetch companies",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
       { status: 500 }
     );
   }

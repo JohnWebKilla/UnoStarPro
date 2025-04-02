@@ -17,109 +17,132 @@ export async function POST() {
   const supabase = await createClient();
 
   try {
-    // Get all drivers without Stripe Connect accounts first
-    const { data: driversWithoutStripe } = await supabase
+    // Get all drivers from database
+    const { data: drivers, error: driversError } = await supabase
       .from("drivers")
-      .select("*")
-      .is("stripe_connect_account_id", null);
+      .select("*");
 
-    // Create Stripe Connect accounts for drivers that don't have one
-    if (driversWithoutStripe) {
-      for (const driver of driversWithoutStripe) {
-        try {
-          // Create a new Connect account
-          const account = await stripe.accounts.create({
-            type: "express",
-            country: "US",
-            email: driver.email,
-            capabilities: {
-              card_payments: { requested: true },
-              transfers: { requested: true },
-            },
-            business_type: "individual",
+    if (driversError) throw driversError;
+
+    // Get all Stripe products
+    const products = await stripe.products.list({
+      limit: 100,
+      active: true,
+    });
+
+    const productMap = new Map(
+      products.data.map((product) => [product.metadata.driver_id, product])
+    );
+
+    const results = {
+      created: 0,
+      updated: 0,
+      errors: [] as string[],
+    };
+
+    // Process each driver
+    for (const driver of drivers || []) {
+      try {
+        let product = productMap.get(driver.id.toString());
+        let price;
+
+        // If driver has no Stripe product or it's not found in Stripe, create new one
+        if (!driver.stripe_product_id || !product) {
+          product = await stripe.products.create({
+            name: driver.name,
             metadata: {
               driver_id: driver.id.toString(),
-              name: driver.name,
-              phone_number: driver.phone_number,
             },
           });
 
-          // Update driver with Stripe Connect account ID
-          await supabase
-            .from("drivers")
-            .update({
-              stripe_connect_account_id: account.id,
-              last_synced_at: new Date().toISOString(),
-            })
-            .eq("id", driver.id);
-        } catch (error) {
-          console.error(
-            `Error creating Connect account for driver ${driver.id}:`,
-            error
-          );
+          price = await stripe.prices.create({
+            product: product.id,
+            unit_amount: driver.subscription_amount * 100,
+            currency: "usd",
+            recurring: {
+              interval:
+                driver.subscription_frequency === "monthly" ? "month" : "week",
+            },
+          });
+
+          results.created++;
+        } else {
+          // Update existing product if needed
+          if (product.name !== driver.name) {
+            product = await stripe.products.update(product.id, {
+              name: driver.name,
+            });
+          }
+
+          // Check if price needs to be updated
+          if (driver.stripe_price_id) {
+            const existingPrice = await stripe.prices.retrieve(
+              driver.stripe_price_id
+            );
+            if (
+              existingPrice.unit_amount !== driver.subscription_amount * 100 ||
+              existingPrice.recurring?.interval !==
+                (driver.subscription_frequency === "monthly" ? "month" : "week")
+            ) {
+              price = await stripe.prices.create({
+                product: product.id,
+                unit_amount: driver.subscription_amount * 100,
+                currency: "usd",
+                recurring: {
+                  interval:
+                    driver.subscription_frequency === "monthly"
+                      ? "month"
+                      : "week",
+                },
+              });
+            } else {
+              price = existingPrice;
+            }
+          } else {
+            price = await stripe.prices.create({
+              product: product.id,
+              unit_amount: driver.subscription_amount * 100,
+              currency: "usd",
+              recurring: {
+                interval:
+                  driver.subscription_frequency === "monthly"
+                    ? "month"
+                    : "week",
+              },
+            });
+          }
+
+          results.updated++;
         }
-      }
-    }
 
-    // Get all Stripe Connect accounts
-    const accounts = await stripe.accounts.list({
-      limit: 100,
-    });
-
-    let syncedCount = 0;
-    let createdCount = 0;
-
-    for (const account of accounts.data) {
-      // Find driver by Stripe Connect account ID
-      const { data: existingDriver } = await supabase
-        .from("drivers")
-        .select()
-        .eq("stripe_connect_account_id", account.id)
-        .single();
-
-      if (existingDriver) {
-        // Update existing driver
-        await supabase
+        // Update driver with latest Stripe IDs
+        const { error: updateError } = await supabase
           .from("drivers")
           .update({
-            stripe_connect_account_id: account.id,
-            last_synced_at: new Date().toISOString(),
+            stripe_product_id: product.id,
+            stripe_price_id: price.id,
           })
-          .eq("id", existingDriver.id);
+          .eq("id", driver.id);
 
-        syncedCount++;
-      } else if (account.metadata?.driver_id) {
-        // Find driver by ID in metadata
-        const { data: driverById } = await supabase
-          .from("drivers")
-          .select()
-          .eq("id", account.metadata.driver_id)
-          .single();
-
-        if (driverById) {
-          // Update driver with Stripe Connect account ID
-          await supabase
-            .from("drivers")
-            .update({
-              stripe_connect_account_id: account.id,
-              last_synced_at: new Date().toISOString(),
-            })
-            .eq("id", driverById.id);
-
-          syncedCount++;
-        }
+        if (updateError) throw updateError;
+      } catch (error) {
+        console.error(`Error processing driver ${driver.id}:`, error);
+        results.errors.push(
+          `Driver ${driver.id} (${driver.name}): ${error instanceof Error ? error.message : "Unknown error"}`
+        );
       }
     }
 
     return NextResponse.json({
       success: true,
-      message: `Synced ${syncedCount} and created ${createdCount} drivers from Stripe`,
+      message: `Synced ${results.updated} and created ${results.created} products in Stripe`,
+      errors: results.errors,
     });
   } catch (error) {
-    console.error("Error syncing Stripe Connect accounts:", error);
+    console.error("Error syncing with Stripe:", error);
     return NextResponse.json(
       {
-        error: "Failed to sync drivers with Stripe",
+        error: "Failed to sync with Stripe",
         details: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 }
