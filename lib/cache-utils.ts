@@ -3,7 +3,7 @@ import { Role } from "@/types/role";
 import { createClient } from "@/utils/supabase/server";
 import { cookies } from "next/headers";
 
-const CACHE_TTL = 300; // 5 minutes
+export const CACHE_TTL = 3600; // 1 hour
 
 interface CommonData {
   users?: any[];
@@ -16,6 +16,28 @@ interface CommonData {
 }
 
 type CacheOperation = () => Promise<void>;
+
+export interface CacheConfig {
+  prefix: string;
+  ttl?: number;
+}
+
+export interface CachedResponse<T> {
+  data: T;
+  source: "cache" | "database";
+  timing: {
+    total: number;
+    database?: number;
+    source?: "client-cache" | "server" | "local-storage";
+  };
+}
+
+export const createCacheKey = (
+  prefix: string,
+  identifier?: string | number
+) => {
+  return `api:/api/${prefix}${identifier ? `/${identifier}` : ""}`;
+};
 
 /**
  * Generic function to cache database query results
@@ -281,4 +303,83 @@ export async function cacheCommonData(
   // Execute all cache operations in parallel
   await Promise.all(cacheOperations.map((op) => op()));
   console.log(`Cache warming completed for user ${userId} with role ${role}`);
+}
+
+export async function getFromCache<T>(key: string): Promise<T | null> {
+  try {
+    const cachedData = await getCache<T>(key);
+    return cachedData;
+  } catch (error) {
+    console.error(`Error getting data from cache for key ${key}:`, error);
+    return null;
+  }
+}
+
+export async function setToCache<T>(
+  key: string,
+  data: T,
+  ttl: number = CACHE_TTL
+): Promise<void> {
+  try {
+    await setCache(key, data, ttl);
+    console.log(`Data cached successfully with key: ${key}`);
+  } catch (error) {
+    console.error(`Error setting cache for key ${key}:`, error);
+  }
+}
+
+export async function invalidateCache(key: string): Promise<void> {
+  try {
+    await setCache(key, null, 0);
+    console.log(`Cache invalidated for key: ${key}`);
+  } catch (error) {
+    console.error(`Error invalidating cache for key ${key}:`, error);
+  }
+}
+
+export function getClientCache<T>(key: string): Promise<CachedResponse<T>> {
+  return new Promise((resolve, reject) => {
+    try {
+      // Try localStorage first
+      const localData = localStorage.getItem(key);
+      const timestamp = localStorage.getItem(`${key}:timestamp`);
+
+      if (localData && timestamp) {
+        const dataAge = Date.now() - parseInt(timestamp, 10);
+        if (dataAge < 5 * 60 * 1000) {
+          // 5 minutes
+          resolve({
+            data: JSON.parse(localData),
+            source: "cache",
+            timing: {
+              total: 0,
+              source: "local-storage",
+            },
+          });
+          return;
+        }
+      }
+      reject(new Error("No valid cache found"));
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+export function setClientCache<T>(key: string, data: T): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(data));
+    localStorage.setItem(`${key}:timestamp`, Date.now().toString());
+  } catch (error) {
+    console.error(`Error setting client cache for key ${key}:`, error);
+  }
+}
+
+export function clearClientCache(key: string): void {
+  try {
+    localStorage.removeItem(key);
+    localStorage.removeItem(`${key}:timestamp`);
+  } catch (error) {
+    console.error(`Error clearing client cache for key ${key}:`, error);
+  }
 }

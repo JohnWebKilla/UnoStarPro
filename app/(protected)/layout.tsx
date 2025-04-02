@@ -1,12 +1,14 @@
 "use client";
 
-import { TopNav } from "@/components/Nav/topNav";
+import { SideNav } from "@/components/Nav/SideNav";
 import { useUser } from "@/contexts/UserContext";
 import { useRouter } from "next/navigation";
 import { BirthdayCheck } from "@/components/birthday-check";
 import { NotificationProvider } from "@/app/(protected)/Banners/components/NotificationProvider";
+import { SidebarProvider } from "@/contexts/SidebarContext";
 import { useEffect } from "react";
 import { Loader2 } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 
 export default function ProtectedLayout({
   children,
@@ -23,30 +25,49 @@ export default function ProtectedLayout({
     }
   }, [isLoading, userRole, router]);
 
-  // Always render the layout with appropriate loading states
   return (
-    <div className="min-h-screen relative">
-      <NotificationProvider>
-        <TopNav
-          userRole={userRole}
-          userName={userName}
-          userEmail={userEmail}
-          isLoading={isLoading}
-        />
-        {isLoading ? (
-          <div className="flex items-center justify-center min-h-[calc(100vh-4rem)] px-4 py-4">
-            <div className="flex flex-col items-center gap-4">
-              <Loader2 className="h-8 w-8 animate-spin text-primary" />
-              <p className="text-muted-foreground">Loading your dashboard...</p>
-            </div>
-          </div>
-        ) : userRole ? (
-          <>
-            <main className="px-4 py-4">{children}</main>
-            <BirthdayCheck />
-          </>
-        ) : null}
-      </NotificationProvider>
+    <div className="min-h-screen bg-background">
+      <SidebarProvider>
+        <NotificationProvider>
+          <SideNav
+            userRole={userRole}
+            userName={userName}
+            userEmail={userEmail}
+            isLoading={isLoading}
+          >
+            <AnimatePresence mode="wait">
+              {isLoading ? (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="flex items-center justify-center min-h-[calc(100vh-2rem)] p-4"
+                >
+                  <div className="flex flex-col items-center gap-4">
+                    <div className="relative">
+                      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                      <div className="absolute inset-0 h-8 w-8 animate-ping rounded-full bg-primary/20" />
+                    </div>
+                    <p className="text-muted-foreground animate-pulse">
+                      Loading your dashboard...
+                    </p>
+                  </div>
+                </motion.div>
+              ) : userRole ? (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 20 }}
+                  className="p-6"
+                >
+                  {children}
+                  <BirthdayCheck />
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
+          </SideNav>
+        </NotificationProvider>
+      </SidebarProvider>
     </div>
   );
 }

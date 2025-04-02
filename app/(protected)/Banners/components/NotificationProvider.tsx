@@ -2,7 +2,6 @@
 
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { NotificationMessage, NotificationSettings } from "../types";
-import { Banner } from "./Banner";
 import { NotificationDialog } from "./NotificationDialog";
 import { useToast } from "@/components/ui/use-toast";
 import {
@@ -16,12 +15,17 @@ import {
   RealtimePostgresChangesPayload,
   RealtimeChannel,
 } from "@supabase/supabase-js";
+import { useSidebar } from "@/contexts/SidebarContext";
+import { cn } from "@/lib/utils";
 
 interface NotificationContextType {
   showNotification: (message: NotificationMessage) => void;
   hideNotification: (id: string) => void;
   updateSettings: (settings: NotificationSettings) => void;
   settings: NotificationSettings;
+  activeNotifications: NotificationMessage[];
+  dismissedNotifications: string[];
+  setDismissedNotifications: React.Dispatch<React.SetStateAction<string[]>>;
 }
 
 const NotificationContext = createContext<NotificationContextType | undefined>(
@@ -52,7 +56,6 @@ export const NotificationProvider = ({
   const [activeNotifications, setActiveNotifications] = useState<
     NotificationMessage[]
   >([]);
-  const [currentBannerIndex, setCurrentBannerIndex] = useState(0);
   const [dismissedNotifications, setDismissedNotifications] = useState<
     string[]
   >([]);
@@ -200,51 +203,19 @@ export const NotificationProvider = ({
 
   const hideNotification = async (id: string) => {
     try {
-      // Add to dismissed notifications (in-memory only)
+      // Only update local state
       setDismissedNotifications((prev) => [...prev, id]);
 
-      toast({
-        title: "Success",
-        description: "Notification hidden successfully",
-      });
+      // No need to modify activeNotifications since the filter in the render
+      // will handle hiding it based on dismissedNotifications
     } catch (error) {
       console.error("Error hiding notification:", error);
-      toast({
-        title: "Error",
-        description: "Failed to hide notification",
-        variant: "destructive",
-      });
     }
   };
 
   const updateSettings = (newSettings: NotificationSettings) => {
     setSettings(newSettings);
   };
-
-  // Function to get active banner notifications
-  const getActiveBanners = () =>
-    activeNotifications.filter(
-      (notification) =>
-        notification.displayType === "banner" &&
-        notification.active &&
-        (!notification.showFrom ||
-          new Date(notification.showFrom) <= new Date()) &&
-        (!notification.showUntil ||
-          new Date(notification.showUntil) >= new Date()) &&
-        !dismissedNotifications.includes(notification.id)
-    );
-
-  // Rotate banners
-  useEffect(() => {
-    const activeBanners = getActiveBanners();
-    if (activeBanners.length <= 1) return;
-
-    const intervalId = setInterval(() => {
-      setCurrentBannerIndex((current) => (current + 1) % activeBanners.length);
-    }, ROTATION_INTERVAL);
-
-    return () => clearInterval(intervalId);
-  }, [activeNotifications, dismissedNotifications]);
 
   return (
     <NotificationContext.Provider
@@ -253,40 +224,35 @@ export const NotificationProvider = ({
         hideNotification,
         updateSettings,
         settings,
+        activeNotifications,
+        dismissedNotifications,
+        setDismissedNotifications,
       }}
     >
-      <div className="flex flex-col min-h-screen">
-        <div className="sticky top-0 z-50">
-          {getActiveBanners().length > 0 && (
-            <Banner
-              key={getActiveBanners()[currentBannerIndex]?.id}
-              message={getActiveBanners()[currentBannerIndex]}
-              onDismiss={hideNotification}
-              totalBanners={getActiveBanners().length}
-              currentIndex={currentBannerIndex}
-            />
-          )}
-        </div>
+      <div className="h-screen flex flex-col overflow-hidden">
+        {/* Main Content */}
+        <div className="flex-1 overflow-hidden">{children}</div>
 
-        <div className="flex-grow">{children}</div>
-
-        {activeNotifications
-          .filter(
-            (notification) =>
-              notification.displayType === "dialog" &&
-              notification.active &&
-              (!notification.showFrom ||
-                new Date(notification.showFrom) <= new Date()) &&
-              (!notification.showUntil ||
-                new Date(notification.showUntil) >= new Date())
-          )
-          .map((notification) => (
-            <NotificationDialog
-              key={notification.id}
-              message={notification}
-              onDismiss={hideNotification}
-            />
-          ))}
+        {/* Dialogs */}
+        {settings.enabled &&
+          activeNotifications
+            .filter(
+              (notification) =>
+                notification.displayType === "dialog" &&
+                notification.active &&
+                (!notification.showFrom ||
+                  new Date(notification.showFrom) <= new Date()) &&
+                (!notification.showUntil ||
+                  new Date(notification.showUntil) >= new Date()) &&
+                !dismissedNotifications.includes(notification.id)
+            )
+            .map((notification) => (
+              <NotificationDialog
+                key={notification.id}
+                message={notification}
+                onDismiss={hideNotification}
+              />
+            ))}
       </div>
     </NotificationContext.Provider>
   );

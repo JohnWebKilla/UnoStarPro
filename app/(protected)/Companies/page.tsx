@@ -34,8 +34,9 @@ import { subscriptionDetailsCache, CACHE_TTL } from "./cache";
 import { DeactivationDialog } from "./components/deactivation-dialog";
 import { Badge } from "@/components/ui/badge";
 import { useCompanies } from "./hooks/useCompanies";
-import type { Company } from "./types";
+import type { Company, CompanyMeta, ToggleStatusOptions } from "./types";
 import { openDB, IDBPDatabase } from "idb";
+import { PageHeader } from "./components/page-header";
 
 const DB_NAME = "companiesDB";
 const STORE_NAME = "companies";
@@ -48,12 +49,6 @@ async function initDB(): Promise<IDBPDatabase> {
       }
     },
   });
-}
-
-interface ToggleStatusOptions {
-  cancelSubscription?: boolean;
-  cancellationType?: "now" | "end_period";
-  issueRefund?: boolean;
 }
 
 export default function CompaniesPage() {
@@ -213,11 +208,7 @@ export default function CompaniesPage() {
 
   const handleClearCache = async () => {
     try {
-      setIsSyncing(true);
-      // Clear both server cache and IndexedDB
       await clearCompanyCache();
-      const db = await initDB();
-      await db.clear(STORE_NAME);
       await refreshCompanies();
       toast({
         title: "Success",
@@ -227,147 +218,92 @@ export default function CompaniesPage() {
       console.error("Error clearing cache:", error);
       toast({
         title: "Error",
-        description: "Failed to clear cache",
+        description:
+          error instanceof Error ? error.message : "Failed to clear cache",
         variant: "destructive",
       });
-    } finally {
-      setIsSyncing(false);
     }
   };
 
+  if (!companies) {
+    return <TableSkeleton />;
+  }
+
+  const tableMeta: CompanyMeta = {
+    onEdit: (company: Company) => {
+      setSelectedCompany(company);
+      setEditDialogMode(true);
+      setDialogOpen(true);
+    },
+    onUpdateStatus: (company: Company) => {
+      setCompanyToDeactivate(company);
+      setShowDeactivationDialog(true);
+    },
+    onSyncStripe: handleSyncStripe,
+    onStripeSettings: (company: Company) => {
+      setSelectedCompany(company);
+      setStripeDialogOpen(true);
+    },
+    onConnectStripe: handleSyncStripe,
+    onRowClick: (company: Company) => {
+      setSelectedCompany(company);
+      setSideDialogOpen(true);
+    },
+  };
+
   return (
-    <div className="px-4 py-6 space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight">Companies</h1>
-          <div className="flex items-center">
-            <p className="text-muted-foreground">
-              Manage your companies and their Stripe integrations
-            </p>
-            {companiesError && (
-              <div className="flex items-center gap-2 text-muted-foreground text-sm ml-2">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                {companiesError}
-              </div>
-            )}
-            <Badge
-              variant="outline"
-              className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-300 flex items-center gap-1 ml-2"
-            >
-              <Database className="h-3 w-3" />
-              IndexedDB Cache
-            </Badge>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            onClick={handleSyncAllStripe}
-            disabled={isSyncing}
-            className="h-9"
-          >
-            {isSyncing ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 h-4 w-4" />
-            )}
-            Sync Stripe
-          </Button>
-          <Button
-            variant="outline"
-            onClick={handleClearCache}
-            disabled={isSyncing}
-            className="h-9"
-          >
-            Clear Cache
-          </Button>
-          <Button onClick={() => setDialogOpen(true)} className="h-9">
-            <PlusCircle className="mr-2 h-4 w-4" />
-            Add Company
-          </Button>
-        </div>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        onSync={handleSyncAllStripe}
+        onClearCache={handleClearCache}
+        onAddCompany={() => setDialogOpen(true)}
+        isSyncing={isSyncing}
+      />
 
       <SummaryCards companies={companies} />
 
       <DataTable
-        columns={columns}
         data={companies}
+        columns={columns}
+        meta={tableMeta}
         loadingRows={loadingRows}
-        meta={{
-          onEdit: (company) => {
-            setSelectedCompany(company);
-            setDialogOpen(true);
-          },
-          onUpdateStatus: (company) => {
-            setCompanyToDeactivate(company);
-            setShowDeactivationDialog(true);
-          },
-          onSyncStripe: handleSyncStripe,
-          onStripeSettings: (company) => {
-            setSelectedCompany(company);
-            setStripeDialogOpen(true);
-          },
-          onConnectStripe: handleSyncStripe,
-          onRowClick: (company) => {
-            setSelectedCompany(company);
-            setSideDialogOpen(true);
-            setEditDialogMode(false);
-          },
-        }}
         error={companiesError || undefined}
       />
 
       <CompanyDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
-        company={selectedCompany}
         onSubmit={
           selectedCompany
             ? (data) => handleUpdateCompany(selectedCompany.id, data)
             : handleCreateCompany
         }
+        company={selectedCompany}
       />
 
       <StripeDialog
         open={stripeDialogOpen}
         onOpenChange={setStripeDialogOpen}
         company={selectedCompany}
-        onSubmit={
-          selectedCompany
-            ? (data) => handleUpdateCompany(selectedCompany.id, data)
-            : undefined
-        }
       />
 
-      {selectedCompany && (
-        <CompanySideDialog
-          open={sideDialogOpen}
-          onOpenChange={(open) => {
-            setSideDialogOpen(open);
-            if (!open) {
-              setEditDialogMode(false);
-            }
-          }}
-          company={selectedCompany}
-          onUpdate={handleUpdateCompany}
-          initialEditMode={editDialogMode}
-        />
-      )}
+      <CompanySideDialog
+        open={sideDialogOpen}
+        onOpenChange={setSideDialogOpen}
+        company={selectedCompany}
+        onUpdate={handleUpdateCompany}
+      />
 
       {companyToDeactivate && (
         <DeactivationDialog
           company={companyToDeactivate}
-          onToggleStatus={async (options) => {
-            try {
-              await handleUpdateCompany(companyToDeactivate.id, {
-                status: "inactive",
-              });
-              setShowDeactivationDialog(false);
-              setCompanyToDeactivate(undefined);
-            } catch (error) {
-              console.error("Error deactivating company:", error);
-            }
+          onToggleStatus={async (options?: ToggleStatusOptions) => {
+            await handleUpdateCompany(companyToDeactivate.id, {
+              status: "inactive",
+              ...options,
+            });
+            setShowDeactivationDialog(false);
+            setCompanyToDeactivate(undefined);
           }}
           onCancel={() => {
             setShowDeactivationDialog(false);

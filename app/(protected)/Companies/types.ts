@@ -84,3 +84,9 @@ export interface CompanyMeta {
   onConnectStripe: (company: Company) => void;
   onRowClick: (company: Company) => void;
 }
+
+export interface ToggleStatusOptions {
+  cancelSubscription?: boolean;
+  cancellationType?: "now" | "end_period";
+  issueRefund?: boolean;
+}
