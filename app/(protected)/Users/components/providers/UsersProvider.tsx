@@ -584,17 +584,31 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
   // Handle page visibility changes
   useEffect(() => {
     const REFRESH_THRESHOLD = 5 * 60 * 1000; // 5 minutes
+    let lastVisibilityChange = Date.now();
 
     const handleVisibilityChange = async () => {
-      if (document.visibilityState === "visible") {
-        const now = Date.now();
-        const timeSinceLastFetch = now - lastFetchTime;
+      const now = Date.now();
 
-        // Only fetch if it's been more than 5 minutes since the last fetch
-        if (timeSinceLastFetch > REFRESH_THRESHOLD) {
+      // Only proceed if the page becomes visible
+      if (document.visibilityState === "visible") {
+        const timeSinceLastFetch = now - lastFetchTime;
+        const timeSinceLastVisibilityChange = now - lastVisibilityChange;
+
+        // Prevent rapid re-fetches and only fetch if significant time has passed
+        if (
+          timeSinceLastFetch > REFRESH_THRESHOLD &&
+          timeSinceLastVisibilityChange > 1000
+        ) {
+          console.log("Fetching data due to long inactivity:", {
+            timeSinceLastFetch:
+              Math.round(timeSinceLastFetch / 1000) + " seconds",
+            threshold: Math.round(REFRESH_THRESHOLD / 1000) + " seconds",
+          });
           await fetchAndUpdateCache();
         }
       }
+
+      lastVisibilityChange = now;
     };
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -602,7 +616,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [lastFetchTime]);
+  }, [lastFetchTime, fetchAndUpdateCache]);
 
   const value = {
     users,
