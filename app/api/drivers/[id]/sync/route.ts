@@ -6,10 +6,14 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: "2024-06-20",
 });
 
-export async function POST(
-  request: NextRequest,
-  context: { params: { id: string } }
-) {
+export const dynamic = "force-dynamic";
+
+type Props = {
+  params: { id: string };
+  searchParams: { [key: string]: string | string[] | undefined };
+};
+
+export async function POST(request: NextRequest, props: Props) {
   if (!stripe) {
     return NextResponse.json(
       { error: "Stripe is not configured" },
@@ -19,7 +23,7 @@ export async function POST(
 
   try {
     const supabase = await createClient();
-    const { id } = context.params;
+    const { id } = props.params;
 
     // Get driver details
     const { data: driver, error: driverError } = await supabase
