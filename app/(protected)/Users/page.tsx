@@ -5,26 +5,19 @@ import { User } from "./lib/types/types";
 import { useToast } from "@/components/ui/use-toast";
 import { UsersProvider, useUsers } from "./components/providers/UsersProvider";
 import { UsersHeader } from "./components/layout/UsersHeader";
-import { UsersLayout } from "./components/layout/UsersLayout";
-import { UsersFilters } from "./components/filters/UsersFilters";
-import { UsersTable } from "./components/table/UsersTable";
 import { CompanyManagement } from "./components/features/company-management";
-import { Card, CardContent } from "@/components/ui/card";
+import { DataTable } from "./components/table/data-table";
+import { columns } from "./components/table/columns";
+import { PageTransition } from "@/components/ui/page-transition";
+import { UserDialog } from "./components/dialogs/user-dialog";
 
 function UsersContent() {
-  const [selectedUser, setSelectedUser] = useState<User | undefined>();
   const [companyDialogOpen, setCompanyDialogOpen] = useState(false);
   const [userForCompanies, setUserForCompanies] = useState<User | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [roleFilter, setRoleFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const { users, loading: isLoading, companies } = useUsers();
-
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [userForEdit, setUserForEdit] = useState<User | null>(null);
+  const { users, loading: isLoading, companies, updateUser } = useUsers();
   const { toast } = useToast();
-
-  const handleEdit = (user: User) => {
-    setSelectedUser(user);
-  };
 
   const handleManageCompanies = (user: User) => {
     setUserForCompanies(user);
@@ -38,48 +31,136 @@ function UsersContent() {
     }
   };
 
-  const filteredUsers = users.filter((user) => {
-    const matchesSearch =
-      searchQuery === "" ||
-      user.first_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      user.last_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      user.email.toLowerCase().includes(searchQuery.toLowerCase());
+  const handleEditDialogClose = (open: boolean) => {
+    setEditDialogOpen(open);
+    if (!open) {
+      setUserForEdit(null);
+    }
+  };
 
-    const matchesRole = roleFilter === "all" || user.role === roleFilter;
-    const matchesStatus =
-      statusFilter === "all" || user.status.toLowerCase() === statusFilter;
+  const handleEditSuccess = async (updatedUser?: User) => {
+    try {
+      if (!updatedUser) return;
 
-    return matchesSearch && matchesRole && matchesStatus;
-  });
+      // Remove properties that shouldn't be updated
+      const { created_at, companies, id, ...updateData } = updatedUser;
+
+      console.log("Attempting to update user:", {
+        id: updatedUser.id,
+        updateData,
+      });
+
+      const result = await updateUser(updatedUser.id, updateData);
+      console.log("Update successful:", result);
+
+      toast({
+        title: "Success",
+        description: "User updated successfully",
+      });
+      setEditDialogOpen(false);
+      setUserForEdit(null);
+    } catch (error) {
+      console.error("Error in handleEditSuccess:", {
+        error,
+        message: error instanceof Error ? error.message : "Unknown error",
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+
+      toast({
+        title: "Error",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Failed to update user. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleActivateSelected = async (ids: string[]) => {
+    try {
+      await Promise.all(
+        ids.map((id) =>
+          updateUser(id, {
+            status: "active",
+          })
+        )
+      );
+      toast({
+        title: "Success",
+        description: `Successfully activated ${ids.length} user(s)`,
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to activate selected users",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDeactivateSelected = async (ids: string[]) => {
+    try {
+      await Promise.all(
+        ids.map((id) =>
+          updateUser(id, {
+            status: "inactive",
+          })
+        )
+      );
+      toast({
+        title: "Success",
+        description: `Successfully deactivated ${ids.length} user(s)`,
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to deactivate selected users",
+        variant: "destructive",
+      });
+    }
+  };
 
   return (
-    <div className="space-y-4 p-8">
+    <div className="space-y-4">
       <UsersHeader />
-
-      <Card>
-        <CardContent className="p-6">
-          <div className="space-y-4">
-            <UsersFilters
-              searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
-              roleFilter={roleFilter}
-              onRoleChange={setRoleFilter}
-              statusFilter={statusFilter}
-              onStatusChange={setStatusFilter}
-            />
-
-            <UsersTable
-              data={filteredUsers}
-              isLoading={isLoading}
-              onEdit={handleEdit}
-              onToggleStatus={async () => {}}
-              onApprove={async () => {}}
-              onManageCompanies={handleManageCompanies}
-              companies={companies}
-            />
-          </div>
-        </CardContent>
-      </Card>
+      <DataTable
+        columns={columns}
+        data={users}
+        loadingRows={
+          isLoading ? Object.fromEntries(users.map((_, i) => [i, true])) : {}
+        }
+        meta={{
+          onEdit: (user: User) => {
+            setUserForEdit(user);
+            setEditDialogOpen(true);
+          },
+          onManageCompanies: handleManageCompanies,
+          onToggleStatus: async (user: User) => {
+            try {
+              await updateUser(user.id, {
+                status: user.status === "active" ? "inactive" : "active",
+              });
+              toast({
+                title: "Success",
+                description: "User status updated successfully",
+              });
+            } catch (error) {
+              toast({
+                title: "Error",
+                description: "Failed to update user status",
+                variant: "destructive",
+              });
+            }
+          },
+          onApprove: async (user: User) => {
+            // Handle approve
+          },
+          companies,
+        }}
+        onActivateSelected={handleActivateSelected}
+        onDeactivateSelected={handleDeactivateSelected}
+      />
 
       {userForCompanies && (
         <CompanyManagement
@@ -97,6 +178,17 @@ function UsersContent() {
           }}
         />
       )}
+
+      {userForEdit && (
+        <UserDialog
+          key={`edit-${userForEdit.id}`}
+          open={editDialogOpen}
+          onOpenChange={handleEditDialogClose}
+          user={userForEdit}
+          onSuccess={handleEditSuccess}
+          companies={companies}
+        />
+      )}
     </div>
   );
 }
@@ -104,7 +196,9 @@ function UsersContent() {
 export default function UsersPage() {
   return (
     <UsersProvider>
-      <UsersContent />
+      <PageTransition>
+        <UsersContent />
+      </PageTransition>
     </UsersProvider>
   );
 }

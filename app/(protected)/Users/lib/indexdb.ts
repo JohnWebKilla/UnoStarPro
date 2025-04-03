@@ -1,10 +1,5 @@
 import { openDB, IDBPDatabase } from "idb";
-import { User } from "../types";
-
-interface Company {
-  id: number;
-  name: string;
-}
+import { User, Company } from "./types/types";
 
 class UsersDB {
   private db: IDBPDatabase | null = null;

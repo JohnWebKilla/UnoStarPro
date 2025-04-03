@@ -17,6 +17,8 @@ import {
   SortingState,
   getFilteredRowModel,
   ColumnFiltersState,
+  VisibilityState,
+  TableOptions,
 } from "@tanstack/react-table";
 import {
   Table,
@@ -40,6 +42,10 @@ import {
   Power,
   X,
   Search,
+  Settings2,
+  SlidersHorizontal,
+  CheckCircle,
+  XCircle,
 } from "lucide-react";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -50,6 +56,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  DropdownMenuCheckboxItem,
 } from "@/components/ui/dropdown-menu";
 import {
   Select,
@@ -68,6 +75,8 @@ import { getBirthdayStatus } from "../../config/columns";
 import { User } from "../../lib/types/types";
 import { UserDialog } from "../dialogs/user-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
+import { Checkbox } from "@/components/ui/checkbox";
 
 const variantMap = {
   active: "default",
@@ -75,19 +84,14 @@ const variantMap = {
   inactive: "destructive",
 } as const;
 
-interface DataTableProps<TData extends User, TValue> {
-  columns: ColumnDef<TData, TValue>[];
-  data: TData[];
-  isLoading?: boolean;
-  skeletonRowCount?: number;
-  lastUpdatedUserId?: string | null;
-  meta: {
-    onEdit: (user: User) => void;
-    onToggleStatus: (user: User) => Promise<void>;
-    onApprove: (user: User) => Promise<void>;
-    onManageCompanies: (user: User) => void;
-    companies: Array<{ id: number; name: string }>;
-  };
+interface DataTableProps {
+  columns: ColumnDef<User, any>[];
+  data: User[];
+  loadingRows?: Record<number, boolean>;
+  meta?: any;
+  error?: string;
+  onActivateSelected?: (ids: string[]) => Promise<void>;
+  onDeactivateSelected?: (ids: string[]) => Promise<void>;
 }
 
 // Add this helper function at the top level
@@ -95,18 +99,22 @@ const formatDate = (dateString: string) => {
   return new Date(dateString).toLocaleDateString();
 };
 
-export function DataTable<TData extends User, TValue>({
+export function DataTable({
   columns,
   data,
-  isLoading = false,
-  skeletonRowCount = 5,
-  lastUpdatedUserId = null,
+  loadingRows = {},
   meta,
-}: DataTableProps<TData, TValue>) {
+  error,
+  onActivateSelected,
+  onDeactivateSelected,
+}: DataTableProps) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
+  const [rowSelection, setRowSelection] = useState({});
+  const [isProcessing, setIsProcessing] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [selectedUser, setSelectedUser] = useState<TData | undefined>();
+  const [selectedUser, setSelectedUser] = useState<User | undefined>();
   const [globalFilter, setGlobalFilter] = useState("");
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -147,22 +155,29 @@ export function DataTable<TData extends User, TValue>({
     });
   }, [data, roleFilter, statusFilter, globalFilter]);
 
-  // Use the filtered data for the table
   const table = useReactTable({
-    data: filteredData,
+    data,
     columns,
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
     onSortingChange: setSorting,
+    getSortedRowModel: getSortedRowModel(),
     onColumnFiltersChange: setColumnFilters,
+    getFilteredRowModel: getFilteredRowModel(),
+    onColumnVisibilityChange: setColumnVisibility,
+    onRowSelectionChange: setRowSelection,
+    enableRowSelection: true,
+    initialState: {
+      pagination: {
+        pageSize: 5,
+      },
+    },
     state: {
       sorting,
       columnFilters,
-      globalFilter,
+      columnVisibility,
+      rowSelection,
     },
-    onGlobalFilterChange: setGlobalFilter,
     meta,
   });
 
@@ -198,7 +213,7 @@ export function DataTable<TData extends User, TValue>({
 
   const handleEdit = useCallback((user: User) => {
     // Set the selected user first, then open the dialog
-    setSelectedUser(user as TData);
+    setSelectedUser(user);
     setTimeout(() => {
       setDialogOpen(true);
     }, 0);
@@ -214,7 +229,7 @@ export function DataTable<TData extends User, TValue>({
       setDialogOpen(false);
 
       // Pass the selected user directly to the parent component's onEdit function
-      meta.onEdit?.(selectedUser);
+      meta.onEdit(selectedUser);
 
       // Clear user after dialog is closed
       setTimeout(() => {
@@ -277,7 +292,7 @@ export function DataTable<TData extends User, TValue>({
             <Avatar>
               <AvatarImage
                 src={user.avatar}
-                alt={`${user.first_name} ${user.last_name}`}
+                alt={`${user.first_name || ""} ${user.last_name || ""}`}
               />
               <AvatarFallback>
                 {user.first_name?.[0]}
@@ -286,16 +301,18 @@ export function DataTable<TData extends User, TValue>({
             </Avatar>
             <div>
               <div className="font-medium">
-                {user.first_name} {user.last_name}
+                {user.first_name || ""} {user.last_name || ""}
               </div>
-              <div className="text-sm text-muted-foreground">{user.email}</div>
+              <div className="text-sm text-muted-foreground">
+                {user.email || ""}
+              </div>
               <div className="flex items-center space-x-2 mt-1">
                 <Badge
                   variant={user.status === "active" ? "default" : "secondary"}
                 >
                   {user.status === "active" ? "Active" : "Inactive"}
                 </Badge>
-                <Badge variant="outline">{user.role}</Badge>
+                <Badge variant="outline">{user.role || ""}</Badge>
               </div>
             </div>
           </div>
@@ -314,11 +331,11 @@ export function DataTable<TData extends User, TValue>({
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <div className="text-sm font-medium">Role</div>
-                <div className="text-sm">{user.role}</div>
+                <div className="text-sm">{user.role || ""}</div>
               </div>
               <div>
                 <div className="text-sm font-medium">Status</div>
-                <div className="text-sm">{user.status}</div>
+                <div className="text-sm">{user.status || ""}</div>
               </div>
               {user.department && (
                 <div>
@@ -337,20 +354,22 @@ export function DataTable<TData extends User, TValue>({
                 <div>
                   <div className="text-sm font-medium">Working Shift</div>
                   <div className="text-sm">
-                    {shiftNames[user.working_shift] || user.working_shift}
+                    {shiftNames[user.working_shift] || user.working_shift || ""}
                   </div>
                 </div>
               )}
               {user.off_days && (
                 <div>
                   <div className="text-sm font-medium">Off Days</div>
-                  <div className="text-sm">{formatOffDays(user.off_days)}</div>
+                  <div className="text-sm">
+                    {formatOffDays(user.off_days) || ""}
+                  </div>
                 </div>
               )}
               {user.phone_number && (
                 <div>
                   <div className="text-sm font-medium">Phone</div>
-                  <div className="text-sm">{user.phone_number}</div>
+                  <div className="text-sm">{user.phone_number || ""}</div>
                 </div>
               )}
               {user.dob && (
@@ -415,7 +434,7 @@ export function DataTable<TData extends User, TValue>({
 
   // Generate skeleton rows
   const renderSkeletonRows = () => {
-    return Array(skeletonRowCount)
+    return Array(5)
       .fill(0)
       .map((_, index) => (
         <TableRow key={`skeleton-${index}`}>
@@ -430,109 +449,144 @@ export function DataTable<TData extends User, TValue>({
 
   // Add this function to determine if a row should be highlighted
   const isHighlighted = (userId: string) => {
-    return lastUpdatedUserId === userId;
+    return userId === "highlightedUserId";
   };
 
-  return (
-    <div>
-      {/* Filters Section */}
-      <div className="flex flex-col space-y-4 py-4">
-        <div className="flex flex-col md:flex-row gap-4">
-          <div className="relative max-w-sm">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search users..."
-              value={globalFilter}
-              onChange={(event) => setGlobalFilter(event.target.value)}
-              className="pl-8 pr-8 max-w-sm"
-              disabled={isLoading}
-            />
-            {globalFilter && (
-              <button
-                onClick={() => setGlobalFilter("")}
-                className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
-                aria-label="Clear search"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            )}
-          </div>
-          <div className="flex gap-2">
-            <Select
-              value={roleFilter}
-              onValueChange={handleRoleChange}
-              disabled={isLoading}
-            >
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Filter by role" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Roles</SelectItem>
-                <SelectItem value="admin">Admin</SelectItem>
-                <SelectItem value="manager">Manager</SelectItem>
-                <SelectItem value="user">User</SelectItem>
-                <SelectItem value="driver">Driver</SelectItem>
-                <SelectItem value="customer">Customer</SelectItem>
-              </SelectContent>
-            </Select>
+  const selectedRows = table.getFilteredSelectedRowModel().rows;
+  const hasSelectedRows = selectedRows.length > 0;
+  const allSelectedActive =
+    hasSelectedRows &&
+    selectedRows.every((row) => row.original.status === "active");
+  const allSelectedInactive =
+    hasSelectedRows &&
+    selectedRows.every((row) => row.original.status === "inactive");
 
-            <Select
-              value={statusFilter}
-              onValueChange={handleStatusChange}
-              disabled={isLoading}
-            >
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Filter by status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="active">Active</SelectItem>
-                <SelectItem value="pending">Pending</SelectItem>
-                <SelectItem value="inactive">Inactive</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+  return (
+    <div className="w-full space-y-4">
+      {error && (
+        <div className="bg-destructive/15 text-destructive px-4 py-2 rounded-md">
+          {error}
+        </div>
+      )}
+      <div className="flex items-center justify-between">
+        <div className="flex flex-1 items-center space-x-2">
+          <Input
+            placeholder="Filter users..."
+            value={(table.getColumn("name")?.getFilterValue() as string) ?? ""}
+            onChange={(event) =>
+              table.getColumn("name")?.setFilterValue(event.target.value)
+            }
+            className="h-8 w-[150px] lg:w-[250px]"
+          />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="h-8">
+                <SlidersHorizontal className="mr-2 h-4 w-4" />
+                View
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-[150px]">
+              {table
+                .getAllColumns()
+                .filter(
+                  (column) =>
+                    typeof column.accessorFn !== "undefined" ||
+                    column.id === "name" ||
+                    column.id === "companies"
+                )
+                .map((column) => {
+                  return (
+                    <DropdownMenuCheckboxItem
+                      key={column.id}
+                      className="capitalize"
+                      checked={column.getIsVisible()}
+                      onCheckedChange={(value) =>
+                        column.toggleVisibility(!!value)
+                      }
+                    >
+                      {column.id === "name"
+                        ? "Name"
+                        : column.id.charAt(0).toUpperCase() +
+                          column.id.slice(1).replace(/_/g, " ")}
+                    </DropdownMenuCheckboxItem>
+                  );
+                })}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+        <div className="flex items-center gap-2">
+          {hasSelectedRows && (
+            <>
+              {!allSelectedActive && onActivateSelected && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const ids = selectedRows.map((row) => row.original.id);
+                    onActivateSelected(ids);
+                  }}
+                  disabled={isProcessing}
+                  className="text-green-600 border-green-600 hover:bg-green-50 dark:text-green-400 dark:border-green-400 dark:hover:bg-green-900/20"
+                >
+                  <CheckCircle className="mr-2 h-4 w-4" />
+                  Activate Selected
+                </Button>
+              )}
+              {!allSelectedInactive && onDeactivateSelected && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const ids = selectedRows.map((row) => row.original.id);
+                    onDeactivateSelected(ids);
+                  }}
+                  disabled={isProcessing}
+                  className="text-rose-600 border-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:border-rose-400 dark:hover:bg-rose-900/20"
+                >
+                  <XCircle className="mr-2 h-4 w-4" />
+                  Deactivate Selected
+                </Button>
+              )}
+            </>
+          )}
         </div>
       </div>
-
-      {/* Desktop View */}
-      <div className="hidden md:block rounded-md border">
+      <div className="rounded-md border">
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id}>
-                {headerGroup.headers.map((header) => (
-                  <TableHead key={header.id}>
-                    {header.isPlaceholder
-                      ? null
-                      : flexRender(
-                          header.column.columnDef.header,
-                          header.getContext()
-                        )}
-                  </TableHead>
-                ))}
+                {headerGroup.headers.map((header) => {
+                  return (
+                    <TableHead key={header.id}>
+                      {header.isPlaceholder
+                        ? null
+                        : flexRender(
+                            header.column.columnDef.header,
+                            header.getContext()
+                          )}
+                    </TableHead>
+                  );
+                })}
               </TableRow>
             ))}
           </TableHeader>
           <TableBody>
-            {isLoading ? (
-              renderSkeletonRows()
-            ) : table.getRowModel().rows?.length ? (
+            {table.getRowModel().rows?.length ? (
               table.getRowModel().rows.map((row) => (
                 <TableRow
                   key={row.id}
                   data-state={row.getIsSelected() && "selected"}
-                  className={
-                    isHighlighted(row.original.id)
-                      ? "bg-blue-50 dark:bg-blue-900/20 transition-colors duration-500"
-                      : ""
-                  }
                 >
                   {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id}>
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext()
+                      {loadingRows[row.index] ? (
+                        <Skeleton className="h-6 w-20" />
+                      ) : (
+                        flexRender(
+                          cell.column.columnDef.cell,
+                          cell.getContext()
+                        )
                       )}
                     </TableCell>
                   ))}
@@ -551,45 +605,17 @@ export function DataTable<TData extends User, TValue>({
           </TableBody>
         </Table>
       </div>
-
-      {/* Mobile View */}
-      <div className="md:hidden space-y-4">
-        {isLoading ? (
-          // Mobile skeleton loading
-          [...Array(skeletonRowCount)].map((_, i) => (
-            <div key={i} className="bg-card rounded-lg shadow-sm p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-3">
-                  <Skeleton className="h-10 w-10 rounded-full" />
-                  <div>
-                    <Skeleton className="h-4 w-[150px] mb-2" />
-                    <Skeleton className="h-3 w-[100px]" />
-                  </div>
-                </div>
-                <Skeleton className="h-4 w-4" />
-              </div>
-            </div>
-          ))
-        ) : filteredData.length > 0 ? (
-          filteredData.map((user) => renderMobileCard(user as User))
-        ) : (
-          <div className="text-center p-4">No results found.</div>
-        )}
-      </div>
-
-      {/* Pagination */}
-      <div className="flex items-center justify-between py-4">
-        <span className="text-sm text-muted-foreground">
-          {isLoading
-            ? "Loading..."
-            : `Showing ${filteredData.length} of ${data.length} users`}
-        </span>
-        <div className="flex items-center space-x-2">
+      <div className="flex items-center justify-end space-x-2">
+        <div className="flex-1 text-sm text-muted-foreground">
+          {table.getFilteredSelectedRowModel().rows.length} of{" "}
+          {table.getFilteredRowModel().rows.length} row(s) selected.
+        </div>
+        <div className="space-x-2">
           <Button
             variant="outline"
             size="sm"
             onClick={() => table.previousPage()}
-            disabled={!table.getCanPreviousPage() || isLoading}
+            disabled={!table.getCanPreviousPage()}
           >
             Previous
           </Button>
@@ -597,13 +623,12 @@ export function DataTable<TData extends User, TValue>({
             variant="outline"
             size="sm"
             onClick={() => table.nextPage()}
-            disabled={!table.getCanNextPage() || isLoading}
+            disabled={!table.getCanNextPage()}
           >
             Next
           </Button>
         </div>
       </div>
-
       {/* Edit User Dialog - Replace with UserDialog */}
       {selectedUser && (
         <UserDialog

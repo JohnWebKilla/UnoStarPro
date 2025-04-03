@@ -2,10 +2,9 @@
 
 import { createClient } from "@/utils/supabase/server";
 import { revalidatePath } from "next/cache";
-import { User, UserRole } from "./types";
+import { User, UserRole, Company } from "../types/types";
 import { Database } from "@/types/supabase";
 
-type Company = Database["public"]["Tables"]["companies"]["Row"];
 type UserCompanyJunction = {
   companies: Company;
 };
@@ -165,25 +164,8 @@ export async function updateUser(formData: FormData) {
   try {
     const supabase = await createClient();
 
-    // Log the initial state
-    console.log("Starting user update with session check");
-
-    // Get current session
-    const {
-      data: { session },
-      error: sessionError,
-    } = await supabase.auth.getSession();
-    if (sessionError) {
-      console.error("Session error:", sessionError);
-      throw new Error(`Session error: ${sessionError.message}`);
-    }
-    if (!session) {
-      console.error("No session found");
-      throw new Error("No active session");
-    }
-    console.log("Session found for user:", session.user.id);
-
-    const id = formData.get("id") as string;
+    // Extract all fields from form data
+    const userId = formData.get("id") as string;
     const first_name = formData.get("first_name") as string;
     const last_name = formData.get("last_name") as string;
     const email = formData.get("email") as string;
@@ -192,156 +174,108 @@ export async function updateUser(formData: FormData) {
     const department = formData.get("department") as string;
     const dob = formData.get("dob") as string;
     const working_shift = (formData.get("working_shift") as string) || "1";
+    const off_days = formData.getAll("off_days").map(String);
 
-    // Get all off_days values as an array
-    const off_days = formData.getAll("off_days").map((value) => String(value));
-    // Use default if no off_days are provided
-    if (off_days.length === 0) {
-      off_days.push("saturday", "sunday");
+    // Update user data in the users table
+    const { data: user, error: userError } = await supabase
+      .from("users")
+      .update({
+        first_name,
+        last_name,
+        email,
+        phone_number,
+        role,
+        department,
+        dob,
+      })
+      .eq("id", userId)
+      .select()
+      .single();
+
+    if (userError) {
+      console.error("Error updating user:", userError);
+      throw userError;
     }
 
-    console.log("Update data prepared:", {
-      id,
-      first_name,
-      last_name,
-      email,
-      role,
-      department,
+    // Update or insert schedule data
+    const { data: existingSchedule } = await supabase
+      .from("schedules")
+      .select("id")
+      .eq("user_id", userId)
+      .single();
+
+    const scheduleData = {
+      user_id: userId,
       working_shift,
-      off_days,
-    });
+      off_days: off_days.length > 0 ? off_days : ["saturday", "sunday"],
+      updated_at: new Date().toISOString(),
+    };
 
-    // Update user's schedule
-    try {
-      console.log("Updating user schedule with:", {
-        working_shift,
-        off_days,
-      });
-
-      const { error: scheduleError } = await supabase.from("schedules").upsert(
-        {
-          user_id: id,
-          working_shift,
-          off_days,
-        },
-        { onConflict: "user_id" }
-      );
+    if (existingSchedule) {
+      // Update existing schedule
+      const { error: scheduleError } = await supabase
+        .from("schedules")
+        .update(scheduleData)
+        .eq("user_id", userId);
 
       if (scheduleError) {
         console.error("Error updating schedule:", scheduleError);
-        throw new Error(`Failed to update schedule: ${scheduleError.message}`);
+        throw scheduleError;
       }
+    } else {
+      // Create new schedule
+      const { error: scheduleError } = await supabase
+        .from("schedules")
+        .insert([{ ...scheduleData, created_at: new Date().toISOString() }]);
 
-      console.log("Schedule updated successfully");
-    } catch (error) {
-      console.error("Error updating schedule:", error);
-      throw new Error("Failed to update schedule");
+      if (scheduleError) {
+        console.error("Error creating schedule:", scheduleError);
+        throw scheduleError;
+      }
     }
 
-    // Get current user data with error logging
-    const { data: currentUser, error: fetchError } = await supabase
-      .from("users")
-      .select("email, role")
-      .eq("id", id)
+    // Fetch the updated schedule
+    const { data: schedule, error: scheduleGetError } = await supabase
+      .from("schedules")
+      .select("*")
+      .eq("user_id", userId)
       .single();
 
-    if (fetchError) {
-      console.error("Error fetching current user:", fetchError);
-      throw fetchError;
+    if (scheduleGetError) {
+      console.error("Error fetching updated schedule:", scheduleGetError);
+      throw scheduleGetError;
     }
-    console.log("Current user data fetched:", currentUser);
 
-    // Update the user record in the database
-    console.log("Updating user record in database");
-    try {
-      const { error: dbUpdateError } = await supabase
-        .from("users")
-        .update({
-          first_name,
-          last_name,
-          email,
-          phone_number,
-          role,
-          department,
-          dob,
-        })
-        .eq("id", id);
+    // Update user metadata
+    const { error: metadataError } = await supabase.auth.updateUser({
+      email,
+      data: {
+        first_name,
+        last_name,
+        phone_number,
+        role,
+        department,
+        dob,
+        working_shift: schedule.working_shift,
+        off_days: schedule.off_days,
+      },
+    });
 
-      if (dbUpdateError) {
-        console.error("Error updating user record:", dbUpdateError);
-        throw dbUpdateError;
-      }
-      console.log("User record updated successfully");
-
-      // Update user metadata
-      const updateData: {
-        email?: string;
-        data: {
-          first_name: string;
-          last_name: string;
-          phone_number: string;
-          role: string;
-          department?: string;
-          dob: string;
-          working_shift: string;
-          off_days: string[];
-        };
-      } = {
-        data: {
-          first_name,
-          last_name,
-          phone_number,
-          role,
-          department,
-          dob,
-          working_shift,
-          off_days,
-        },
-      };
-
-      if (currentUser.email !== email) {
-        updateData.email = email;
-      }
-
-      console.log("Attempting to update user metadata");
-      const { data: userData, error: userError } =
-        await supabase.auth.updateUser(updateData);
-
-      if (userError) {
-        console.error("Error updating user metadata:", userError);
-        throw userError;
-      }
-      console.log("User metadata updated successfully");
-
-      // Fetch the updated schedule to ensure we have the latest data
-      const { data: scheduleData, error: scheduleQueryError } = await supabase
-        .from("schedules")
-        .select("*")
-        .eq("user_id", id)
-        .single();
-
-      if (scheduleQueryError && scheduleQueryError.code !== "PGRST116") {
-        console.error("Error fetching updated schedule:", scheduleQueryError);
-      }
-
-      // Return user data with schedule information
-      return {
-        user: {
-          ...userData.user,
-          user_metadata: {
-            ...userData.user.user_metadata,
-            working_shift: scheduleData?.working_shift || working_shift,
-            off_days: scheduleData?.off_days || off_days,
-          },
-        },
-        error: null,
-      };
-    } catch (error: any) {
-      console.error("Update error:", error);
-      return { error: error.message };
+    if (metadataError) {
+      console.error("Error updating user metadata:", metadataError);
+      throw metadataError;
     }
+
+    // Return combined user and schedule data
+    return {
+      user: {
+        ...user,
+        working_shift: schedule.working_shift,
+        off_days: schedule.off_days,
+      },
+    };
   } catch (error: any) {
-    console.error("Update user error:", error);
+    console.error("Update error:", error);
     return { error: error.message };
   }
 }
@@ -521,22 +455,38 @@ export async function getUserAccessibleCompanies(userId: string) {
         .order("name");
 
       if (companiesError) throw companiesError;
-      return { companies, single: false };
+
+      // Transform the data to match our Company type
+      const typedCompanies = (companies || []).map((company) => ({
+        id: company.id,
+        name: company.name,
+        status: company.status || "active",
+      }));
+
+      return { companies: typedCompanies, single: false };
     }
 
     // Get user's assigned companies from junction table
-    const { data: userCompanies, error: userCompaniesError } = await supabase
+    const { data: userCompanies, error: userCompaniesError } = (await supabase
       .from("user_companies")
-      .select("companies:companies(*)")
+      .select("companies(*)")
       .eq("user_id", userId)
-      .eq("companies.status", "active");
+      .eq("companies.status", "active")) as {
+      data:
+        | { companies: { id: number; name: string; status: string } }[]
+        | null;
+      error: any;
+    };
 
     if (userCompaniesError) throw userCompaniesError;
 
-    // Type assertion to help TypeScript understand the structure
-    type UserCompanyResponse = { companies: Company };
-    const companies = (userCompanies as unknown as UserCompanyResponse[])
-      .map((uc) => uc.companies)
+    // Transform the data to match our Company type
+    const companies = (userCompanies || [])
+      .map((uc) => ({
+        id: uc.companies.id,
+        name: uc.companies.name,
+        status: uc.companies.status || "active",
+      }))
       .filter((company): company is Company => company !== null);
 
     return { companies, single: false };

@@ -28,13 +28,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { User } from "../lib/types/types";
-
-interface Company {
-  id: number;
-  name: string;
-  status: string;
-}
+import { User, Company } from "../lib/types/types";
 
 const variantMap = {
   active: "default",
@@ -148,16 +142,57 @@ export const columns: ColumnDef<User>[] = [
     accessorKey: "working_shift",
     header: "Working Shift",
     cell: ({ row }) => {
-      const shift = row.getValue("working_shift") as string;
+      const shiftId = row.getValue("working_shift") as string;
 
-      // Map of shift names
-      const shiftNames: Record<string, string> = {
-        "1": "Shift 1 (08:00 - 16:00)",
-        "2": "Shift 2 (16:00 - 00:00)",
-        "3": "Shift 3 (00:00 - 08:00)",
-      };
-
-      return shiftNames[shift] || shift || "-";
+      switch (shiftId) {
+        case "1":
+          return (
+            <div className="flex flex-col gap-1">
+              <Badge
+                variant="outline"
+                className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
+              >
+                <span className="mr-1">🌅</span>
+                Morning Shift
+              </Badge>
+              <span className="text-sm text-muted-foreground">
+                06:00 - 14:00
+              </span>
+            </div>
+          );
+        case "2":
+          return (
+            <div className="flex flex-col gap-1">
+              <Badge
+                variant="outline"
+                className="bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200"
+              >
+                <span className="mr-1">🌞</span>
+                Afternoon Shift
+              </Badge>
+              <span className="text-sm text-muted-foreground">
+                14:00 - 22:00
+              </span>
+            </div>
+          );
+        case "3":
+          return (
+            <div className="flex flex-col gap-1">
+              <Badge
+                variant="outline"
+                className="bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200"
+              >
+                <span className="mr-1">🌙</span>
+                Night Shift
+              </Badge>
+              <span className="text-sm text-muted-foreground">
+                22:00 - 06:00
+              </span>
+            </div>
+          );
+        default:
+          return shiftId || "-";
+      }
     },
   },
   {
@@ -203,10 +238,10 @@ export const columns: ColumnDef<User>[] = [
           {birthdayStatus === "upcoming" && (
             <Tooltip>
               <TooltipTrigger>
-                <Bell className="h-4 w-4 text-yellow-500 animate-pulse" />
+                <Bell className="h-4 w-4 text-blue-500" />
               </TooltipTrigger>
               <TooltipContent>
-                <p>Upcoming Birthday! 🎈</p>
+                <p>Birthday Coming Up! 🎈</p>
               </TooltipContent>
             </Tooltip>
           )}
@@ -220,7 +255,9 @@ export const columns: ColumnDef<User>[] = [
     cell: ({ row }) => {
       const status = row.getValue("status") as string;
       return (
-        <Badge variant={variantMap[status as keyof typeof variantMap]}>
+        <Badge
+          variant={variantMap[status as keyof typeof variantMap] || "default"}
+        >
           {status}
         </Badge>
       );
@@ -265,72 +302,37 @@ export const columns: ColumnDef<User>[] = [
   {
     id: "actions",
     cell: ({ row, table }) => {
-      const user = row.original;
       const meta = table.options.meta as TableMeta;
-      let dropdownOpen = false;
-
-      const handleAction = (action: () => void) => {
-        dropdownOpen = false; // Close dropdown before executing action
-        action();
-      };
+      const user = row.original;
 
       return (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" className="h-8 w-8 p-0">
+              <span className="sr-only">Open menu</span>
               <MoreHorizontal className="h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuLabel>Actions</DropdownMenuLabel>
-            <DropdownMenuItem
-              onSelect={() => handleAction(() => meta.onEdit(user))}
-              className="flex items-center gap-2"
-            >
-              <UserCog className="h-4 w-4" />
-              <span>Edit User</span>
+            <DropdownMenuItem onClick={() => meta.onEdit(user)}>
+              <Pencil className="mr-2 h-4 w-4" />
+              Edit
             </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() => handleAction(() => meta.onManageCompanies(user))}
-              className="flex items-center gap-2"
-            >
-              <Building className="h-4 w-4" />
-              <span>Manage Company Access</span>
+            <DropdownMenuItem onClick={() => meta.onManageCompanies(user)}>
+              <Building className="mr-2 h-4 w-4" />
+              Manage Companies
             </DropdownMenuItem>
-            {user.status === "active" && (
-              <DropdownMenuItem
-                onSelect={() =>
-                  handleAction(async () => {
-                    try {
-                      await meta.onToggleStatus(user);
-                    } catch (error) {
-                      console.error("Error deactivating user:", error);
-                    }
-                  })
-                }
-                className="flex items-center gap-2 text-destructive"
-              >
-                <Power className="h-4 w-4" />
-                <span>Deactivate</span>
+            {user.status === "pending" && (
+              <DropdownMenuItem onClick={() => meta.onApprove(user)}>
+                <Check className="mr-2 h-4 w-4" />
+                Approve
               </DropdownMenuItem>
             )}
-            {user.status === "inactive" && (
-              <DropdownMenuItem
-                onSelect={() =>
-                  handleAction(async () => {
-                    try {
-                      await meta.onToggleStatus(user);
-                    } catch (error) {
-                      console.error("Error activating user:", error);
-                    }
-                  })
-                }
-                className="flex items-center gap-2 text-green-600"
-              >
-                <Power className="h-4 w-4" />
-                <span>Activate</span>
-              </DropdownMenuItem>
-            )}
+            <DropdownMenuItem onClick={() => meta.onToggleStatus(user)}>
+              <Power className="mr-2 h-4 w-4" />
+              {user.status === "active" ? "Deactivate" : "Activate"}
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       );

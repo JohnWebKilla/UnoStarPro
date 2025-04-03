@@ -62,9 +62,9 @@ interface UserDialogProps {
 }
 
 const SHIFTS = [
-  { id: "1", name: "Shift 1 (08:00 - 16:00)" },
-  { id: "2", name: "Shift 2 (16:00 - 00:00)" },
-  { id: "3", name: "Shift 3 (00:00 - 08:00)" },
+  { id: "1", name: "Morning Shift (06:00 - 14:00)" },
+  { id: "2", name: "Afternoon Shift (14:00 - 22:00)" },
+  { id: "3", name: "Night Shift (22:00 - 06:00)" },
 ];
 
 const DAYS = [
