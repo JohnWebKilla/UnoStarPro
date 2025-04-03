@@ -37,6 +37,7 @@ import { useCompanies } from "./hooks/useCompanies";
 import type { Company, CompanyMeta, ToggleStatusOptions } from "./types";
 import { openDB, IDBPDatabase } from "idb";
 import { PageHeader } from "./components/page-header";
+import { PageTransition } from "@/components/ui/page-transition";
 
 const DB_NAME = "companiesDB";
 const STORE_NAME = "companies";
@@ -225,93 +226,126 @@ export default function CompaniesPage() {
     }
   };
 
+  const handleUpdateCompanies = async (
+    ids: number[],
+    status: "active" | "inactive"
+  ) => {
+    try {
+      await Promise.all(ids.map((id) => updateCompany(id, { status })));
+      await refreshCompanies();
+      toast({
+        title: "Success",
+        description: `Companies ${status === "active" ? "activated" : "deactivated"} successfully`,
+      });
+    } catch (error) {
+      console.error("Error updating companies:", error);
+      toast({
+        title: "Error",
+        description:
+          error instanceof Error ? error.message : "Failed to update companies",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleToggleStatus = async (options?: ToggleStatusOptions) => {
+    if (!companyToDeactivate) return;
+    try {
+      await handleUpdateCompany(companyToDeactivate.id, {
+        status: "inactive",
+        ...options,
+      });
+      setShowDeactivationDialog(false);
+      setCompanyToDeactivate(undefined);
+    } catch (error) {
+      console.error("Error toggling status:", error);
+      toast({
+        title: "Error",
+        description:
+          error instanceof Error ? error.message : "Failed to update status",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDialogSubmit = (data: Partial<Company>) => {
+    if (editDialogMode && selectedCompany) {
+      return handleUpdateCompany(selectedCompany.id, data);
+    }
+    return handleCreateCompany(data);
+  };
+
   if (!companies) {
     return <TableSkeleton />;
   }
 
-  const tableMeta: CompanyMeta = {
-    onEdit: (company: Company) => {
-      setSelectedCompany(company);
-      setEditDialogMode(true);
-      setDialogOpen(true);
-    },
-    onUpdateStatus: (company: Company) => {
-      setCompanyToDeactivate(company);
-      setShowDeactivationDialog(true);
-    },
-    onSyncStripe: handleSyncStripe,
-    onStripeSettings: (company: Company) => {
-      setSelectedCompany(company);
-      setStripeDialogOpen(true);
-    },
-    onConnectStripe: handleSyncStripe,
-    onRowClick: (company: Company) => {
-      setSelectedCompany(company);
-      setSideDialogOpen(true);
-    },
-  };
-
   return (
-    <div className="space-y-6">
-      <PageHeader
-        onSync={handleSyncAllStripe}
-        onClearCache={handleClearCache}
-        onAddCompany={() => setDialogOpen(true)}
-        isSyncing={isSyncing}
-      />
-
-      <SummaryCards companies={companies} />
-
-      <DataTable
-        data={companies}
-        columns={columns}
-        meta={tableMeta}
-        loadingRows={loadingRows}
-        error={companiesError || undefined}
-      />
-
-      <CompanyDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        onSubmit={
-          selectedCompany
-            ? (data) => handleUpdateCompany(selectedCompany.id, data)
-            : handleCreateCompany
-        }
-        company={selectedCompany}
-      />
-
-      <StripeDialog
-        open={stripeDialogOpen}
-        onOpenChange={setStripeDialogOpen}
-        company={selectedCompany}
-      />
-
-      <CompanySideDialog
-        open={sideDialogOpen}
-        onOpenChange={setSideDialogOpen}
-        company={selectedCompany}
-        onUpdate={handleUpdateCompany}
-      />
-
-      {companyToDeactivate && (
-        <DeactivationDialog
-          company={companyToDeactivate}
-          onToggleStatus={async (options?: ToggleStatusOptions) => {
-            await handleUpdateCompany(companyToDeactivate.id, {
-              status: "inactive",
-              ...options,
-            });
-            setShowDeactivationDialog(false);
-            setCompanyToDeactivate(undefined);
-          }}
-          onCancel={() => {
-            setShowDeactivationDialog(false);
-            setCompanyToDeactivate(undefined);
-          }}
-          open={showDeactivationDialog}
+    <PageTransition>
+      <div className="space-y-4">
+        <PageHeader
+          onSync={handleSyncAllStripe}
+          onClearCache={handleClearCache}
+          onAddCompany={() => setDialogOpen(true)}
+          isSyncing={isSyncing}
         />
-      )}
-    </div>
+        <SummaryCards companies={companies} />
+        <DataTable
+          columns={columns}
+          data={companies}
+          loadingRows={loadingRows}
+          error={companiesError || undefined}
+          meta={{
+            onRowClick: (company: Company) => {
+              setSelectedCompany(company);
+              setSideDialogOpen(true);
+            },
+            onEdit: (company: Company) => {
+              setSelectedCompany(company);
+              setEditDialogMode(true);
+              setDialogOpen(true);
+            },
+            onUpdateStatus: (company: Company) => {
+              setCompanyToDeactivate(company);
+              setShowDeactivationDialog(true);
+            },
+            onSyncStripe: handleSyncStripe,
+            onStripeSettings: (company: Company) => {
+              setSelectedCompany(company);
+              setStripeDialogOpen(true);
+            },
+            onConnectStripe: handleSyncStripe,
+          }}
+          onUpdateCompanies={handleUpdateCompanies}
+        />
+        <CompanyDialog
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
+          company={selectedCompany}
+          onSubmit={handleDialogSubmit}
+        />
+        <StripeDialog
+          open={stripeDialogOpen}
+          onOpenChange={setStripeDialogOpen}
+          company={selectedCompany}
+        />
+        <CompanySideDialog
+          open={sideDialogOpen}
+          onOpenChange={setSideDialogOpen}
+          company={selectedCompany}
+          onUpdate={handleUpdateCompany}
+        />
+        {companyToDeactivate && (
+          <DeactivationDialog
+            open={showDeactivationDialog}
+            company={companyToDeactivate}
+            onToggleStatus={handleToggleStatus}
+            onCancel={() => {
+              setShowDeactivationDialog(false);
+              setCompanyToDeactivate(undefined);
+            }}
+          />
+        )}
+      </div>
+    </PageTransition>
   );
 }

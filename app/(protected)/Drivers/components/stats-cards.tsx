@@ -141,12 +141,12 @@ export function StatsCards() {
             </span>
             <span
               className={cn(
-                "ml-2 text-xs font-medium",
+                "ml-2 text-xs font-medium rounded-full px-1.5 py-0.5",
                 expiringPercentage === 0
-                  ? "text-emerald-600"
+                  ? "text-emerald-700 bg-emerald-50 dark:text-emerald-400 dark:bg-emerald-900/20"
                   : expiringPercentage <= 10
-                    ? "text-amber-600"
-                    : "text-rose-600"
+                    ? "text-amber-700 bg-amber-50 dark:text-amber-400 dark:bg-amber-900/20"
+                    : "text-rose-700 bg-rose-50 dark:text-rose-400 dark:bg-rose-900/20"
               )}
             >
               {expiringPercentage}%

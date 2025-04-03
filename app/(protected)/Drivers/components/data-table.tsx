@@ -124,7 +124,14 @@ export function DataTable<TData, TValue>({
     }
   };
 
-  const selectedCount = table.getFilteredSelectedRowModel().rows.length;
+  const selectedRows = table.getFilteredSelectedRowModel().rows;
+  const hasSelectedRows = selectedRows.length > 0;
+  const allSelectedActive =
+    hasSelectedRows &&
+    selectedRows.every((row) => (row.original as Driver).status === "active");
+  const allSelectedInactive =
+    hasSelectedRows &&
+    selectedRows.every((row) => (row.original as Driver).status === "inactive");
 
   return (
     <div className="w-full space-y-4">
@@ -145,7 +152,7 @@ export function DataTable<TData, TValue>({
           />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="ml-auto h-8">
+              <Button variant="outline" size="sm" className="h-8">
                 <SlidersHorizontal className="mr-2 h-4 w-4" />
                 View
               </Button>
@@ -176,28 +183,32 @@ export function DataTable<TData, TValue>({
           </DropdownMenu>
         </div>
         <div className="flex items-center gap-2">
-          {selectedCount > 0 && (
+          {hasSelectedRows && (
             <>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => handleBulkAction("activate")}
-                disabled={isProcessing}
-                className="text-green-600 border-green-600 hover:bg-green-50"
-              >
-                <CheckCircle className="mr-2 h-4 w-4" />
-                Activate Selected
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => handleBulkAction("deactivate")}
-                disabled={isProcessing}
-                className="text-red-600 border-red-600 hover:bg-red-50"
-              >
-                <XCircle className="mr-2 h-4 w-4" />
-                Deactivate Selected
-              </Button>
+              {!allSelectedActive && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleBulkAction("activate")}
+                  disabled={isProcessing}
+                  className="text-green-600 border-green-600 hover:bg-green-50 dark:text-green-400 dark:border-green-400 dark:hover:bg-green-900/20"
+                >
+                  <CheckCircle className="mr-2 h-4 w-4" />
+                  Activate Selected
+                </Button>
+              )}
+              {!allSelectedInactive && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleBulkAction("deactivate")}
+                  disabled={isProcessing}
+                  className="text-red-600 border-red-600 hover:bg-red-50 dark:text-red-400 dark:border-red-400 dark:hover:bg-red-900/20"
+                >
+                  <XCircle className="mr-2 h-4 w-4" />
+                  Deactivate Selected
+                </Button>
+              )}
             </>
           )}
           <Button variant="outline" size="sm">
@@ -290,8 +301,8 @@ export function DataTable<TData, TValue>({
       </div>
       <div className="flex items-center justify-end space-x-2 py-4">
         <div className="flex-1 text-sm text-muted-foreground">
-          {selectedCount} of {table.getFilteredRowModel().rows.length} row(s)
-          selected.
+          {selectedRows.length} of {table.getFilteredRowModel().rows.length}{" "}
+          row(s) selected.
         </div>
         <div className="space-x-2">
           <Button

@@ -18,7 +18,7 @@ export function PageHeader({
   isSyncing,
 }: PageHeaderProps) {
   return (
-    <div className="bg-gradient-to-br from-slate-50 to-white dark:from-slate-900 dark:to-slate-800 border-none rounded-lg shadow-sm p-6 mb-6">
+    <div className="bg-gradient-to-br from-slate-50 to-white dark:from-slate-900 dark:to-slate-800 border-none rounded-lg shadow-sm px-6 py-4">
       <div className="flex items-center justify-between">
         <div className="space-y-1">
           <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">

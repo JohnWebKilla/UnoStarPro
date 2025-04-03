@@ -43,11 +43,14 @@ import {
   Edit,
   Eye,
   Trash,
+  CheckCircle,
+  XCircle,
 } from "lucide-react";
 import { useState } from "react";
 import { Company, CompanyMeta } from "./types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { Checkbox } from "@/components/ui/checkbox";
 
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
@@ -55,6 +58,10 @@ interface DataTableProps<TData, TValue> {
   loadingRows?: Record<number, boolean>;
   meta?: CompanyMeta;
   error?: string;
+  onUpdateCompanies?: (
+    ids: number[],
+    status: "active" | "inactive"
+  ) => Promise<void>;
 }
 
 export function DataTable<TData, TValue>({
@@ -63,11 +70,13 @@ export function DataTable<TData, TValue>({
   loadingRows = {},
   meta,
   error,
+  onUpdateCompanies,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
   const [rowSelection, setRowSelection] = useState({});
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const table = useReactTable({
     data,
@@ -80,6 +89,7 @@ export function DataTable<TData, TValue>({
     getFilteredRowModel: getFilteredRowModel(),
     onColumnVisibilityChange: setColumnVisibility,
     onRowSelectionChange: setRowSelection,
+    enableRowSelection: true,
     initialState: {
       pagination: {
         pageSize: 5,
@@ -93,6 +103,35 @@ export function DataTable<TData, TValue>({
     },
     meta,
   });
+
+  const handleBulkAction = async (action: "activate" | "deactivate") => {
+    if (!onUpdateCompanies) return;
+
+    try {
+      setIsProcessing(true);
+      const selectedRows = table.getFilteredSelectedRowModel().rows;
+      const selectedIds = selectedRows.map((row) => (row.original as any).id);
+      const status = action === "activate" ? "active" : "inactive";
+
+      await onUpdateCompanies(selectedIds, status);
+      setRowSelection({});
+    } catch (error) {
+      console.error(`Error ${action}ing companies:`, error);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const selectedRows = table.getFilteredSelectedRowModel().rows;
+  const hasSelectedRows = selectedRows.length > 0;
+  const allSelectedActive =
+    hasSelectedRows &&
+    selectedRows.every((row) => (row.original as Company).status === "active");
+  const allSelectedInactive =
+    hasSelectedRows &&
+    selectedRows.every(
+      (row) => (row.original as Company).status === "inactive"
+    );
 
   return (
     <div className="w-full space-y-4">
@@ -113,7 +152,7 @@ export function DataTable<TData, TValue>({
           />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="ml-auto h-8">
+              <Button variant="outline" size="sm" className="h-8">
                 <SlidersHorizontal className="mr-2 h-4 w-4" />
                 View
               </Button>
@@ -144,6 +183,34 @@ export function DataTable<TData, TValue>({
           </DropdownMenu>
         </div>
         <div className="flex items-center gap-2">
+          {hasSelectedRows && (
+            <>
+              {!allSelectedActive && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleBulkAction("activate")}
+                  disabled={isProcessing}
+                  className="text-green-600 border-green-600 hover:bg-green-50 dark:text-green-400 dark:border-green-400 dark:hover:bg-green-900/20"
+                >
+                  <CheckCircle className="mr-2 h-4 w-4" />
+                  Activate Selected
+                </Button>
+              )}
+              {!allSelectedInactive && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleBulkAction("deactivate")}
+                  disabled={isProcessing}
+                  className="text-red-600 border-red-600 hover:bg-red-50 dark:text-red-400 dark:border-red-400 dark:hover:bg-red-900/20"
+                >
+                  <XCircle className="mr-2 h-4 w-4" />
+                  Deactivate Selected
+                </Button>
+              )}
+            </>
+          )}
           <Button variant="outline" size="sm">
             <Download className="mr-2 h-4 w-4" />
             Export
@@ -155,6 +222,18 @@ export function DataTable<TData, TValue>({
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id}>
+                <TableHead className="w-12 px-6 py-3">
+                  <Checkbox
+                    checked={
+                      table.getIsAllPageRowsSelected() ||
+                      (table.getIsSomePageRowsSelected() && "indeterminate")
+                    }
+                    onCheckedChange={(value) =>
+                      table.toggleAllPageRowsSelected(!!value)
+                    }
+                    aria-label="Select all"
+                  />
+                </TableHead>
                 {headerGroup.headers.map((header) => {
                   return (
                     <TableHead
@@ -181,27 +260,24 @@ export function DataTable<TData, TValue>({
                   data-state={row.getIsSelected() && "selected"}
                   className={cn(
                     "cursor-pointer hover:bg-muted/50 relative",
-                    loadingRows[row.index] && "bg-muted/30"
+                    loadingRows[row.index] && "bg-muted/30",
+                    row.getIsSelected() && "bg-muted/50"
                   )}
                   onClick={(e) => {
                     const target = e.target as HTMLElement;
                     if (
                       target.closest(".row-actions-menu") ||
-                      target.closest("[data-dropdown-menu]")
+                      target.closest("[data-dropdown-menu]") ||
+                      target.closest('input[type="checkbox"]') ||
+                      target.closest(".checkbox-wrapper")
                     ) {
                       e.stopPropagation();
                       return;
                     }
 
                     if (!loadingRows[row.index]) {
-                      const rowElem = document.getElementById(
-                        `table-row-${row.id}`
-                      );
-                      if (rowElem) {
-                        rowElem.classList.add("bg-muted/30");
-                      }
+                      meta?.onRowClick?.(row.original as Company);
                     }
-                    meta?.onRowClick?.(row.original as Company);
                   }}
                   onContextMenu={(e) => {
                     e.preventDefault();
@@ -212,6 +288,15 @@ export function DataTable<TData, TValue>({
                   }}
                   id={`table-row-${row.id}`}
                 >
+                  <TableCell className="w-12 px-6 py-3">
+                    <div className="checkbox-wrapper">
+                      <Checkbox
+                        checked={row.getIsSelected()}
+                        onCheckedChange={(value) => row.toggleSelected(!!value)}
+                        aria-label="Select row"
+                      />
+                    </div>
+                  </TableCell>
                   {loadingRows[row.index] && (
                     <div className="absolute inset-0 flex items-center justify-center bg-background/50 backdrop-blur-[1px] z-10">
                       <div className="flex items-center space-x-2 bg-primary/10 px-3 py-1.5 rounded-full">
@@ -235,7 +320,7 @@ export function DataTable<TData, TValue>({
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={columns.length}
+                  colSpan={columns.length + 1}
                   className="h-24 text-center"
                 >
                   No results.
@@ -245,23 +330,29 @@ export function DataTable<TData, TValue>({
           </TableBody>
         </Table>
       </div>
-      <div className="flex items-center justify-end space-x-2">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => table.previousPage()}
-          disabled={!table.getCanPreviousPage()}
-        >
-          Previous
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => table.nextPage()}
-          disabled={!table.getCanNextPage()}
-        >
-          Next
-        </Button>
+      <div className="flex items-center justify-between space-x-2">
+        <div className="flex-1 text-sm text-muted-foreground">
+          {table.getFilteredSelectedRowModel().rows.length} of{" "}
+          {table.getFilteredRowModel().rows.length} row(s) selected.
+        </div>
+        <div className="flex items-center space-x-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => table.previousPage()}
+            disabled={!table.getCanPreviousPage()}
+          >
+            Previous
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => table.nextPage()}
+            disabled={!table.getCanNextPage()}
+          >
+            Next
+          </Button>
+        </div>
       </div>
     </div>
   );

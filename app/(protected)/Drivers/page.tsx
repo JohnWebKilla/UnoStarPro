@@ -7,13 +7,16 @@ import { StatsCards } from "./components/stats-cards";
 import { useToast } from "@/components/ui/use-toast";
 import { PageHeader } from "./components/page-header";
 import { clearDriverCaches } from "./actions";
+import { PageTransition } from "@/components/ui/page-transition";
 
 export default function DriversPage() {
   return (
     <DriversProvider>
-      <div className="space-y-6">
-        <DriversContent />
-      </div>
+      <PageTransition>
+        <div className="space-y-4">
+          <DriversContent />
+        </div>
+      </PageTransition>
     </DriversProvider>
   );
 }
@@ -109,7 +112,7 @@ function DriversContent() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <PageHeader
         onSync={handleSync}
         onClearCache={handleClearCache}
