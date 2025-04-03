@@ -18,8 +18,10 @@ export interface User {
   department?: Department;
   status: string;
   created_at: string;
+  updated_at: string;
+  last_sign_in_at: string | null;
   dob?: string;
-  avatar?: string;
+  avatar_url: string | null;
   company_id: number | null;
   has_all_access: boolean;
   companies?: Company[];

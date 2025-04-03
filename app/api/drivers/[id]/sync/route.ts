@@ -8,7 +8,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
 
 export async function POST(
   request: Request,
-  context: { params: { id: string } }
+  { params }: { params: { id: string } }
 ) {
   if (!stripe) {
     return NextResponse.json(
@@ -19,7 +19,7 @@ export async function POST(
 
   try {
     const supabase = await createClient();
-    const { id } = await Promise.resolve(context.params);
+    const { id } = params;
 
     // Get driver details
     const { data: driver, error: driverError } = await supabase

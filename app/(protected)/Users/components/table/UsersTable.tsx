@@ -1,4 +1,4 @@
-import { User } from "../../lib/types/types";
+import { User } from "../../types";
 import {
   Table,
   TableBody,

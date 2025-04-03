@@ -83,18 +83,20 @@ const DEPARTMENTS = {
 function formatUser(supabaseUser: import("@supabase/auth-js").User): User {
   return {
     id: supabaseUser.id,
-    email: supabaseUser.email || "",
     first_name: supabaseUser.user_metadata?.first_name || "",
     last_name: supabaseUser.user_metadata?.last_name || "",
+    email: supabaseUser.email || "",
     phone_number: supabaseUser.user_metadata?.phone_number || "",
     role: supabaseUser.user_metadata?.role || "user",
     department: supabaseUser.user_metadata?.department || undefined,
     status: supabaseUser.user_metadata?.status || "active",
     has_all_access: supabaseUser.user_metadata?.has_all_access || false,
     created_at: supabaseUser.created_at || new Date().toISOString(),
+    updated_at: supabaseUser.updated_at || new Date().toISOString(),
+    last_sign_in_at: supabaseUser.last_sign_in_at || null,
     dob: supabaseUser.user_metadata?.dob || null,
     company_id: supabaseUser.user_metadata?.company_id || null,
-    avatar: supabaseUser.user_metadata?.avatar || null,
+    avatar_url: supabaseUser.user_metadata?.avatar_url || null,
     working_shift: supabaseUser.user_metadata?.working_shift || "1",
     off_days: supabaseUser.user_metadata?.off_days || ["saturday", "sunday"],
   };
