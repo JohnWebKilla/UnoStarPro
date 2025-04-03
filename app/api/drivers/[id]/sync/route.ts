@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import Stripe from "stripe";
 
@@ -7,8 +7,8 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
 });
 
 export async function POST(
-  request: Request,
-  { params }: { params: { id: string } }
+  request: NextRequest,
+  context: { params: { id: string } }
 ) {
   if (!stripe) {
     return NextResponse.json(
@@ -19,7 +19,7 @@ export async function POST(
 
   try {
     const supabase = await createClient();
-    const { id } = params;
+    const { id } = context.params;
 
     // Get driver details
     const { data: driver, error: driverError } = await supabase
