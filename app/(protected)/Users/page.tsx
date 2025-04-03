@@ -9,6 +9,7 @@ import { UsersLayout } from "./components/layout/UsersLayout";
 import { UsersFilters } from "./components/filters/UsersFilters";
 import { UsersTable } from "./components/table/UsersTable";
 import { CompanyManagement } from "./components/features/company-management";
+import { Card, CardContent } from "@/components/ui/card";
 
 function UsersContent() {
   const [selectedUser, setSelectedUser] = useState<User | undefined>();
@@ -52,51 +53,51 @@ function UsersContent() {
   });
 
   return (
-    <UsersLayout
-      header={<UsersHeader />}
-      filters={
-        <UsersFilters
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
-          roleFilter={roleFilter}
-          onRoleChange={setRoleFilter}
-          statusFilter={statusFilter}
-          onStatusChange={setStatusFilter}
-        />
-      }
-      content={
-        <>
-          <UsersTable
-            data={filteredUsers}
-            isLoading={isLoading}
-            onEdit={handleEdit}
-            onToggleStatus={async () => {}}
-            onApprove={async () => {}}
-            onManageCompanies={handleManageCompanies}
-            companies={companies}
-          />
+    <div className="space-y-4 p-8">
+      <UsersHeader />
 
-          {userForCompanies && (
-            <CompanyManagement
-              open={companyDialogOpen}
-              onOpenChange={handleCompanyDialogClose}
-              userId={userForCompanies.id}
-              userRole={userForCompanies.role}
-              currentCompanyIds={
-                userForCompanies.companies?.map((c) => c.id) || []
-              }
-              hasAllAccess={userForCompanies.has_all_access}
-              companies={companies}
-              userName={`${userForCompanies.first_name} ${userForCompanies.last_name}`}
-              onSuccess={async () => {
-                setCompanyDialogOpen(false);
-                setUserForCompanies(null);
-              }}
+      <Card>
+        <CardContent className="p-6">
+          <div className="space-y-4">
+            <UsersFilters
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+              roleFilter={roleFilter}
+              onRoleChange={setRoleFilter}
+              statusFilter={statusFilter}
+              onStatusChange={setStatusFilter}
             />
-          )}
-        </>
-      }
-    />
+
+            <UsersTable
+              data={filteredUsers}
+              isLoading={isLoading}
+              onEdit={handleEdit}
+              onToggleStatus={async () => {}}
+              onApprove={async () => {}}
+              onManageCompanies={handleManageCompanies}
+              companies={companies}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      {userForCompanies && (
+        <CompanyManagement
+          open={companyDialogOpen}
+          onOpenChange={handleCompanyDialogClose}
+          userId={userForCompanies.id}
+          userRole={userForCompanies.role}
+          currentCompanyIds={userForCompanies.companies?.map((c) => c.id) || []}
+          hasAllAccess={userForCompanies.has_all_access}
+          companies={companies}
+          userName={`${userForCompanies.first_name} ${userForCompanies.last_name}`}
+          onSuccess={async () => {
+            setCompanyDialogOpen(false);
+            setUserForCompanies(null);
+          }}
+        />
+      )}
+    </div>
   );
 }
 

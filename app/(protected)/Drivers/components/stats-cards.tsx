@@ -1,7 +1,6 @@
 "use client";
 
 import { useDrivers } from "./DriversProvider";
-import { Card, CardContent } from "@/components/ui/card";
 import {
   Users,
   Receipt,
@@ -9,6 +8,7 @@ import {
   AlertTriangle,
   Activity,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export function StatsCards() {
   const { drivers } = useDrivers();
@@ -52,113 +52,108 @@ export function StatsCards() {
   const expiringPercentage =
     totalDrivers > 0 ? Math.round((expiringDocuments / totalDrivers) * 100) : 0;
 
+  function formatCurrency(amount: number) {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: 2,
+    }).format(amount / 100);
+  }
+
   return (
-    <div className="grid gap-4 grid-cols-2 lg:grid-cols-5">
-      <Card>
-        <CardContent className="py-3 px-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-blue-50 rounded-full">
-              <Users className="w-4 h-4 text-blue-600" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-muted-foreground">
-                Drivers
-              </p>
-              <div className="flex items-baseline gap-2">
-                <h2 className="text-2xl font-bold">{totalDrivers}</h2>
-                <span className="text-sm text-green-600">
-                  ↗{Math.round((activeDrivers / (totalDrivers || 1)) * 100)}%
-                </span>
-              </div>
+    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="flex items-center space-x-4 p-3 rounded-lg bg-white dark:bg-slate-900 shadow-[0_2px_8px_rgb(0,0,0,0.04)]">
+        <div className="flex-shrink-0">
+          <div className="w-10 h-10 flex items-center justify-center rounded-full bg-blue-50 dark:bg-blue-900/20">
+            <Users className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+          </div>
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-0.5">
+            Drivers
+          </p>
+          <div className="flex items-center">
+            <span className="text-2xl font-semibold text-slate-900 dark:text-white tracking-tight">
+              {totalDrivers}
+            </span>
+            <div className="flex items-center ml-2 text-xs font-medium text-emerald-700 bg-emerald-50 dark:text-emerald-400 dark:bg-emerald-900/20 rounded-full px-1.5 py-0.5">
+              {Math.round((activeDrivers / (totalDrivers || 1)) * 100)}%
             </div>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
-      <Card>
-        <CardContent className="py-3 px-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-green-50 rounded-full">
-              <Activity className="w-4 h-4 text-green-600" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-muted-foreground">
-                Status
-              </p>
-              <div className="flex flex-col">
-                <div className="flex items-baseline gap-2">
-                  <h2 className="text-2xl font-bold">{activeDrivers}</h2>
-                  <span className="text-sm text-muted-foreground">active</span>
-                </div>
-                <span className="text-sm text-muted-foreground">
-                  {inactiveDrivers} inactive
-                </span>
-              </div>
-            </div>
+      <div className="flex items-center space-x-4 p-3 rounded-lg bg-white dark:bg-slate-900 shadow-[0_2px_8px_rgb(0,0,0,0.04)]">
+        <div className="flex-shrink-0">
+          <div className="w-10 h-10 flex items-center justify-center rounded-full bg-emerald-50 dark:bg-emerald-900/20">
+            <Activity className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
           </div>
-        </CardContent>
-      </Card>
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-0.5">
+            Status
+          </p>
+          <div className="flex items-center">
+            <span className="text-2xl font-semibold text-slate-900 dark:text-white tracking-tight">
+              {activeDrivers}
+            </span>
+            <span className="ml-2 text-xs font-medium text-slate-500 dark:text-slate-400">
+              {Math.round((activeDrivers / totalDrivers) * 100)}% active
+            </span>
+          </div>
+        </div>
+      </div>
 
-      <Card>
-        <CardContent className="py-3 px-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-green-50 rounded-full">
-              <Receipt className="w-4 h-4 text-green-600" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-muted-foreground">
-                Subscriptions
-              </p>
-              <div className="flex items-baseline gap-2">
-                <h2 className="text-2xl font-bold">{activeDrivers}</h2>
-                <span className="text-sm text-muted-foreground">
-                  100% active
-                </span>
-              </div>
-            </div>
+      <div className="flex items-center space-x-4 p-3 rounded-lg bg-white dark:bg-slate-900 shadow-[0_2px_8px_rgb(0,0,0,0.04)]">
+        <div className="flex-shrink-0">
+          <div className="w-10 h-10 flex items-center justify-center rounded-full bg-violet-50 dark:bg-violet-900/20">
+            <DollarSign className="h-5 w-5 text-violet-600 dark:text-violet-400" />
           </div>
-        </CardContent>
-      </Card>
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-0.5">
+            Revenue
+          </p>
+          <div className="flex items-center">
+            <span className="text-2xl font-semibold text-slate-900 dark:text-white tracking-tight">
+              {formatCurrency(totalRevenue)}
+            </span>
+            <span className="ml-2 text-xs font-medium text-slate-500 dark:text-slate-400">
+              /mo
+            </span>
+          </div>
+        </div>
+      </div>
 
-      <Card>
-        <CardContent className="py-3 px-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-violet-50 rounded-full">
-              <DollarSign className="w-4 h-4 text-violet-600" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-muted-foreground">
-                Revenue
-              </p>
-              <div className="flex items-baseline gap-2">
-                <h2 className="text-2xl font-bold">${totalRevenue}</h2>
-                <span className="text-sm text-muted-foreground">/mo</span>
-              </div>
-            </div>
+      <div className="flex items-center space-x-4 p-3 rounded-lg bg-white dark:bg-slate-900 shadow-[0_2px_8px_rgb(0,0,0,0.04)]">
+        <div className="flex-shrink-0">
+          <div className="w-10 h-10 flex items-center justify-center rounded-full bg-rose-50 dark:bg-rose-900/20">
+            <AlertTriangle className="h-5 w-5 text-rose-600 dark:text-rose-400" />
           </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent className="py-3 px-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-red-50 rounded-full">
-              <AlertTriangle className="w-4 h-4 text-red-600" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-muted-foreground">
-                Issues
-              </p>
-              <div className="flex items-baseline gap-2">
-                <h2 className="text-2xl font-bold">{expiringDocuments}</h2>
-                <span className="text-sm text-muted-foreground">
-                  {expiringPercentage}%
-                </span>
-              </div>
-            </div>
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-0.5">
+            Issues
+          </p>
+          <div className="flex items-center">
+            <span className="text-2xl font-semibold text-slate-900 dark:text-white tracking-tight">
+              {expiringDocuments}
+            </span>
+            <span
+              className={cn(
+                "ml-2 text-xs font-medium",
+                expiringPercentage === 0
+                  ? "text-emerald-600"
+                  : expiringPercentage <= 10
+                    ? "text-amber-600"
+                    : "text-rose-600"
+              )}
+            >
+              {expiringPercentage}%
+            </span>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   );
 }

@@ -372,7 +372,7 @@ export function UserDialog({
       {/* Only render the trigger if we're creating a new user */}
       {!user && (
         <DialogTrigger asChild>
-          <Button className="h-9 relative z-0">
+          <Button className="h-7 relative z-0">
             <PlusCircle className=" mr-2" />
             Add User
           </Button>
