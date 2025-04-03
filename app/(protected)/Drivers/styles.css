@@ -1,0 +1,142 @@
+/* Custom styles for the Drivers table */
+
+.drivers-table {
+    width: 100% !important;
+    table-layout: fixed !important;
+    border-collapse: separate !important;
+    border-spacing: 0 !important;
+}
+
+.drivers-table th,
+.drivers-table td {
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    padding: 12px 16px !important;
+}
+
+/* Column widths */
+.drivers-table th:nth-child(1),
+.drivers-table td:nth-child(1) {
+    width: 15% !important;
+    /* Driver name */
+}
+
+.drivers-table th:nth-child(2),
+.drivers-table td:nth-child(2) {
+    width: 12% !important;
+    /* Phone */
+}
+
+.drivers-table th:nth-child(3),
+.drivers-table td:nth-child(3) {
+    width: 10% !important;
+    /* Truck # */
+}
+
+.drivers-table th:nth-child(4),
+.drivers-table td:nth-child(4) {
+    width: 10% !important;
+    /* Type */
+}
+
+.drivers-table th:nth-child(5),
+.drivers-table td:nth-child(5) {
+    width: 12% !important;
+    /* Status */
+}
+
+.drivers-table th:nth-child(6),
+.drivers-table td:nth-child(6) {
+    width: 15% !important;
+    /* Documents */
+}
+
+.drivers-table th:nth-child(7),
+.drivers-table td:nth-child(7) {
+    width: 18% !important;
+    /* Subscription */
+}
+
+.drivers-table th:nth-child(8),
+.drivers-table td:nth-child(8) {
+    width: 8% !important;
+    text-align: right !important;
+    /* Actions */
+}
+
+/* Ensure content alignment */
+.drivers-table th {
+    font-weight: 500 !important;
+    color: var(--muted-foreground) !important;
+    text-align: left !important;
+}
+
+.drivers-table td {
+    vertical-align: middle !important;
+}
+
+/* Badge and icon styles */
+.drivers-table .badge {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 0.25rem !important;
+    padding: 0.25rem 0.5rem !important;
+    border-radius: 9999px !important;
+    font-size: 0.75rem !important;
+    font-weight: 500 !important;
+    line-height: 1 !important;
+}
+
+.drivers-table .icon {
+    width: 1rem !important;
+    height: 1rem !important;
+}
+
+/* Hover and active states */
+.drivers-table tbody tr:hover {
+    background-color: var(--muted) !important;
+}
+
+.drivers-table tbody tr:active {
+    background-color: var(--accent) !important;
+}
+
+/* Ensure proper text wrapping for long content */
+.drivers-table .truncate {
+    max-width: 100% !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+}
+
+/* Truncate long subscription IDs */
+.drivers-table .subscription-id {
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: inline-block;
+}
+
+/* Update the badge styling to be more compact */
+.drivers-table .badge {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding-left: 0.5rem !important;
+    padding-right: 0.5rem !important;
+    min-width: unset !important;
+    border: 1px solid transparent;
+    transition: all 0.2s ease;
+}
+
+/* Add styling for the date icon hover */
+.drivers-table .date-icon {
+    opacity: 0.7;
+    transition: opacity 0.2s ease;
+}
+
+.drivers-table .date-icon:hover {
+    opacity: 1;
+}

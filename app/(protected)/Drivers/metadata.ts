@@ -1,10 +1,8 @@
 import { Metadata } from "next";
-import "./styles.css";
 
 export const metadata: Metadata = {
-  title: "Drivers Management | UnoStarPro",
-  description:
-    "Manage your drivers, view documents, and track status efficiently with UnoStarPro.",
+  title: "Drivers | UnoStarPro",
+  description: "Manage your drivers and their documents",
   keywords: [
     "drivers management",
     "fleet management",
@@ -31,11 +29,3 @@ export const metadata: Metadata = {
     images: ["/images/drivers-management.png"],
   },
 };
-
-export default function DriversLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  return <>{children}</>;
-}

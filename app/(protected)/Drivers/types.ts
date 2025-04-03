@@ -18,30 +18,47 @@ export interface Document {
 
 // Driver type
 export interface Driver {
-  id: number;
+  id: string;
   name: string;
-  phone_number: string;
-  truck_number: string;
-  solo_or_team: string;
-  status: string;
-  driver_licenses: Document[];
-  medical_cards: Document[];
-  mvr_files: Document[];
-  company_id: number;
+  phone: string;
+  phone_number?: string; // Legacy field
+  truckNumber: string;
+  truck_number?: string; // Legacy field
+  type: "solo" | "team";
+  solo_or_team?: string; // Legacy field
+  status: "active" | "inactive" | "terminated" | "pending";
+  documents: {
+    id: string;
+    name: string;
+    url: string;
+    expiryDate?: string;
+  }[];
+  driver_licenses?: Document[];
+  medical_cards?: Document[];
+  mvr_files?: Document[];
+  subscription: {
+    id: string;
+    status: "connected" | "disconnected";
+    amount: number;
+    info?: string;
+  };
+  subscription_amount?: number; // Legacy field
+  subscription_frequency?: SubscriptionFrequency;
+  stripe_product_id?: string | null;
+  stripe_price_id?: string | null;
+  stripe_connect_account_id?: string | null;
+  company_id?: number;
   company_name?: string;
-  subscription_amount: number;
-  subscription_frequency: SubscriptionFrequency;
-  stripe_product_id: string | null;
-  stripe_price_id: string | null;
-  stripe_connect_account_id: string | null;
-  hire_date: string;
-  terminated_date: string | null;
-  created_at: string;
-  updated_at: string;
   companies?: {
     id: number;
     name: string;
   };
+  hire_date?: string;
+  terminated_date?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  created_at?: string; // Legacy field
+  updated_at?: string; // Legacy field
 }
 
 // Driver status options
@@ -50,10 +67,10 @@ export const DRIVER_STATUS_OPTIONS = [
   "Inactive",
   "Terminated",
   "Pending",
-];
+] as const;
 
 // Driver team options
-export const DRIVER_TEAM_OPTIONS = ["Solo", "Team"];
+export const DRIVER_TEAM_OPTIONS = ["Solo", "Team"] as const;
 
 // Subscription frequency options
 export const SUBSCRIPTION_FREQUENCY_OPTIONS = ["weekly", "monthly"] as const;
@@ -69,4 +86,10 @@ export interface CacheResponse<T> {
     database?: number;
     source: "client-cache" | "server" | "local-storage";
   };
+}
+
+export interface RealtimePayload {
+  eventType: "INSERT" | "UPDATE" | "DELETE";
+  new: Driver;
+  old: Driver;
 }
