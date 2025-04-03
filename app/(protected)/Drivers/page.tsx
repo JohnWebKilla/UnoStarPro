@@ -19,7 +19,8 @@ export default function DriversPage() {
 }
 
 function DriversContent() {
-  const { drivers, loading, error, syncWithServer } = useDrivers();
+  const { drivers, loading, error, syncWithServer, updateDrivers } =
+    useDrivers();
   const { toast } = useToast();
 
   const handleClearCache = async () => {
@@ -55,11 +56,56 @@ function DriversContent() {
   };
 
   const handleAddDriver = () => {
-    // TODO: Implement add driver functionality
     toast({
       title: "Coming Soon",
       description: "Add driver functionality will be implemented soon.",
     });
+  };
+
+  const handleActivateSelected = async (ids: number[]) => {
+    try {
+      await Promise.all(
+        ids.map((id) =>
+          updateDrivers(id, {
+            status: "active",
+          })
+        )
+      );
+      toast({
+        title: "Success",
+        description: `Successfully activated ${ids.length} driver(s)`,
+      });
+      await syncWithServer();
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to activate selected drivers",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDeactivateSelected = async (ids: number[]) => {
+    try {
+      await Promise.all(
+        ids.map((id) =>
+          updateDrivers(id, {
+            status: "inactive",
+          })
+        )
+      );
+      toast({
+        title: "Success",
+        description: `Successfully deactivated ${ids.length} driver(s)`,
+      });
+      await syncWithServer();
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to deactivate selected drivers",
+        variant: "destructive",
+      });
+    }
   };
 
   return (
@@ -78,6 +124,8 @@ function DriversContent() {
           loading ? Object.fromEntries(drivers.map((_, i) => [i, true])) : {}
         }
         error={error || undefined}
+        onActivateSelected={handleActivateSelected}
+        onDeactivateSelected={handleDeactivateSelected}
       />
     </div>
   );

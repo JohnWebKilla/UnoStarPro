@@ -1,3 +1,5 @@
+"use client";
+
 import * as React from "react";
 import {
   ColumnDef,
@@ -40,11 +42,15 @@ import {
   Edit,
   Eye,
   Trash,
+  CheckCircle,
+  XCircle,
 } from "lucide-react";
 import { useState } from "react";
 import { Driver } from "../types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { Checkbox } from "@/components/ui/checkbox";
+import { useDrivers } from "./DriversProvider";
 
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
@@ -52,6 +58,8 @@ interface DataTableProps<TData, TValue> {
   loadingRows?: Record<number, boolean>;
   meta?: any;
   error?: string;
+  onActivateSelected?: (ids: number[]) => Promise<void>;
+  onDeactivateSelected?: (ids: number[]) => Promise<void>;
 }
 
 export function DataTable<TData, TValue>({
@@ -60,11 +68,15 @@ export function DataTable<TData, TValue>({
   loadingRows = {},
   meta,
   error,
+  onActivateSelected,
+  onDeactivateSelected,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
   const [rowSelection, setRowSelection] = useState({});
+  const [isProcessing, setIsProcessing] = useState(false);
+  const { updateDrivers } = useDrivers();
 
   const table = useReactTable({
     data,
@@ -77,6 +89,7 @@ export function DataTable<TData, TValue>({
     getFilteredRowModel: getFilteredRowModel(),
     onColumnVisibilityChange: setColumnVisibility,
     onRowSelectionChange: setRowSelection,
+    enableRowSelection: true,
     initialState: {
       pagination: {
         pageSize: 5,
@@ -90,6 +103,28 @@ export function DataTable<TData, TValue>({
     },
     meta,
   });
+
+  const handleBulkAction = async (action: "activate" | "deactivate") => {
+    try {
+      setIsProcessing(true);
+      const selectedRows = table.getFilteredSelectedRowModel().rows;
+      const status = action === "activate" ? "active" : "inactive";
+
+      await Promise.all(
+        selectedRows.map((row) =>
+          updateDrivers((row.original as any).id, { status })
+        )
+      );
+
+      setRowSelection({});
+    } catch (error) {
+      console.error(`Error ${action}ing drivers:`, error);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const selectedCount = table.getFilteredSelectedRowModel().rows.length;
 
   return (
     <div className="w-full space-y-4">
@@ -141,6 +176,30 @@ export function DataTable<TData, TValue>({
           </DropdownMenu>
         </div>
         <div className="flex items-center gap-2">
+          {selectedCount > 0 && (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleBulkAction("activate")}
+                disabled={isProcessing}
+                className="text-green-600 border-green-600 hover:bg-green-50"
+              >
+                <CheckCircle className="mr-2 h-4 w-4" />
+                Activate Selected
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleBulkAction("deactivate")}
+                disabled={isProcessing}
+                className="text-red-600 border-red-600 hover:bg-red-50"
+              >
+                <XCircle className="mr-2 h-4 w-4" />
+                Deactivate Selected
+              </Button>
+            </>
+          )}
           <Button variant="outline" size="sm">
             <Download className="mr-2 h-4 w-4" />
             Export
@@ -148,15 +207,28 @@ export function DataTable<TData, TValue>({
         </div>
       </div>
       <div className="rounded-md border">
-        <Table className="drivers-table">
+        <Table>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id}>
+                <TableHead className="w-12 px-6 py-3">
+                  <Checkbox
+                    checked={
+                      table.getIsAllPageRowsSelected() ||
+                      (table.getIsSomePageRowsSelected() && "indeterminate")
+                    }
+                    onCheckedChange={(value) =>
+                      table.toggleAllPageRowsSelected(!!value)
+                    }
+                    aria-label="Select all"
+                    className="translate-y-[2px]"
+                  />
+                </TableHead>
                 {headerGroup.headers.map((header) => {
                   return (
                     <TableHead
                       key={header.id}
-                      className="px-4 py-3 font-medium text-left"
+                      className="px-6 py-3 font-medium text-left"
                     >
                       {header.isPlaceholder
                         ? null
@@ -180,50 +252,24 @@ export function DataTable<TData, TValue>({
                     "cursor-pointer hover:bg-muted/50 relative",
                     loadingRows[row.index] && "bg-muted/30"
                   )}
-                  onClick={(e) => {
-                    const target = e.target as HTMLElement;
-                    if (
-                      target.closest(".row-actions-menu") ||
-                      target.closest("[data-dropdown-menu]")
-                    ) {
-                      e.stopPropagation();
-                      return;
-                    }
-
-                    if (!loadingRows[row.index]) {
-                      const rowElem = document.getElementById(
-                        `table-row-${row.id}`
-                      );
-                      if (rowElem) {
-                        rowElem.classList.add("bg-muted/30");
-                      }
-                    }
-                    meta?.onRowClick?.(row.original as Driver);
-                  }}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    const shouldEdit = window.confirm("Edit this driver?");
-                    if (shouldEdit) {
-                      meta?.onEdit?.(row.original as Driver);
-                    }
-                  }}
-                  id={`table-row-${row.id}`}
                 >
-                  {loadingRows[row.index] && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-background/50 backdrop-blur-[1px] z-10">
-                      <div className="flex items-center space-x-2 bg-primary/10 px-3 py-1.5 rounded-full">
-                        <Skeleton className="h-4 w-4 rounded-full animate-pulse bg-primary/30" />
-                        <span className="text-xs font-medium">
-                          Loading data...
-                        </span>
-                      </div>
-                    </div>
-                  )}
+                  <TableCell className="px-6 py-3">
+                    <Checkbox
+                      checked={row.getIsSelected()}
+                      onCheckedChange={(value) => row.toggleSelected(!!value)}
+                      aria-label="Select row"
+                      className="translate-y-[2px]"
+                    />
+                  </TableCell>
                   {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id} className="px-4 py-3">
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext()
+                    <TableCell key={cell.id} className="px-6 py-3">
+                      {loadingRows[row.index] ? (
+                        <LoadingCell type={cell.column.id} />
+                      ) : (
+                        flexRender(
+                          cell.column.columnDef.cell,
+                          cell.getContext()
+                        )
                       )}
                     </TableCell>
                   ))}
@@ -232,7 +278,7 @@ export function DataTable<TData, TValue>({
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={columns.length}
+                  colSpan={columns.length + 1}
                   className="h-24 text-center"
                 >
                   No results.
@@ -242,24 +288,50 @@ export function DataTable<TData, TValue>({
           </TableBody>
         </Table>
       </div>
-      <div className="flex items-center justify-end space-x-2">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => table.previousPage()}
-          disabled={!table.getCanPreviousPage()}
-        >
-          Previous
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => table.nextPage()}
-          disabled={!table.getCanNextPage()}
-        >
-          Next
-        </Button>
+      <div className="flex items-center justify-end space-x-2 py-4">
+        <div className="flex-1 text-sm text-muted-foreground">
+          {selectedCount} of {table.getFilteredRowModel().rows.length} row(s)
+          selected.
+        </div>
+        <div className="space-x-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => table.previousPage()}
+            disabled={!table.getCanPreviousPage()}
+          >
+            Previous
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => table.nextPage()}
+            disabled={!table.getCanNextPage()}
+          >
+            Next
+          </Button>
+        </div>
       </div>
     </div>
   );
+}
+
+function LoadingCell({ type }: { type: string }) {
+  switch (type) {
+    case "name":
+      return (
+        <div className="flex flex-col gap-1">
+          <Skeleton className="h-4 w-[120px]" />
+          <Skeleton className="h-3 w-[80px]" />
+        </div>
+      );
+    case "status":
+      return <Skeleton className="h-6 w-[80px]" />;
+    case "subscription":
+      return <Skeleton className="h-6 w-[100px]" />;
+    case "documents":
+      return <Skeleton className="h-8 w-[80px]" />;
+    default:
+      return <Skeleton className="h-4 w-[80px]" />;
+  }
 }

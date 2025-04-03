@@ -28,6 +28,7 @@ export interface DriversContextType {
   refreshDrivers: (skipCache?: boolean) => Promise<void>;
   clearCache: () => Promise<void>;
   syncWithServer: () => Promise<void>;
+  updateDrivers: (id: number, data: Partial<Driver>) => Promise<void>;
 }
 
 const DriversContext = createContext<DriversContextType | undefined>(undefined);
@@ -271,6 +272,34 @@ export function DriversProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const updateDrivers = async (id: number, data: Partial<Driver>) => {
+    try {
+      const response = await fetch(`/api/drivers/${id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(data),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to update driver");
+      }
+
+      // Update local state
+      const updatedDrivers = drivers.map((driver) =>
+        Number(driver.id) === id ? { ...driver, ...data } : driver
+      );
+      setDrivers(updatedDrivers);
+
+      // Update IndexedDB
+      await driversDB.setDrivers(updatedDrivers);
+    } catch (error) {
+      console.error("Error updating driver:", error);
+      throw error;
+    }
+  };
+
   useEffect(() => {
     const loadInitialData = async () => {
       try {
@@ -392,6 +421,7 @@ export function DriversProvider({ children }: { children: React.ReactNode }) {
     refreshDrivers: fetchDrivers,
     clearCache,
     syncWithServer,
+    updateDrivers,
   };
 
   return (

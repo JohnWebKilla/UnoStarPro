@@ -188,90 +188,21 @@ class DriversIndexedDB {
   }
 
   async setDrivers(drivers: Driver[]): Promise<void> {
-    await this.connect();
-    await this.ensureStoreExists(DRIVERS_STORE);
+    const db = await this.connect();
+    const tx = db.transaction("drivers", "readwrite");
+    const store = tx.objectStore("drivers");
 
-    return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error("Database not initialized"));
-        return;
-      }
+    // Clear existing data
+    await store.clear();
 
-      try {
-        const transaction = this.db.transaction(DRIVERS_STORE, "readwrite");
-        const store = transaction.objectStore(DRIVERS_STORE);
+    // Add all drivers
+    for (const driver of drivers) {
+      await store.add(driver);
+    }
 
-        // Clear existing data
-        const clearRequest = store.clear();
-
-        clearRequest.onsuccess = () => {
-          // Add all drivers
-          let completed = 0;
-          let hasError = false;
-
-          if (drivers.length === 0) {
-            resolve();
-            return;
-          }
-
-          drivers.forEach((driver) => {
-            if (!driver.id) {
-              console.warn("Driver without ID found:", driver);
-              completed++;
-              if (completed === drivers.length) {
-                resolve();
-              }
-              return;
-            }
-
-            try {
-              // Create a new object with the key as a property
-              const driverData = {
-                ...driver,
-                id: Number(driver.id),
-              };
-
-              const request = store.put(driverData); // Don't pass explicit key since we're using keyPath
-
-              request.onsuccess = () => {
-                completed++;
-                if (completed === drivers.length && !hasError) {
-                  resolve();
-                }
-              };
-
-              request.onerror = (event) => {
-                hasError = true;
-                console.error(
-                  "Error adding driver:",
-                  request.error,
-                  driverData
-                );
-                event.preventDefault(); // Prevent transaction abort
-                completed++;
-                if (completed === drivers.length) {
-                  reject(request.error);
-                }
-              };
-            } catch (e) {
-              hasError = true;
-              console.error("Error in put operation:", e, driver);
-              completed++;
-              if (completed === drivers.length) {
-                reject(e);
-              }
-            }
-          });
-        };
-
-        clearRequest.onerror = () => {
-          console.error("Error clearing store:", clearRequest.error);
-          reject(clearRequest.error);
-        };
-      } catch (error) {
-        console.error("Error in setDrivers:", error);
-        reject(error);
-      }
+    return new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
     });
   }
 
