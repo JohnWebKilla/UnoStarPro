@@ -788,17 +788,17 @@ export function CompanySideDialog({
           <SheetHeader className="px-6 py-4 border-b">
             <SheetTitle className="flex items-center gap-2">
               <Building2 className="h-5 w-5" />
-              {company.name}
+              {company?.name || "Untitled Company"}
               <Badge
                 variant="outline"
                 className={cn(
                   "ml-2 capitalize",
-                  company.status === "active"
+                  company?.status === "active"
                     ? "border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-950/50 dark:text-green-400"
                     : "border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950/50 dark:text-red-400"
                 )}
               >
-                {company.status}
+                {company?.status || "unknown"}
               </Badge>
             </SheetTitle>
           </SheetHeader>

@@ -647,32 +647,36 @@ export default function DriversTable() {
                   return (
                     <TableRow key={driver.id}>
                       <TableCell className="font-medium">
-                        {driver.name}
+                        {driver?.name || "N/A"}
                       </TableCell>
                       <TableCell>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 flex items-center gap-2"
-                          onClick={() =>
-                            window.open(`tel:${driver.phone_number}`)
-                          }
-                        >
-                          <Phone className="h-4 w-4" />
-                          {driver.phone_number}
-                        </Button>
+                        {driver?.phone_number ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 flex items-center gap-2"
+                            onClick={() =>
+                              window.open(`tel:${driver.phone_number}`)
+                            }
+                          >
+                            <Phone className="h-4 w-4" />
+                            {driver.phone_number}
+                          </Button>
+                        ) : (
+                          "N/A"
+                        )}
                       </TableCell>
-                      <TableCell>{driver.truck_number}</TableCell>
-                      <TableCell>{driver.solo_or_team}</TableCell>
+                      <TableCell>{driver?.truck_number || "N/A"}</TableCell>
+                      <TableCell>{driver?.solo_or_team || "N/A"}</TableCell>
                       <TableCell>
                         <Badge
                           variant={
-                            driver.status?.toLowerCase() === "active"
+                            driver?.status?.toLowerCase() === "active"
                               ? "default"
                               : "secondary"
                           }
                         >
-                          {getStatusDisplay(driver.status)}
+                          {getStatusDisplay(driver?.status) || "N/A"}
                         </Badge>
                       </TableCell>
                       <TableCell>

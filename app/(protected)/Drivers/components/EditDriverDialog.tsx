@@ -289,7 +289,7 @@ export function EditDriverDialog({
           </div>
         )}
         <DialogHeader>
-          <DialogTitle>Edit Driver: {driver.name}</DialogTitle>
+          <DialogTitle>Edit Driver: {driver?.name || "Untitled"}</DialogTitle>
         </DialogHeader>
 
         <Form {...form}>
