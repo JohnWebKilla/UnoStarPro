@@ -881,14 +881,14 @@ export function CompanySideDialog({
                           <h3 className="text-sm font-medium text-muted-foreground">
                             Company Name
                           </h3>
-                          <p className="text-base">{company.name}</p>
+                          <p className="text-base">{company?.name || "—"}</p>
                         </div>
                         <div className="space-y-1">
                           <h3 className="text-sm font-medium text-muted-foreground">
                             Status
                           </h3>
                           <p className="text-base capitalize">
-                            {company.status}
+                            {company?.status || "—"}
                           </p>
                         </div>
                         <div className="space-y-1">
@@ -896,7 +896,9 @@ export function CompanySideDialog({
                             Created
                           </h3>
                           <p className="text-base">
-                            {formatDate(company.created_at)}
+                            {company?.created_at
+                              ? formatDate(company.created_at)
+                              : "—"}
                           </p>
                         </div>
                         <div className="space-y-1">
@@ -904,7 +906,9 @@ export function CompanySideDialog({
                             Last Updated
                           </h3>
                           <p className="text-base">
-                            {formatDate(company.updated_at)}
+                            {company?.updated_at
+                              ? formatDate(company.updated_at)
+                              : "—"}
                           </p>
                         </div>
                       </div>
@@ -919,9 +923,9 @@ export function CompanySideDialog({
                               Contact Name
                             </h4>
                             <p className="text-base">
-                              {company.contact_first_name ||
-                              company.contact_last_name
-                                ? `${company.contact_first_name || ""} ${company.contact_last_name || ""}`.trim()
+                              {company?.contact_first_name ||
+                              company?.contact_last_name
+                                ? `${company?.contact_first_name || ""} ${company?.contact_last_name || ""}`.trim()
                                 : "—"}
                             </p>
                           </div>
@@ -930,7 +934,7 @@ export function CompanySideDialog({
                               Email
                             </h4>
                             <p className="text-base">
-                              {company.contact_email ? (
+                              {company?.contact_email ? (
                                 <a
                                   href={`mailto:${company.contact_email}`}
                                   className="text-primary hover:underline"
@@ -947,7 +951,7 @@ export function CompanySideDialog({
                               Phone
                             </h4>
                             <p className="text-base">
-                              {company.contact_phone ? (
+                              {company?.contact_phone ? (
                                 <a
                                   href={`tel:${company.contact_phone}`}
                                   className="text-primary hover:underline"
@@ -971,25 +975,27 @@ export function CompanySideDialog({
                             <h4 className="text-sm font-medium text-muted-foreground">
                               Street
                             </h4>
-                            <p className="text-base">{company.street || "—"}</p>
+                            <p className="text-base">
+                              {company?.street || "—"}
+                            </p>
                           </div>
                           <div className="space-y-1">
                             <h4 className="text-sm font-medium text-muted-foreground">
                               City
                             </h4>
-                            <p className="text-base">{company.city || "—"}</p>
+                            <p className="text-base">{company?.city || "—"}</p>
                           </div>
                           <div className="space-y-1">
                             <h4 className="text-sm font-medium text-muted-foreground">
                               State
                             </h4>
-                            <p className="text-base">{company.state || "—"}</p>
+                            <p className="text-base">{company?.state || "—"}</p>
                           </div>
                           <div className="space-y-1">
                             <h4 className="text-sm font-medium text-muted-foreground">
                               Zip Code
                             </h4>
-                            <p className="text-base">{company.zip || "—"}</p>
+                            <p className="text-base">{company?.zip || "—"}</p>
                           </div>
                         </div>
                       </div>
