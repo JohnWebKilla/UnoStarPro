@@ -23,7 +23,7 @@ import {
 import { useToast } from "@/components/ui/use-toast";
 
 interface UploadDocumentDialogProps {
-  driverId: number;
+  driverId: string | number;
   driverName: string;
   documentType: "license" | "medical_card" | "mvr";
   open: boolean;

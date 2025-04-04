@@ -29,7 +29,7 @@ export async function updateDriverInStripe(driver: Driver) {
       metadata: {
         driver_id: driver.id.toString(),
         name: driver.name,
-        phone_number: driver.phone_number,
+        phone_number: driver.phone_number || null,
       },
     });
 
@@ -83,7 +83,7 @@ export async function syncStripeConnectAccounts() {
             metadata: {
               driver_id: driver.id.toString(),
               name: driver.name,
-              phone_number: driver.phone_number,
+              phone_number: driver.phone_number || null,
             },
           });
 
@@ -195,7 +195,7 @@ export async function syncStripeConnectAccount(driverId: number) {
       metadata: {
         driver_id: driver.id.toString(),
         name: driver.name,
-        phone_number: driver.phone_number,
+        phone_number: driver.phone_number || null,
       },
     });
 
@@ -230,7 +230,7 @@ export async function syncStripeConnectAccount(driverId: number) {
         metadata: {
           driver_id: driver.id.toString(),
           name: driver.name,
-          phone_number: driver.phone_number,
+          phone_number: driver.phone_number || null,
         },
       });
 

@@ -28,9 +28,9 @@ export async function createStripeConnectAccount(driver: Driver) {
     },
     business_type: "individual",
     metadata: {
-      driver_id: driver.id.toString(),
-      name: driver.name,
-      phone_number: driver.phone_number,
+      driver_id: String(driver.id),
+      name: driver.name || null,
+      phone_number: driver.phone_number || null,
     },
   });
 
@@ -146,9 +146,9 @@ export async function updateDriverInStripe(driver: Driver) {
     // Update existing account in Stripe
     await stripe.accounts.update(driver.stripe_connect_account_id, {
       metadata: {
-        driver_id: driver.id.toString(),
-        name: driver.name,
-        phone_number: driver.phone_number,
+        driver_id: String(driver.id),
+        name: driver.name || null,
+        phone_number: driver.phone_number || null,
       },
     });
 
@@ -256,7 +256,7 @@ export async function createOrUpdateDriverProductAction(
   // Create a new price for the product
   const price = await stripe.prices.create({
     product: product.id,
-    unit_amount: Math.round(driver.subscription_amount * 100), // Convert to cents
+    unit_amount: Math.round((driver.subscription_amount || 0) * 100), // Convert to cents
     currency: "usd",
     recurring: {
       interval: frequency === "weekly" ? "week" : "month",
@@ -278,7 +278,7 @@ export async function createOrUpdateDriverProductAction(
 }
 
 export async function createCheckoutSessionAction(
-  driverId: number,
+  driverId: string,
   priceId: string
 ) {
   const supabase = await createClient();
@@ -293,6 +293,9 @@ export async function createCheckoutSessionAction(
     throw new Error("Driver not found or Stripe Connect account not set up");
   }
 
+  // Get subscription amount, defaulting to 0
+  const subscriptionAmount = driver.subscription_amount || 0;
+
   // Create a checkout session
   const session = await stripe.checkout.sessions.create({
     line_items: [
@@ -305,9 +308,7 @@ export async function createCheckoutSessionAction(
     success_url: `${process.env.NEXT_PUBLIC_APP_URL}/drivers/${driverId}?checkout=success`,
     cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/drivers/${driverId}?checkout=canceled`,
     payment_intent_data: {
-      application_fee_amount: Math.round(
-        driver.subscription_amount * 100 * 0.1
-      ), // 10% platform fee
+      application_fee_amount: Math.round(subscriptionAmount * 100 * 0.1), // 10% platform fee
       transfer_data: {
         destination: driver.stripe_connect_account_id,
       },
@@ -317,7 +318,7 @@ export async function createCheckoutSessionAction(
   return session.url;
 }
 
-export async function getStripeAccountStatusAction(driverId: number) {
+export async function getStripeAccountStatusAction(driverId: string) {
   const supabase = await createClient();
 
   const { data: driver } = await supabase
@@ -336,44 +337,54 @@ export async function getStripeAccountStatusAction(driverId: number) {
   return account;
 }
 
-export async function createStripeConnectAccountAction(driverId: number) {
+export async function createStripeConnectAccountAction(driverId: string) {
   const supabase = await createClient();
 
   // Get driver data
-  const { data: driver } = await supabase
+  const { data: driverData } = await supabase
     .from("drivers")
     .select("*")
     .eq("id", driverId)
     .single();
 
-  if (!driver) {
+  if (!driverData) {
     throw new Error("Driver not found");
   }
 
-  // Create a new Connect account
-  const account = await stripe.accounts.create({
-    type: "express",
-    country: "US",
-    capabilities: {
-      card_payments: { requested: true },
-      transfers: { requested: true },
+  // Convert database result to Driver type
+  const driver: Driver = {
+    id: driverData.id,
+    name: driverData.name,
+    phone: driverData.phone || "",
+    phone_number: driverData.phone_number || "",
+    truckNumber: driverData.truck_number || "",
+    truck_number: driverData.truck_number,
+    type: (driverData.solo_or_team || "solo") as "solo" | "team",
+    solo_or_team: driverData.solo_or_team,
+    status: driverData.status as
+      | "active"
+      | "inactive"
+      | "terminated"
+      | "pending",
+    documents: [],
+    subscription: {
+      id: driverData.stripe_connect_account_id || "",
+      status: "disconnected",
+      amount: driverData.subscription_amount || 0,
+      info: "",
     },
-    business_type: "individual",
-    metadata: {
-      driver_id: driver.id.toString(),
-      name: driver.name,
-      phone_number: driver.phone_number,
-    },
-  });
+    subscription_amount: driverData.subscription_amount || 0,
+    subscription_frequency: driverData.subscription_frequency,
+    stripe_product_id: driverData.stripe_product_id,
+    stripe_price_id: driverData.stripe_price_id,
+    stripe_connect_account_id: driverData.stripe_connect_account_id,
+    company_id: driverData.company_id,
+    createdAt: driverData.created_at || new Date().toISOString(),
+    updatedAt: driverData.updated_at || new Date().toISOString(),
+  };
 
-  // Update driver with Stripe Connect account ID
-  await supabase
-    .from("drivers")
-    .update({
-      stripe_connect_account_id: account.id,
-      last_synced_at: new Date().toISOString(),
-    })
-    .eq("id", driver.id);
+  // Create the Stripe Connect account using the working function
+  const account = await createStripeConnectAccount(driver);
 
   // Create an account link for onboarding
   const accountLink = await stripe.accountLinks.create({

@@ -8,12 +8,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
 
 export const dynamic = "force-dynamic";
 
-type Props = {
-  params: { id: string };
-  searchParams: { [key: string]: string | string[] | undefined };
-};
-
-export async function POST(request: NextRequest, props: Props) {
+export async function POST(req: NextRequest): Promise<Response> {
   if (!stripe) {
     return NextResponse.json(
       { error: "Stripe is not configured" },
@@ -23,7 +18,11 @@ export async function POST(request: NextRequest, props: Props) {
 
   try {
     const supabase = await createClient();
-    const { id } = props.params;
+
+    // Extract driver ID from the URL
+    const url = new URL(req.url);
+    const segments = url.pathname.split("/");
+    const id = segments[segments.length - 2]; // assumes /api/drivers/[id]/sync
 
     // Get driver details
     const { data: driver, error: driverError } = await supabase
@@ -42,21 +41,16 @@ export async function POST(request: NextRequest, props: Props) {
     // If driver already has a Stripe product, update it
     if (driver.stripe_product_id) {
       try {
-        // Update existing product
         product = await stripe.products.update(driver.stripe_product_id, {
           name: driver.name,
-          metadata: {
-            driver_id: driver.id.toString(),
-          },
+          metadata: { driver_id: driver.id.toString() },
         });
 
-        // Update or create price if subscription amount changed
         if (driver.stripe_price_id) {
           const existingPrice = await stripe.prices.retrieve(
             driver.stripe_price_id
           );
           if (existingPrice.unit_amount !== driver.subscription_amount * 100) {
-            // Create new price if amount changed
             price = await stripe.prices.create({
               product: product.id,
               unit_amount: driver.subscription_amount * 100,
@@ -72,9 +66,8 @@ export async function POST(request: NextRequest, props: Props) {
             price = existingPrice;
           }
         }
-      } catch (stripeError) {
-        // If product not found in Stripe, create new one
-        if ((stripeError as any).code === "resource_missing") {
+      } catch (stripeError: any) {
+        if (stripeError.code === "resource_missing") {
           product = null;
         } else {
           throw stripeError;
@@ -82,16 +75,12 @@ export async function POST(request: NextRequest, props: Props) {
       }
     }
 
-    // If no product exists or couldn't be updated, create new one
     if (!product) {
       product = await stripe.products.create({
         name: driver.name,
-        metadata: {
-          driver_id: driver.id.toString(),
-        },
+        metadata: { driver_id: driver.id.toString() },
       });
 
-      // Create new price
       price = await stripe.prices.create({
         product: product.id,
         unit_amount: driver.subscription_amount * 100,
@@ -103,7 +92,6 @@ export async function POST(request: NextRequest, props: Props) {
       });
     }
 
-    // Update driver with Stripe product and price IDs
     const { error: updateError } = await supabase
       .from("drivers")
       .update({

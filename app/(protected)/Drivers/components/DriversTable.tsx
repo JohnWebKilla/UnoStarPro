@@ -79,19 +79,20 @@ const DialogDescription = dynamic(
   { ssr: false }
 );
 
+// Document interface with all required properties
 interface Document {
   id: number;
-  driver_id: number;
   expiration_date: string;
   license_file_url?: string;
   file_link?: string;
   mvr_file_url?: string;
-  created_at: string;
-  updated_at: string;
-  status?: string;
-  file_name?: string;
   file_url?: string;
   url?: string;
+  file_name?: string;
+  status?: string;
+  created_at: string;
+  updated_at: string;
+  driver_id: number;
 }
 
 interface DocumentWithType extends Document {
@@ -99,13 +100,16 @@ interface DocumentWithType extends Document {
   name: string;
 }
 
+// Status type definition
+type DriverStatus = "active" | "inactive" | "terminated" | "pending" | "all";
+
 export default function DriversTable() {
   const { drivers, error, refreshDrivers } = useDrivers();
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [currentPage, setCurrentPage] = useState(1);
-  const driversPerPage = 5;
+  const driversPerPageNum = 5;
   const [editingDriver, setEditingDriver] = useState<Driver | null>(null);
   const [viewingDocuments, setViewingDocuments] = useState<Driver | null>(null);
   const [deletingDriver, setDeletingDriver] = useState<Driver | null>(null);
@@ -187,27 +191,173 @@ export default function DriversTable() {
     return expiringDocs;
   };
 
+  // Helper function to safely check array length
+  const safeArrayLength = (arr: any[] | undefined): number => arr?.length ?? 0;
+
+  // Helper function to safely map array
+  const safeArrayMap = <T extends any>(
+    arr: T[] | undefined,
+    callback: (item: T, index: number) => any
+  ): any[] => arr?.map(callback) ?? [];
+
   const filteredDrivers = drivers.filter((driver) => {
+    const searchTermLower = searchTerm.toLowerCase();
+
+    // Handle both legacy and new fields for phone and truck number
+    const hasPhoneMatch =
+      (driver.phone_number?.includes(searchTerm) ?? false) ||
+      (driver.phone?.includes(searchTerm) ?? false);
+    const hasTruckMatch =
+      (driver.truck_number?.toLowerCase().includes(searchTermLower) ?? false) ||
+      (driver.truckNumber?.toLowerCase().includes(searchTermLower) ?? false);
+
     const matchesSearch =
-      driver.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      driver.phone_number.includes(searchTerm) ||
-      driver.truck_number.toLowerCase().includes(searchTerm.toLowerCase());
+      driver.name.toLowerCase().includes(searchTermLower) ||
+      hasPhoneMatch ||
+      hasTruckMatch;
+
+    // Handle status comparison - normalize status to lowercase
+    const normalizedDriverStatus = driver.status?.toLowerCase() ?? "";
+    const normalizedStatusFilter = statusFilter.toLowerCase();
 
     const matchesStatus =
-      statusFilter === "all" ||
-      (statusFilter === "active" && driver.status === "Active") ||
-      (statusFilter === "inactive" && driver.status !== "Active");
+      normalizedStatusFilter === "all" ||
+      normalizedDriverStatus === normalizedStatusFilter;
 
     return matchesSearch && matchesStatus;
   });
 
-  // Calculate pagination
-  const totalPages = Math.ceil(filteredDrivers.length / driversPerPage);
-  const startIndex = (currentPage - 1) * driversPerPage;
-  const paginatedDrivers = filteredDrivers.slice(
-    startIndex,
-    startIndex + driversPerPage
+  // Pagination setup
+  const totalPages = Math.ceil(filteredDrivers.length / driversPerPageNum);
+  const startIndex = (currentPage - 1) * driversPerPageNum;
+  const endIndex = Math.min(
+    startIndex + driversPerPageNum,
+    filteredDrivers.length
   );
+  const paginatedDrivers = filteredDrivers.slice(startIndex, endIndex);
+
+  // Safe document rendering functions
+  const safeRenderDocuments = (docs: Document[] | undefined | null) => {
+    if (!docs?.length) {
+      return null;
+    }
+    return docs.map((doc) => {
+      const expDate = parseISO(doc.expiration_date);
+      const currentDate = new Date();
+      const daysLeft =
+        Math.floor(
+          differenceInDays(endOfDay(expDate), startOfDay(currentDate))
+        ) + 1;
+      const isExpiringSoon = daysLeft <= 7 && daysLeft >= 0;
+      const isExpired = daysLeft < 0;
+
+      return (
+        <div
+          key={doc.id}
+          className={cn(
+            "flex items-center justify-between p-3 rounded-lg border",
+            isExpired && "border-red-200 bg-red-50",
+            isExpiringSoon && "border-yellow-200 bg-yellow-50"
+          )}
+        >
+          <div className="space-y-1">
+            <p className="font-medium">Document</p>
+            <p className="text-sm text-muted-foreground">
+              Expires: {format(expDate, "MM/dd/yyyy")}
+            </p>
+          </div>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => {
+                if (viewingDocuments) {
+                  setUploadingDocument({
+                    driver: viewingDocuments,
+                    type: "license",
+                  });
+                }
+              }}
+              title="Replace Document"
+            >
+              <Upload className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-red-600 hover:text-red-700 hover:bg-red-50"
+              onClick={() =>
+                setDeletingDocument({
+                  id: doc.id,
+                  type: "license",
+                  name: "Document",
+                })
+              }
+              title="Delete Document"
+            >
+              <Trash className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => {
+                const url =
+                  doc.license_file_url || doc.file_link || doc.mvr_file_url;
+                if (url) {
+                  window.open(url, "_blank");
+                }
+              }}
+              title="View Document"
+              disabled={
+                !doc.license_file_url && !doc.file_link && !doc.mvr_file_url
+              }
+            >
+              <FileText className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      );
+    });
+  };
+
+  // Document handling functions
+  const hasDocuments = (documents: Document[] | undefined): boolean => {
+    return safeArrayLength(documents) > 0;
+  };
+
+  // Document sections with safe rendering
+  const renderLicenseSection = () => {
+    const docs = viewingDocuments?.driver_licenses;
+    return docs?.length ? (
+      <div className="space-y-2">{safeRenderDocuments(docs)}</div>
+    ) : (
+      <div className="text-center py-6 text-muted-foreground">
+        No license documents uploaded
+      </div>
+    );
+  };
+
+  const renderMedicalSection = () => {
+    const docs = viewingDocuments?.medical_cards;
+    return docs?.length ? (
+      <div className="space-y-2">{safeRenderDocuments(docs)}</div>
+    ) : (
+      <div className="text-center py-6 text-muted-foreground">
+        No medical cards uploaded
+      </div>
+    );
+  };
+
+  const renderMvrSection = () => {
+    const docs = viewingDocuments?.mvr_files;
+    return docs?.length ? (
+      <div className="space-y-2">{safeRenderDocuments(docs)}</div>
+    ) : (
+      <div className="text-center py-6 text-muted-foreground">
+        No MVR files uploaded
+      </div>
+    );
+  };
 
   const updateDriverDocuments = async () => {
     // First refresh the drivers data
@@ -380,6 +530,12 @@ export default function DriversTable() {
     }
   };
 
+  // Helper function for status display
+  const getStatusDisplay = (status: string | undefined) => {
+    if (!status) return "";
+    return status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
+  };
+
   if (error) {
     return (
       <Card className="border-destructive">
@@ -438,9 +594,7 @@ export default function DriversTable() {
                   <Filter className="h-4 w-4" />
                   {statusFilter === "all"
                     ? "All Status"
-                    : statusFilter === "active"
-                      ? "Active"
-                      : "Inactive"}
+                    : getStatusDisplay(statusFilter)}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent>
@@ -452,6 +606,12 @@ export default function DriversTable() {
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setStatusFilter("inactive")}>
                   Inactive
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setStatusFilter("terminated")}>
+                  Terminated
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setStatusFilter("pending")}>
+                  Pending
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -507,10 +667,12 @@ export default function DriversTable() {
                       <TableCell>
                         <Badge
                           variant={
-                            driver.status === "Active" ? "default" : "secondary"
+                            driver.status?.toLowerCase() === "active"
+                              ? "default"
+                              : "secondary"
                           }
                         >
-                          {driver.status}
+                          {getStatusDisplay(driver.status)}
                         </Badge>
                       </TableCell>
                       <TableCell>
@@ -600,9 +762,8 @@ export default function DriversTable() {
         {filteredDrivers.length > 0 && (
           <div className="flex items-center justify-between space-x-2 py-4">
             <div className="text-sm text-muted-foreground">
-              Showing {startIndex + 1} to{" "}
-              {Math.min(startIndex + driversPerPage, filteredDrivers.length)} of{" "}
-              {filteredDrivers.length} drivers
+              Showing {startIndex + 1} to {endIndex} of {filteredDrivers.length}{" "}
+              drivers
             </div>
             <div className="flex items-center space-x-2">
               <Button
@@ -663,8 +824,7 @@ export default function DriversTable() {
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <h3 className="font-semibold">Driver License</h3>
-                  {(!viewingDocuments.driver_licenses ||
-                    viewingDocuments.driver_licenses.length === 0) && (
+                  {!viewingDocuments?.driver_licenses?.length && (
                     <Button
                       variant="outline"
                       size="sm"
@@ -679,104 +839,7 @@ export default function DriversTable() {
                     </Button>
                   )}
                 </div>
-                {viewingDocuments.driver_licenses?.length > 0 ? (
-                  <div className="space-y-2">
-                    {viewingDocuments.driver_licenses.map((doc) => {
-                      const expDate = parseISO(doc.expiration_date);
-                      const currentDate = new Date();
-                      const daysLeft =
-                        Math.floor(
-                          differenceInDays(
-                            endOfDay(expDate),
-                            startOfDay(currentDate)
-                          )
-                        ) + 1;
-                      const isExpiringSoon = daysLeft <= 7 && daysLeft >= 0;
-                      const isExpired = daysLeft < 0;
-
-                      return (
-                        <div
-                          key={doc.id}
-                          className={cn(
-                            "flex items-center justify-between p-3 rounded-lg border",
-                            isExpired && "border-red-200 bg-red-50",
-                            isExpiringSoon && "border-yellow-200 bg-yellow-50"
-                          )}
-                        >
-                          <div className="space-y-1">
-                            <p className="font-medium">License Document</p>
-                            <p className="text-sm text-muted-foreground">
-                              Expires: {format(expDate, "MM/dd/yyyy")}
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            {(isExpiringSoon || isExpired) && (
-                              <div
-                                className={cn(
-                                  "px-2 py-1 rounded text-xs font-medium",
-                                  isExpired
-                                    ? "bg-red-100 text-red-700"
-                                    : "bg-yellow-100 text-yellow-700"
-                                )}
-                              >
-                                {isExpired
-                                  ? "Expired"
-                                  : `${daysLeft} days left`}
-                              </div>
-                            )}
-                            <div className="flex items-center gap-1">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() =>
-                                  setUploadingDocument({
-                                    driver: viewingDocuments,
-                                    type: "license",
-                                  })
-                                }
-                                title="Replace License"
-                              >
-                                <Upload className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                                onClick={() =>
-                                  setDeletingDocument({
-                                    id: doc.id,
-                                    type: "license",
-                                    name: "License Document",
-                                  })
-                                }
-                                title="Delete License"
-                              >
-                                <Trash className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => {
-                                  if (doc.license_file_url) {
-                                    window.open(doc.license_file_url, "_blank");
-                                  }
-                                }}
-                                title="View License"
-                                disabled={!doc.license_file_url}
-                              >
-                                <FileText className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="text-center py-6 text-muted-foreground">
-                    No license documents uploaded
-                  </div>
-                )}
+                {renderLicenseSection()}
               </div>
 
               {/* Medical Card Section */}
@@ -796,102 +859,7 @@ export default function DriversTable() {
                     Upload New
                   </Button>
                 </div>
-                {viewingDocuments.medical_cards?.length > 0 ? (
-                  <div className="space-y-2">
-                    {viewingDocuments.medical_cards.map((doc) => {
-                      const expDate = parseISO(doc.expiration_date);
-                      const currentDate = new Date();
-                      const daysLeft =
-                        Math.floor(
-                          differenceInDays(
-                            endOfDay(expDate),
-                            startOfDay(currentDate)
-                          )
-                        ) + 1;
-                      const isExpiringSoon = daysLeft <= 7 && daysLeft >= 0;
-                      const isExpired = daysLeft < 0;
-
-                      return (
-                        <div
-                          key={doc.id}
-                          className={cn(
-                            "flex items-center justify-between p-3 rounded-lg border",
-                            isExpired && "border-red-200 bg-red-50",
-                            isExpiringSoon && "border-yellow-200 bg-yellow-50"
-                          )}
-                        >
-                          <div className="space-y-1">
-                            <p className="font-medium">Medical Card</p>
-                            <p className="text-sm text-muted-foreground">
-                              Expires: {format(expDate, "MM/dd/yyyy")}
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            {(isExpiringSoon || isExpired) && (
-                              <div
-                                className={cn(
-                                  "px-2 py-1 rounded text-xs font-medium",
-                                  isExpired
-                                    ? "bg-red-100 text-red-700"
-                                    : "bg-yellow-100 text-yellow-700"
-                                )}
-                              >
-                                {isExpired
-                                  ? "Expired"
-                                  : `${daysLeft} days left`}
-                              </div>
-                            )}
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() =>
-                                setUploadingDocument({
-                                  driver: viewingDocuments,
-                                  type: "medical_card",
-                                })
-                              }
-                              title="Replace Medical Card"
-                            >
-                              <Upload className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                              onClick={() =>
-                                setDeletingDocument({
-                                  id: doc.id,
-                                  type: "medical_card",
-                                  name: "Medical Card",
-                                })
-                              }
-                              title="Delete Medical Card"
-                            >
-                              <Trash className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => {
-                                if (doc.file_link) {
-                                  window.open(doc.file_link, "_blank");
-                                }
-                              }}
-                              title="View Medical Card"
-                              disabled={!doc.file_link}
-                            >
-                              <FileText className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="text-center py-6 text-muted-foreground">
-                    No medical cards uploaded
-                  </div>
-                )}
+                {renderMedicalSection()}
               </div>
 
               {/* MVR Files Section */}
@@ -911,102 +879,7 @@ export default function DriversTable() {
                     Upload New
                   </Button>
                 </div>
-                {viewingDocuments.mvr_files?.length > 0 ? (
-                  <div className="space-y-2">
-                    {viewingDocuments.mvr_files.map((doc) => {
-                      const expDate = parseISO(doc.expiration_date);
-                      const currentDate = new Date();
-                      const daysLeft =
-                        Math.floor(
-                          differenceInDays(
-                            endOfDay(expDate),
-                            startOfDay(currentDate)
-                          )
-                        ) + 1;
-                      const isExpiringSoon = daysLeft <= 7 && daysLeft >= 0;
-                      const isExpired = daysLeft < 0;
-
-                      return (
-                        <div
-                          key={doc.id}
-                          className={cn(
-                            "flex items-center justify-between p-3 rounded-lg border",
-                            isExpired && "border-red-200 bg-red-50",
-                            isExpiringSoon && "border-yellow-200 bg-yellow-50"
-                          )}
-                        >
-                          <div className="space-y-1">
-                            <p className="font-medium">MVR File</p>
-                            <p className="text-sm text-muted-foreground">
-                              Expires: {format(expDate, "MM/dd/yyyy")}
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            {(isExpiringSoon || isExpired) && (
-                              <div
-                                className={cn(
-                                  "px-2 py-1 rounded text-xs font-medium",
-                                  isExpired
-                                    ? "bg-red-100 text-red-700"
-                                    : "bg-yellow-100 text-yellow-700"
-                                )}
-                              >
-                                {isExpired
-                                  ? "Expired"
-                                  : `${daysLeft} days left`}
-                              </div>
-                            )}
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() =>
-                                setUploadingDocument({
-                                  driver: viewingDocuments,
-                                  type: "mvr",
-                                })
-                              }
-                              title="Replace MVR File"
-                            >
-                              <Upload className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                              onClick={() =>
-                                setDeletingDocument({
-                                  id: doc.id,
-                                  type: "mvr",
-                                  name: "MVR File",
-                                })
-                              }
-                              title="Delete MVR File"
-                            >
-                              <Trash className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => {
-                                if (doc.mvr_file_url) {
-                                  window.open(doc.mvr_file_url, "_blank");
-                                }
-                              }}
-                              title="View MVR File"
-                              disabled={!doc.mvr_file_url}
-                            >
-                              <FileText className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="text-center py-6 text-muted-foreground">
-                    No MVR files uploaded
-                  </div>
-                )}
+                {renderMvrSection()}
               </div>
             </div>
 
@@ -1024,7 +897,7 @@ export default function DriversTable() {
       {uploadingDocument && (
         <UploadDocumentDialog
           key={`upload-dialog-${dialogKey}`}
-          driverId={uploadingDocument.driver.id}
+          driverId={Number(uploadingDocument.driver.id)}
           driverName={uploadingDocument.driver.name}
           documentType={uploadingDocument.type}
           open={!!uploadingDocument}

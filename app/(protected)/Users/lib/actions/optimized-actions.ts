@@ -10,8 +10,7 @@ import {
   getUserAction,
   clearUserCachesAction,
 } from "./server-actions";
-import { User } from "./types";
-import { USER_LIST_KEY } from "./redis-client";
+import { User } from "../types/types";
 
 // Define response type for cached data
 export interface CacheResponse<T> {

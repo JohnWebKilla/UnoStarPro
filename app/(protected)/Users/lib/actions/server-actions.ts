@@ -4,7 +4,7 @@ import { createClient } from "@/utils/supabase/server";
 import { revalidatePath } from "next/cache";
 import { getCache, setCache } from "@/lib/redis";
 import { clearUserListCache, clearUserDetailCache } from "./cache";
-import { User, UserRole } from "./types";
+import { User } from "../types/types";
 import { USER_LIST_KEY, USER_DETAIL_KEY, CACHE_EXPIRATION } from "./constants";
 
 // Helper function for retrying database operations

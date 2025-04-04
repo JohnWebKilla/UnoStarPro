@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { calculateMonthlyPayroll } from "../actions/payroll";
-import { PayrollSummary } from "../types/payroll";
+import { calculateMonthlyPayroll } from "../../actions/payroll";
+import { PayrollSummary } from "../../types/payroll";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {

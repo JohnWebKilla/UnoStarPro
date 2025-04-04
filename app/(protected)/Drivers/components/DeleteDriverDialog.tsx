@@ -13,7 +13,7 @@ import { Trash, Loader2 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 
 interface DeleteDriverDialogProps {
-  driverId: number;
+  driverId: string;
   driverName: string;
   onDriverDeleted: () => Promise<void>;
   open?: boolean;
