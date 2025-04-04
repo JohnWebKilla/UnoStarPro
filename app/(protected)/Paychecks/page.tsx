@@ -53,6 +53,7 @@ import {
   getMonthlyPayrollSummaries,
   clearPayrollCaches,
 } from "./actions/client-actions";
+import { PaychecksHeader } from "./components/paychecks-header";
 
 // Add this type for payment status
 type OverallStatus = "paid" | "partially_paid" | "pending" | "unpaid";
@@ -389,147 +390,51 @@ function PaychecksContent() {
   };
 
   return (
-    <div className="p-6 space-y-6">
-      {/* Header Section */}
-      <div className="flex justify-between items-center">
-        <div className="space-y-0.5">
-          <h2 className="text-2xl font-bold tracking-tight">Paychecks</h2>
-          <div className="flex items-center">
-            <p className="text-muted-foreground">
-              Manage employee payroll transactions
-            </p>
-            {!isLoading && renderDataSourceIndicator()}
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
+    <ErrorBoundary>
+      <div className="space-y-4">
+        <PaychecksHeader
+          summaries={summaries}
+          loading={isLoading}
+          dataSource={dataSource}
+          selectedMonth={selectedMonth}
+          onGeneratePayroll={() => setIsAdvancedPayrollDialogOpen(true)}
+          onClearCache={invalidateCache}
+        />
+
+        <div className="flex items-center justify-between">
           <MonthPicker
             selected={selectedMonth}
             onMonthChange={handleMonthChange}
           />
-          <Button
-            variant="outline"
-            onClick={invalidateCache}
-            className="h-9 relative z-0"
-            disabled={isInvalidating}
-          >
-            {isInvalidating ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 h-4 w-4" />
-            )}
-            Clear Cache
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="outline"
-                size="icon"
-                className="h-9 relative z-0"
-              >
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>Actions</DropdownMenuLabel>
-              <DropdownMenuItem
-                onClick={() => setIsAdvancedPayrollDialogOpen(true)}
-              >
-                <Calculator className="mr-2 h-4 w-4" />
-                Generate Payroll
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <Button
-            onClick={() => setIsPayrollDialogOpen(true)}
-            className="h-9 relative z-0"
-          >
-            <PlusCircle className="mr-2 h-4 w-4" />
-            Add Transaction
-          </Button>
         </div>
-      </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Total Payroll
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              ${summary.total.toFixed(2)}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              For {format(selectedMonth, "MMMM yyyy")}
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Paid Amount
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-green-600">
-              ${summary.paid.toFixed(2)}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              {((summary.paid / summary.total) * 100 || 0).toFixed(1)}% of total
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Pending Amount
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-amber-600">
-              ${summary.pending.toFixed(2)}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              {((summary.pending / summary.total) * 100 || 0).toFixed(1)}% of
-              total
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Data Table */}
-      <DataTable
-        columns={columns}
-        data={ensureArray(summaries)}
-        isLoading={isLoading || isInvalidating}
-        onViewTransactions={handleViewTransactions}
-        lastUpdatedUserId={lastUpdatedUserId}
-        emptyMessage={`No payroll data found for ${format(selectedMonth, "MMMM yyyy")}`}
-      />
-
-      <PayrollDialog
-        open={isPayrollDialogOpen}
-        onOpenChange={setIsPayrollDialogOpen}
-        onSuccess={handlePayrollDialogSuccess}
-      />
-
-      {selectedUserId && (
-        <TransactionsDialog
-          open={isTransactionsDialogOpen}
-          onOpenChange={handleTransactionsDialogClose}
-          userId={selectedUserId}
-          onTransactionUpdated={handleTransactionUpdated}
+        <DataTable
+          columns={columns}
+          data={summaries}
+          isLoading={isLoading}
+          onViewTransactions={handleViewTransactions}
+          lastUpdatedUserId={lastUpdatedUserId}
+          emptyMessage={`No payroll data found for ${format(selectedMonth, "MMMM yyyy")}`}
         />
-      )}
 
-      <GeneratePayrollDialog
-        open={isAdvancedPayrollDialogOpen}
-        onOpenChange={setIsAdvancedPayrollDialogOpen}
-        onSuccess={handlePayrollDialogSuccess}
-      />
-    </div>
+        {isAdvancedPayrollDialogOpen && (
+          <GeneratePayrollDialog
+            open={isAdvancedPayrollDialogOpen}
+            onOpenChange={setIsAdvancedPayrollDialogOpen}
+            onSuccess={handlePayrollDialogSuccess}
+          />
+        )}
+
+        {isTransactionsDialogOpen && selectedUserId && (
+          <TransactionsDialog
+            open={isTransactionsDialogOpen}
+            onOpenChange={handleTransactionsDialogClose}
+            userId={selectedUserId}
+            onTransactionUpdated={handleTransactionUpdated}
+          />
+        )}
+      </div>
+    </ErrorBoundary>
   );
 }
 
