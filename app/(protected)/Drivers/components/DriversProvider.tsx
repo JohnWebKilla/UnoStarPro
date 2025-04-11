@@ -1,6 +1,13 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  ReactNode,
+} from "react";
 import { toast } from "@/components/ui/use-toast";
 import { getDrivers, clearDriverCaches } from "../actions";
 import { Driver, CacheResponse } from "../types";
@@ -13,11 +20,12 @@ import {
   RealtimeChannel,
   RealtimePostgresChangesPayload,
 } from "@supabase/supabase-js";
+import { getDriversAction, updateDriverAction } from "../server-actions";
 
-export interface DriversContextType {
+interface DriversContextType {
   drivers: Driver[];
   loading: boolean;
-  error: string | null;
+  error: Error | null;
   dataSource: string;
   companies: Array<{ id: number; name: string }>;
   timingInfo: {
@@ -28,16 +36,16 @@ export interface DriversContextType {
   refreshDrivers: (skipCache?: boolean) => Promise<void>;
   clearCache: () => Promise<void>;
   syncWithServer: () => Promise<void>;
-  updateDrivers: (id: number, data: Partial<Driver>) => Promise<void>;
+  updateDrivers: (id: number, data: Partial<Driver>) => Promise<Driver>;
 }
 
 const DriversContext = createContext<DriversContextType | undefined>(undefined);
 
-export function DriversProvider({ children }: { children: React.ReactNode }) {
+export function DriversProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Error | null>(null);
   const [dataSource, setDataSource] = useState<string>("loading");
   const [companies, setCompanies] = useState<
     Array<{ id: number; name: string }>
@@ -114,74 +122,44 @@ export function DriversProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const fetchDrivers = async (skipCache: boolean = false) => {
+  const fetchDrivers = useCallback(async (useCache = true) => {
     try {
+      setLoading(true);
       setError(null);
-      // Only set loading if we don't have any data yet
-      if (!drivers.length) {
-        setLoading(true);
-      }
-      setDataSource("loading");
 
-      // If skipCache is true, clear all caches
-      if (skipCache) {
-        await clearDriverCaches();
-        await driversDB.clearAll();
-      } else {
-        // Try to get data from IndexedDB first
+      // If useCache is false, skip IndexedDB and fetch directly from server
+      let data: Driver[] = [];
+      if (useCache) {
+        // Try to get from IndexedDB first
         try {
-          const cachedDrivers = await driversDB.getAllDrivers();
-          if (cachedDrivers && cachedDrivers.length > 0) {
-            // Don't show loading state for cached data
+          data = await driversDB.getAllDrivers();
+          if (data && data.length > 0) {
+            setDrivers(data);
             setLoading(false);
-            updateDriversState(cachedDrivers, "IndexedDB", {
-              total: 0,
-              source: "indexeddb",
-            });
-            // Still fetch in background to update cache, but don't update loading state
-            fetchAndUpdateCache(false);
             return;
           }
-        } catch (error) {
-          if (error instanceof Error && error.name === "VersionError") {
-            await cleanupDatabase();
-            // Retry fetching after cleanup
-            await fetchDrivers(skipCache);
-            return;
-          }
-          console.error("Error reading from IndexedDB:", error);
+        } catch (e) {
+          console.error("Error reading from IndexedDB:", e);
         }
       }
 
-      // Fetch from API and update all caches
-      await fetchAndUpdateCache(true);
-    } catch (err) {
-      console.error("Error fetching drivers:", err);
-      const errorMessage =
-        err instanceof Error ? err.message : "An unexpected error occurred";
-      setError(errorMessage);
-      setDataSource("error");
-      setLoading(false);
+      // Fetch from server
+      data = await getDriversAction();
+      setDrivers(data);
 
-      if (
-        errorMessage.includes("401") ||
-        errorMessage.includes("Unauthorized")
-      ) {
-        toast({
-          title: "Authentication Error",
-          description: "Please log in again to continue.",
-          variant: "destructive",
-        });
-        router.push("/login");
-      } else {
-        toast({
-          title: "Error",
-          description: "Failed to load drivers. Please try again later.",
-          variant: "destructive",
-        });
+      // Update IndexedDB
+      try {
+        await driversDB.setDrivers(data);
+      } catch (e) {
+        console.error("Error writing to IndexedDB:", e);
       }
+    } catch (e) {
+      setError(e instanceof Error ? e : new Error(String(e)));
+      console.error("Error fetching drivers:", e);
+    } finally {
+      setLoading(false);
     }
-  };
+  }, []);
 
   const fetchAndUpdateCache = async (updateLoadingState: boolean = true) => {
     try {
@@ -251,54 +229,73 @@ export function DriversProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const syncWithServer = async () => {
-    setLoading(true);
-    setError(null);
+  const syncWithServer = useCallback(async () => {
     try {
-      const response = await fetch("/api/drivers/sync", {
-        method: "POST",
-      });
-      if (!response.ok) {
-        throw new Error("Failed to sync with server");
+      setLoading(true);
+      // Force fetch from server
+      const data = await getDriversAction();
+
+      // Update state with fresh data
+      setDrivers(data);
+
+      // Update IndexedDB
+      try {
+        await driversDB.clearAll(); // Clear existing cache
+        await driversDB.setDrivers(data);
+      } catch (e) {
+        console.error("Error updating IndexedDB:", e);
       }
-      await fetchDrivers();
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to sync with server"
-      );
-      throw err;
+
+      setDataSource("Database");
+      setTimingInfo({
+        total: 0,
+        source: "server",
+      });
+    } catch (error) {
+      console.error("Error syncing with server:", error);
+      throw error;
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const updateDrivers = async (id: number, data: Partial<Driver>) => {
-    try {
-      const response = await fetch(`/api/drivers/${id}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(data),
-      });
+  const updateDrivers = useCallback(
+    async (id: number, data: Partial<Driver>) => {
+      try {
+        // First update the server
+        const updatedDriver = await updateDriverAction(id, data);
 
-      if (!response.ok) {
-        throw new Error("Failed to update driver");
+        // Then update local state
+        setDrivers((prev) =>
+          prev.map((driver) =>
+            driver.id.toString() === id.toString()
+              ? { ...driver, ...updatedDriver }
+              : driver
+          )
+        );
+
+        // Update IndexedDB
+        try {
+          const currentDrivers = await driversDB.getAllDrivers();
+          const updatedDrivers = currentDrivers.map((driver) =>
+            driver.id.toString() === id.toString()
+              ? { ...driver, ...updatedDriver }
+              : driver
+          );
+          await driversDB.setDrivers(updatedDrivers);
+        } catch (e) {
+          console.error("Error updating IndexedDB:", e);
+        }
+
+        // Return the updated driver for chaining
+        return updatedDriver;
+      } catch (error) {
+        console.error("Error updating driver:", error);
+        throw error; // Re-throw to be handled by the caller
       }
-
-      // Update local state
-      const updatedDrivers = drivers.map((driver) =>
-        Number(driver.id) === id ? { ...driver, ...data } : driver
-      );
-      setDrivers(updatedDrivers);
-
-      // Update IndexedDB
-      await driversDB.setDrivers(updatedDrivers);
-    } catch (error) {
-      console.error("Error updating driver:", error);
-      throw error;
-    }
-  };
+    },
+    [updateDriverAction]
+  );
 
   useEffect(() => {
     const loadInitialData = async () => {
@@ -337,7 +334,7 @@ export function DriversProvider({ children }: { children: React.ReactNode }) {
         } else {
           console.error("Error in loadInitialData:", error);
           setLoading(false);
-          setError("Failed to load data");
+          setError(error instanceof Error ? error : new Error(String(error)));
         }
       }
     };

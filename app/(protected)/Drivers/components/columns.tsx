@@ -22,6 +22,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { EditDriverDialog } from "./EditDriverDialog";
 import { useDrivers } from "./DriversProvider";
+import { differenceInDays, formatDistanceToNow, format } from "date-fns";
 
 function formatCurrency(amount: number) {
   // If amount is already in dollars (less than 1000), treat as dollars
@@ -85,6 +86,33 @@ function getStatusBadge(status: string | undefined | null) {
 }
 
 export const columns: ColumnDef<Driver>[] = [
+  {
+    accessorKey: "created_at",
+    header: ({ column }) => {
+      return (
+        <Button
+          variant="ghost"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+          className="p-0 hover:bg-transparent"
+        >
+          Created At
+          <ArrowUpDown className="ml-2 h-4 w-4" />
+        </Button>
+      );
+    },
+    cell: ({ row }) => {
+      const date = new Date(row.getValue("created_at"));
+      const daysDiff = differenceInDays(new Date(), date);
+
+      return (
+        <span className="text-slate-900 dark:text-slate-100">
+          {daysDiff <= 7
+            ? formatDistanceToNow(date, { addSuffix: true })
+            : format(date, "MMM d, yyyy")}
+        </span>
+      );
+    },
+  },
   {
     accessorKey: "name",
     header: ({ column }) => {

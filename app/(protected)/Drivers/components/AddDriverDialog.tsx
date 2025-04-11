@@ -271,8 +271,8 @@ export function AddDriverDialog({ onDriverAdded }: AddDriverDialogProps) {
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value="solo">SOLO</SelectItem>
-                      <SelectItem value="team">TEAM</SelectItem>
+                      <SelectItem value="solo">Solo</SelectItem>
+                      <SelectItem value="team">Team</SelectItem>
                     </SelectContent>
                   </Select>
                   <FormMessage />

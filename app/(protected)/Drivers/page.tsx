@@ -8,16 +8,28 @@ import { useToast } from "@/components/ui/use-toast";
 import { PageHeader } from "./components/page-header";
 import { clearDriverCaches } from "./actions";
 import { PageTransition } from "@/components/ui/page-transition";
+import { ImportDrivers } from "./components/ImportDrivers";
+import {
+  Dialog,
+  DialogContent,
+  DialogTrigger,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { useState } from "react";
+import { CacheManager } from "./components/CacheManager";
 
 export default function DriversPage() {
   return (
-    <DriversProvider>
-      <PageTransition>
-        <div className="space-y-4">
-          <DriversContent />
-        </div>
-      </PageTransition>
-    </DriversProvider>
+    <>
+      <CacheManager />
+      <DriversProvider>
+        <PageTransition>
+          <div className="space-y-4">
+            <DriversContent />
+          </div>
+        </PageTransition>
+      </DriversProvider>
+    </>
   );
 }
 
@@ -25,13 +37,17 @@ function DriversContent() {
   const { drivers, loading, error, syncWithServer, updateDrivers } =
     useDrivers();
   const { toast } = useToast();
+  const [showImportDialog, setShowImportDialog] = useState(false);
 
   const handleClearCache = async () => {
     try {
       await clearDriverCaches();
+      await syncWithServer();
+      window.dispatchEvent(new Event("clear-drivers-cache"));
+
       toast({
         title: "Cache cleared",
-        description: "The drivers cache has been cleared successfully.",
+        description: "The drivers cache has been cleared and data refreshed.",
       });
     } catch (error) {
       toast({
@@ -59,10 +75,7 @@ function DriversContent() {
   };
 
   const handleAddDriver = () => {
-    toast({
-      title: "Coming Soon",
-      description: "Add driver functionality will be implemented soon.",
-    });
+    setShowImportDialog(true);
   };
 
   const handleActivateSelected = async (ids: number[]) => {
@@ -119,6 +132,12 @@ function DriversContent() {
         onAddDriver={handleAddDriver}
         isSyncing={loading}
       />
+      <Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>
+        <DialogContent className="max-w-3xl">
+          <DialogTitle>Import Drivers</DialogTitle>
+          <ImportDrivers />
+        </DialogContent>
+      </Dialog>
       <StatsCards />
       <DataTable
         columns={columns}

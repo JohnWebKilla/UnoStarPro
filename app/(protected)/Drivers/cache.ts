@@ -11,8 +11,9 @@ import {
 // Clear driver list cache
 export async function clearDriverListCache() {
   try {
+    // Clear Redis cache only on server
     await setCache(DRIVER_LIST_KEY, null, 0);
-    console.log("Cleared driver list cache");
+    console.log("Cleared driver list cache from Redis");
     return true;
   } catch (error) {
     console.error("Failed to clear driver list cache:", error);
@@ -26,11 +27,11 @@ export async function clearDriverCache(driverId: number) {
     const detailKey = DRIVER_DETAIL_KEY(driverId);
     const documentsKey = DRIVER_DOCUMENTS_KEY(driverId);
 
-    // Clear both keys
+    // Clear Redis cache
     await setCache(detailKey, null, 0);
     await setCache(documentsKey, null, 0);
 
-    console.log(`Cleared cache for driver ${driverId}`);
+    console.log(`Cleared cache for driver ${driverId} from Redis`);
     return true;
   } catch (error) {
     console.error(`Failed to clear cache for driver ${driverId}:`, error);
