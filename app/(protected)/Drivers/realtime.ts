@@ -8,27 +8,44 @@ export function setupDriversSubscription(
   const supabase = createClient();
 
   const channel = supabase
-    .channel("drivers_changes")
+    .channel("drivers_status_changes")
     .on(
       "postgres_changes",
       {
-        event: "*",
+        event: "UPDATE",
         schema: "public",
         table: "drivers",
+        filter: "status=eq.status", // Only listen for status changes
       },
       async (payload) => {
         const eventType = payload.eventType;
         const newRecord = payload.new;
         const oldRecord = payload.old;
 
-        await onUpdate({
-          eventType,
-          new: newRecord,
-          old: oldRecord,
-        } as RealtimePayload);
+        // Only process if status has actually changed
+        if (newRecord.status !== oldRecord.status) {
+          await onUpdate({
+            eventType,
+            new: newRecord,
+            old: oldRecord,
+          } as RealtimePayload);
+        }
       }
     )
-    .subscribe();
+    .subscribe((status) => {
+      console.log("Realtime subscription status:", status);
+    });
 
   return channel;
+}
+
+// Optimized function for updating driver status locally
+export function updateDriverStatusLocally(
+  drivers: any[],
+  driverId: number,
+  newStatus: string
+): any[] {
+  return drivers.map((driver) =>
+    driver.id === driverId ? { ...driver, status: newStatus } : driver
+  );
 }

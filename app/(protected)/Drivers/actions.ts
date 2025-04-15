@@ -12,6 +12,8 @@ import {
   updateDriverAction,
   deleteDriverAction,
   clearDriverCachesAction,
+  updateDriverStatusAction,
+  updateDriverStatusBatchAction,
 } from "./server-actions";
 import { Driver, CacheResponse } from "./types";
 import { DRIVER_LIST_KEY } from "./redis-client";
@@ -274,3 +276,14 @@ export async function clearDriverCaches(): Promise<boolean> {
     return false;
   }
 }
+
+export {
+  getDriversAction,
+  getDriverAction,
+  createDriverAction,
+  updateDriverAction,
+  deleteDriverAction,
+  clearDriverCachesAction,
+  updateDriverStatusAction,
+  updateDriverStatusBatchAction,
+} from "./server-actions";

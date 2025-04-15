@@ -1,8 +1,17 @@
 /* Custom styles for the Drivers table */
 
+.drivers-table-container {
+    position: relative !important;
+    width: 100% !important;
+    overflow: auto !important;
+    max-height: calc(100vh - 400px) !important;
+    min-height: 300px !important;
+    border-radius: 8px !important;
+    background-color: var(--background) !important;
+}
+
 .drivers-table {
     width: 100% !important;
-    table-layout: fixed !important;
     border-collapse: separate !important;
     border-spacing: 0 !important;
     position: relative !important;
@@ -12,19 +21,33 @@
 .drivers-table thead {
     position: sticky !important;
     top: 0 !important;
-    z-index: 100 !important;
+    z-index: 20 !important;
     background-color: var(--background) !important;
-    border-bottom: 1px solid var(--border) !important;
+}
+
+.drivers-table thead tr {
+    background-color: var(--background) !important;
 }
 
 .drivers-table th {
-    position: relative !important;
     background-color: var(--background) !important;
-    border-bottom: 1px solid var(--border) !important;
-    font-weight: 500 !important;
-    color: var(--muted-foreground) !important;
+    padding: 12px !important;
     text-align: left !important;
-    padding: 12px 16px !important;
+    font-weight: 500 !important;
+    color: var(--foreground) !important;
+    border-bottom: 1px solid var(--border) !important;
+    white-space: nowrap !important;
+    position: relative !important;
+    min-width: 150px !important;
+}
+
+.drivers-table th:first-child {
+    min-width: 40px !important;
+    width: 40px !important;
+}
+
+.drivers-table th:last-child {
+    min-width: 120px !important;
 }
 
 /* Add shadow to sticky header */
@@ -33,129 +56,141 @@
     position: absolute !important;
     left: 0 !important;
     right: 0 !important;
-    bottom: -4px !important;
-    height: 4px !important;
-    background: linear-gradient(to bottom, rgba(0, 0, 0, 0.1), transparent) !important;
+    bottom: 0 !important;
+    height: 1px !important;
+    background-color: var(--border) !important;
     pointer-events: none !important;
 }
 
 /* Cell styles */
-.drivers-table th,
 .drivers-table td {
-    overflow: hidden !important;
-    text-overflow: ellipsis !important;
+    padding: 12px !important;
+    vertical-align: middle !important;
+    border-bottom: 1px solid var(--border) !important;
+    background-color: var(--background) !important;
     white-space: nowrap !important;
-    padding: 12px 16px !important;
-    border-right: 1px solid var(--border) !important;
+    text-overflow: ellipsis !important;
+    overflow: hidden !important;
+    max-width: 300px !important;
 }
 
-.drivers-table th:last-child,
-.drivers-table td:last-child {
-    border-right: none !important;
-}
-
-/* Selection styles */
-.drivers-table tr[data-state="selected"] {
-    background-color: var(--primary-5) !important;
-}
-
-.drivers-table tr[data-state="selected"]:hover {
-    background-color: var(--primary-10) !important;
-}
-
-.drivers-table tr[data-state="selected"] td:first-child::before {
-    content: '' !important;
-    position: absolute !important;
-    left: 0 !important;
-    top: 0 !important;
-    bottom: 0 !important;
-    width: 2px !important;
-    background-color: var(--primary) !important;
-}
-
-/* Column widths */
-.drivers-table th:nth-child(1),
-.drivers-table td:nth-child(1) {
-    width: 50px !important;
+/* Fixed width columns */
+.drivers-table th:first-child,
+.drivers-table td:first-child {
     position: sticky !important;
     left: 0 !important;
-    z-index: 99 !important;
+    z-index: 21 !important;
+    width: 40px !important;
     background-color: var(--background) !important;
 }
 
-.drivers-table th:nth-child(2),
-.drivers-table td:nth-child(2) {
-    width: 15% !important;
+.drivers-table th:first-child::after,
+.drivers-table td:first-child::after {
+    content: '' !important;
+    position: absolute !important;
+    right: 0 !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    width: 1px !important;
+    background-color: var(--border) !important;
 }
 
-.drivers-table th:nth-child(3),
-.drivers-table td:nth-child(3) {
-    width: 12% !important;
+/* Column specific styles */
+.drivers-table td[data-column="name"],
+.drivers-table th[data-column="name"] {
+    min-width: 200px !important;
+    max-width: 300px !important;
 }
 
-.drivers-table th:nth-child(4),
-.drivers-table td:nth-child(4) {
-    width: 10% !important;
+.drivers-table td[data-column="phone"],
+.drivers-table th[data-column="phone"] {
+    min-width: 150px !important;
 }
 
-.drivers-table th:nth-child(5),
-.drivers-table td:nth-child(5) {
-    width: 10% !important;
+.drivers-table td[data-column="created_at"],
+.drivers-table th[data-column="created_at"] {
+    min-width: 120px !important;
 }
 
-.drivers-table th:nth-child(6),
-.drivers-table td:nth-child(6) {
-    width: 12% !important;
+.drivers-table td[data-column="type"],
+.drivers-table th[data-column="type"] {
+    min-width: 100px !important;
 }
 
-.drivers-table th:nth-child(7),
-.drivers-table td:nth-child(7) {
-    width: 15% !important;
+.drivers-table td[data-column="status"],
+.drivers-table th[data-column="status"] {
+    min-width: 100px !important;
 }
 
-.drivers-table th:nth-child(8),
-.drivers-table td:nth-child(8) {
-    width: 18% !important;
+.drivers-table td[data-column="documents"],
+.drivers-table th[data-column="documents"] {
+    min-width: 100px !important;
 }
 
-.drivers-table th:nth-child(9),
-.drivers-table td:nth-child(9) {
-    width: 8% !important;
+.drivers-table td[data-column="stripe_status"],
+.drivers-table th[data-column="stripe_status"] {
+    min-width: 120px !important;
+}
+
+.drivers-table td[data-column="subscription"],
+.drivers-table th[data-column="subscription"] {
+    min-width: 120px !important;
+}
+
+.drivers-table td[data-column="actions"],
+.drivers-table th[data-column="actions"] {
+    min-width: 120px !important;
     text-align: right !important;
 }
 
-/* Ensure proper text wrapping for long content */
-.drivers-table .truncate {
-    max-width: 100% !important;
-    overflow: hidden !important;
-    text-overflow: ellipsis !important;
-    white-space: nowrap !important;
-}
-
-/* Badge and icon styles */
-.drivers-table .badge {
-    display: inline-flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    padding-left: 0.5rem !important;
-    padding-right: 0.5rem !important;
-    min-width: unset !important;
-    border: 1px solid transparent !important;
-    transition: all 0.2s ease !important;
-}
-
-/* Hover and active states */
+/* Row hover and selection styles */
 .drivers-table tbody tr:hover {
     background-color: var(--muted) !important;
 }
 
-.drivers-table tbody tr:active {
+.drivers-table tr[data-state="selected"] {
+    background-color: var(--muted) !important;
+}
+
+.drivers-table tr[data-state="selected"]:hover {
+    background-color: var(--accent) !important;
+}
+
+/* Scrollbar styles */
+.drivers-table-container::-webkit-scrollbar {
+    width: 6px !important;
+    height: 6px !important;
+}
+
+.drivers-table-container::-webkit-scrollbar-track {
+    background: transparent !important;
+}
+
+.drivers-table-container::-webkit-scrollbar-thumb {
+    background-color: var(--border) !important;
+    border-radius: 3px !important;
+}
+
+.drivers-table-container::-webkit-scrollbar-corner {
+    background: transparent !important;
+}
+
+/* Dark mode adjustments */
+.dark .drivers-table thead::after {
+    background: linear-gradient(to bottom, rgba(0, 0, 0, 0.2), transparent) !important;
+}
+
+.dark .drivers-table tr[data-state="selected"] {
+    background-color: var(--muted) !important;
+}
+
+.dark .drivers-table tr[data-state="selected"]:hover {
     background-color: var(--accent) !important;
 }
 
 /* Loading state styles */
 .drivers-table tr.loading td {
-    background-color: var(--muted-30) !important;
+    background-color: var(--muted) !important;
 }
 
 /* Empty state styles */
@@ -165,36 +200,30 @@
     color: var(--muted-foreground) !important;
 }
 
-/* Scrollbar styles */
-.drivers-table-container {
-    scrollbar-width: thin !important;
-    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track) !important;
-}
-
-.drivers-table-container::-webkit-scrollbar {
-    width: 8px !important;
-    height: 8px !important;
-}
-
-.drivers-table-container::-webkit-scrollbar-track {
-    background: var(--scrollbar-track) !important;
-}
-
-.drivers-table-container::-webkit-scrollbar-thumb {
-    background-color: var(--scrollbar-thumb) !important;
+/* Badge styles */
+.drivers-table .badge {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 2px 8px !important;
+    font-size: 12px !important;
+    font-weight: 500 !important;
     border-radius: 4px !important;
-    border: 2px solid var(--scrollbar-track) !important;
+    white-space: nowrap !important;
 }
 
-/* Dark mode adjustments */
-.dark .drivers-table thead::after {
-    background: linear-gradient(to bottom, rgba(0, 0, 0, 0.2), transparent) !important;
+/* Action buttons styles */
+.drivers-table .action-buttons {
+    display: flex !important;
+    gap: 4px !important;
+    justify-content: flex-end !important;
 }
 
-.dark .drivers-table tr[data-state="selected"] {
-    background-color: var(--primary-10) !important;
+.drivers-table .action-button {
+    padding: 4px !important;
+    border-radius: 4px !important;
 }
 
-.dark .drivers-table tr[data-state="selected"]:hover {
-    background-color: var(--primary-15) !important;
+.drivers-table .action-button:hover {
+    background-color: var(--muted) !important;
 }

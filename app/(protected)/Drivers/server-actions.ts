@@ -708,3 +708,131 @@ export async function importDriversFromRawDataAction(
     };
   }
 }
+
+// Optimized function specifically for status updates
+export async function updateDriverStatusAction(
+  driverId: number,
+  newStatus: "active" | "inactive" | "terminated" | "pending"
+): Promise<{ success: boolean; error?: string }> {
+  console.log(`Server: Updating driver ${driverId} status to ${newStatus}`);
+
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      throw new Error("Not authenticated");
+    }
+
+    // Update the driver status
+    const { data: updatedDriver, error: updateError } = await withRetry(
+      async () => {
+        return await supabase
+          .from("drivers")
+          .update({
+            status: newStatus,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", driverId)
+          .select()
+          .single();
+      },
+      3,
+      500
+    );
+
+    if (updateError) {
+      console.error("Error updating driver status:", updateError);
+      throw updateError;
+    }
+
+    if (!updatedDriver) {
+      throw new Error("Failed to update driver status");
+    }
+
+    // Clear both list and individual driver cache
+    await Promise.all([clearDriverCache(driverId), clearDriverListCache()]);
+
+    console.log(
+      `Server: Successfully updated driver ${driverId} status to ${newStatus}`
+    );
+    return { success: true };
+  } catch (error) {
+    console.error("Error in updateDriverStatusAction:", error);
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Failed to update driver status",
+    };
+  }
+}
+
+// Batch update function for driver statuses
+export async function updateDriverStatusBatchAction(
+  driverIds: number[],
+  newStatus: "active" | "inactive" | "terminated" | "pending"
+): Promise<{ success: boolean; error?: string; updatedDrivers?: Driver[] }> {
+  console.log(
+    `Server: Batch updating ${driverIds.length} drivers status to ${newStatus}`
+  );
+
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      throw new Error("Not authenticated");
+    }
+
+    // Update all drivers' status in a single query
+    const { data: updatedDrivers, error: updateError } = await withRetry(
+      async () => {
+        return await supabase
+          .from("drivers")
+          .update({
+            status: newStatus,
+            updated_at: new Date().toISOString(),
+          })
+          .in("id", driverIds)
+          .select("*"); // Select all fields to get the complete updated records
+      },
+      3,
+      500
+    );
+
+    if (updateError) {
+      console.error("Error batch updating driver statuses:", updateError);
+      throw updateError;
+    }
+
+    if (!updatedDrivers || updatedDrivers.length === 0) {
+      throw new Error("Failed to update driver statuses");
+    }
+
+    // Clear both list and individual driver caches
+    await Promise.all([
+      ...driverIds.map((id) => clearDriverCache(id)),
+      clearDriverListCache(),
+    ]);
+
+    console.log(
+      `Server: Successfully updated ${updatedDrivers.length} drivers status to ${newStatus}`
+    );
+    return { success: true, updatedDrivers };
+  } catch (error) {
+    console.error("Error in updateDriverStatusBatchAction:", error);
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Failed to update driver statuses",
+    };
+  }
+}
