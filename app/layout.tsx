@@ -5,6 +5,7 @@ import { UserProvider } from "@/contexts/UserContext";
 import "./globals.css";
 import "./(protected)/Companies/global.css";
 import { Toaster } from "@/components/ui/toaster";
+import { Template } from "@/components/template";
 
 export const metadata: Metadata = {
   title: "UnoStar Pro",
@@ -29,7 +30,7 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <UserProvider>
-            {children}
+            <Template>{children}</Template>
             <Toaster />
           </UserProvider>
         </ThemeProvider>

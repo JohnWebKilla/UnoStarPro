@@ -83,6 +83,8 @@ export function DriversProvider({ children }: { children: ReactNode }) {
     type: "info",
     isVisible: false,
   });
+  const [lastFetchTime, setLastFetchTime] = useState<number>(Date.now());
+  const REFRESH_THRESHOLD = 5 * 60 * 1000; // 5 minutes in milliseconds
   const supabase = createClient();
 
   const setProgressUpdate = useCallback((update: Partial<ProgressUpdate>) => {
@@ -159,10 +161,9 @@ export function DriversProvider({ children }: { children: ReactNode }) {
 
   const fetchDrivers = useCallback(async (useCache = true) => {
     try {
-      setLoading(true);
-      setError(null);
+      // Don't set loading state for cache-based fetches
+      if (!useCache) setLoading(true);
 
-      // If useCache is false, skip IndexedDB and fetch directly from server
       let data: Driver[] = [];
       if (useCache) {
         // Try to get from IndexedDB first
@@ -170,7 +171,12 @@ export function DriversProvider({ children }: { children: ReactNode }) {
           data = await driversDB.getAllDrivers();
           if (data && data.length > 0) {
             setDrivers(data);
-            setLoading(false);
+            // Fetch from server in background without loading state
+            const serverData = await getDriversAction();
+            if (JSON.stringify(serverData) !== JSON.stringify(data)) {
+              setDrivers(serverData);
+              await driversDB.setDrivers(serverData);
+            }
             return;
           }
         } catch (e) {
@@ -192,63 +198,163 @@ export function DriversProvider({ children }: { children: ReactNode }) {
       setError(e instanceof Error ? e : new Error(String(e)));
       console.error("Error fetching drivers:", e);
     } finally {
-      setLoading(false);
+      if (!useCache) setLoading(false);
     }
   }, []);
 
-  const fetchAndUpdateCache = async (updateLoadingState: boolean = true) => {
-    try {
-      const result = await getDrivers(false);
+  // Enhanced real-time subscription setup
+  const setupRealtimeSubscription = useCallback(async () => {
+    const channel: RealtimeChannel = supabase
+      .channel("drivers_changes")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "drivers",
+        },
+        async (payload: RealtimePostgresChangesPayload<any>) => {
+          console.log("Received real-time update:", payload);
 
-      const source =
-        result.source === "cache"
-          ? result.timing.source === "client-cache"
-            ? "Client Cache (API)"
-            : result.timing.source === "local-storage"
-              ? "Client Cache (Local)"
-              : "Redis Cache"
-          : "Database";
+          // Handle different types of changes
+          switch (payload.eventType) {
+            case "INSERT": {
+              const newDriver = payload.new;
+              // Fetch complete driver data including relations
+              const { data: fullDriver } = await supabase
+                .from("drivers")
+                .select(
+                  `
+                  *,
+                  companies:company_id (
+                    id,
+                    name
+                  )
+                `
+                )
+                .eq("id", newDriver.id)
+                .single();
 
-      // Only update state if this is an explicit refresh (updateLoadingState = true)
-      if (updateLoadingState) {
-        updateDriversState(result.data, source, result.timing);
-      }
+              if (fullDriver) {
+                setDrivers((current) => [fullDriver, ...current]);
+                // Update IndexedDB
+                await driversDB.addDriver(fullDriver);
+              }
+              break;
+            }
+            case "UPDATE": {
+              const updatedDriver = payload.new;
+              // Fetch complete driver data including relations
+              const { data: fullDriver } = await supabase
+                .from("drivers")
+                .select(
+                  `
+                  *,
+                  companies:company_id (
+                    id,
+                    name
+                  )
+                `
+                )
+                .eq("id", updatedDriver.id)
+                .single();
 
-      // Update IndexedDB cache only if we have new data AND this is an explicit refresh
-      if (updateLoadingState) {
-        try {
-          await driversDB.setDrivers(result.data);
-        } catch (error) {
-          if (error instanceof Error && error.name === "VersionError") {
-            await cleanupDatabase();
-            await driversDB.setDrivers(result.data);
-          } else {
-            console.error("Error updating IndexedDB cache:", error);
+              if (fullDriver) {
+                setDrivers((current) =>
+                  current.map((d) => (d.id === fullDriver.id ? fullDriver : d))
+                );
+                // Update IndexedDB
+                await driversDB.updateDriver(fullDriver);
+              }
+              break;
+            }
+            case "DELETE": {
+              const deletedDriver = payload.old;
+              setDrivers((current) =>
+                current.filter((d) => d.id !== deletedDriver.id)
+              );
+              // Remove from IndexedDB
+              await driversDB.deleteDriver(deletedDriver.id);
+              break;
+            }
           }
         }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [supabase]);
+
+  // Enhanced fetch and update function with time-based refresh control
+  const fetchAndUpdateCache = async (
+    updateLoadingState: boolean = true,
+    force: boolean = false
+  ) => {
+    const now = Date.now();
+    const timeSinceLastFetch = now - lastFetchTime;
+
+    // Skip refresh if it's too soon and not forced
+    if (!force && timeSinceLastFetch < REFRESH_THRESHOLD) {
+      console.log("Skipping refresh - too soon since last fetch");
+      return;
+    }
+
+    try {
+      // Try to get from IndexedDB first
+      const cachedData = await driversDB.getAllDrivers();
+      if (cachedData && cachedData.length > 0) {
+        setDrivers(cachedData);
+
+        // Only show loading for forced refreshes
+        if (force && updateLoadingState) setLoading(true);
+
+        // Fetch from server in background
+        const response = await getDriversAction();
+        if (JSON.stringify(response) !== JSON.stringify(cachedData)) {
+          setDrivers(response);
+          await driversDB.setDrivers(response);
+        }
+      } else {
+        // No cache available, show loading and fetch
+        if (updateLoadingState) setLoading(true);
+        const response = await getDriversAction();
+        setDrivers(response);
+        await driversDB.setDrivers(response);
       }
+
+      setLastFetchTime(now);
     } catch (error) {
-      console.error("Error in fetchAndUpdateCache:", error);
+      console.error("Error fetching and updating cache:", error);
+    } finally {
+      setLoading(false);
     }
   };
 
+  // Enhanced clear cache function
   const clearCache = async () => {
     try {
-      setLoading(true);
-      // Clear all caches
+      // Clear server-side cache
       await clearDriverCaches();
-      await driversDB.clearAll();
+
+      // Clear client-side caches
+      await deleteClientCache("drivers:client-list");
+      localStorage.removeItem("drivers:client-list");
+      localStorage.removeItem("drivers:client-list:timestamp");
+
+      // Clear IndexedDB
+      await driversDB.clearDrivers();
+
+      // Fetch fresh data
+      await fetchAndUpdateCache();
 
       toast({
-        title: "Cache Cleared",
-        description: "All caches have been cleared successfully.",
+        title: "Cache cleared",
+        description: "Successfully cleared cache and refreshed data.",
       });
-
-      // Refresh drivers with skipCache=true to force a database fetch
-      await fetchDrivers(true);
     } catch (error) {
       console.error("Error clearing cache:", error);
-      setLoading(false);
       toast({
         title: "Error",
         description: "Failed to clear cache. Please try again.",
@@ -256,6 +362,58 @@ export function DriversProvider({ children }: { children: ReactNode }) {
       });
     }
   };
+
+  // Set up initial data and subscriptions
+  useEffect(() => {
+    const setup = async () => {
+      try {
+        // Set up real-time subscription first
+        const cleanup = await setupRealtimeSubscription();
+
+        // Try to load from cache first
+        const cachedData = await driversDB.getAllDrivers();
+        if (cachedData && cachedData.length > 0) {
+          setDrivers(cachedData);
+          // Fetch fresh data in background without loading state
+          const response = await getDriversAction();
+          if (JSON.stringify(response) !== JSON.stringify(cachedData)) {
+            setDrivers(response);
+            await driversDB.setDrivers(response);
+          }
+        } else {
+          // Only show loading if we need to fetch from server
+          setLoading(true);
+          await fetchAndUpdateCache(true, true);
+        }
+
+        // Set up focus event listener with debounce
+        let focusTimeout: NodeJS.Timeout;
+        const handleFocus = () => {
+          clearTimeout(focusTimeout);
+          focusTimeout = setTimeout(() => {
+            // Never show loading state for focus events
+            fetchAndUpdateCache(false, false);
+          }, 1000);
+        };
+
+        window.addEventListener("focus", handleFocus);
+
+        setLoading(false);
+
+        return () => {
+          cleanup();
+          window.removeEventListener("focus", handleFocus);
+          clearTimeout(focusTimeout);
+        };
+      } catch (error) {
+        console.error("Error in setup:", error);
+        setError(error instanceof Error ? error : new Error(String(error)));
+        setLoading(false);
+      }
+    };
+
+    setup();
+  }, [setupRealtimeSubscription]);
 
   const syncWithServer = useCallback(async () => {
     try {
@@ -325,92 +483,6 @@ export function DriversProvider({ children }: { children: ReactNode }) {
     [updateDriverAction]
   );
 
-  useEffect(() => {
-    let channel: RealtimeChannel;
-
-    const setupRealtimeSubscription = async () => {
-      if (channel) {
-        await supabase.removeChannel(channel);
-      }
-
-      channel = supabase
-        .channel("drivers_status_changes")
-        .on(
-          "postgres_changes",
-          {
-            event: "UPDATE",
-            schema: "public",
-            table: "drivers",
-          },
-          async (payload: RealtimePostgresChangesPayload<Driver>) => {
-            console.log("Real-time status update received:", payload);
-
-            const newDriver = payload.new as Driver;
-            const oldDriver = payload.old as Driver;
-
-            if (!newDriver?.id) {
-              console.error("Invalid payload received:", payload);
-              return;
-            }
-
-            // Skip if this is our own optimistic update
-            if (isOptimisticUpdate) {
-              console.log("Skipping realtime update due to optimistic update");
-              return;
-            }
-
-            // Apply the change directly without fetching all drivers
-            setDrivers((currentDrivers) =>
-              currentDrivers.map((driver) => {
-                // Ensure both IDs are strings and trimmed for comparison
-                const currentId = String(driver.id).trim();
-                const newId = String(newDriver.id).trim();
-
-                if (currentId === newId) {
-                  // Apply all updates unconditionally
-                  console.log(
-                    `Updating driver ${driver.id} with new data:`,
-                    newDriver
-                  );
-                  return { ...driver, ...newDriver };
-                }
-                return driver;
-              })
-            );
-
-            // Update IndexedDB in the background
-            try {
-              const currentDrivers = await driversDB.getAllDrivers();
-              if (!currentDrivers) return;
-
-              const updatedDrivers = currentDrivers.map((driver) => {
-                const currentId = String(driver.id).trim();
-                const newId = String(newDriver.id).trim();
-
-                return currentId === newId
-                  ? { ...driver, ...newDriver }
-                  : driver;
-              });
-              await driversDB.setDrivers(updatedDrivers);
-            } catch (error) {
-              console.error("Error updating IndexedDB:", error);
-            }
-          }
-        )
-        .subscribe((status) => {
-          console.log("Realtime subscription status:", status);
-        });
-    };
-
-    setupRealtimeSubscription();
-
-    return () => {
-      if (channel) {
-        supabase.removeChannel(channel).catch(console.error);
-      }
-    };
-  }, [supabase, isOptimisticUpdate]);
-
   const updateDriverOptimistically = useCallback(
     (driverId: string, updates: Partial<Driver>) => {
       console.log(`Optimistically updating driver ${driverId} with:`, updates);
@@ -471,50 +543,6 @@ export function DriversProvider({ children }: { children: ReactNode }) {
     []
   );
 
-  useEffect(() => {
-    const loadInitialData = async () => {
-      try {
-        // Try to load from cache first without setting loading state
-        const cachedDrivers = await driversDB.getAllDrivers();
-        if (cachedDrivers && cachedDrivers.length > 0) {
-          // Immediately show cached data
-          setDrivers(cachedDrivers);
-          setDataSource("Local Cache");
-          setTimingInfo({
-            total: 0,
-            source: "local-cache",
-          });
-          setLoading(false);
-
-          // Only fetch companies, skip background cache update
-          fetchCompanies();
-          return;
-        }
-
-        // Only set loading if we don't have cached data
-        setLoading(true);
-
-        // If no cache, fetch fresh data
-        fetchCompanies();
-        fetchDrivers();
-      } catch (error) {
-        if (error instanceof Error && error.name === "VersionError") {
-          await cleanupDatabase();
-          // Retry with fresh data
-          setLoading(true);
-          fetchCompanies();
-          fetchDrivers();
-        } else {
-          console.error("Error in loadInitialData:", error);
-          setLoading(false);
-          setError(error instanceof Error ? error : new Error(String(error)));
-        }
-      }
-    };
-
-    loadInitialData();
-  }, []);
-
   const contextValue: DriversContextType = {
     drivers,
     loading,
@@ -525,9 +553,10 @@ export function DriversProvider({ children }: { children: ReactNode }) {
     processingDrivers,
     progressUpdate,
     setProgressUpdate,
-    refreshDrivers: fetchDrivers,
+    refreshDrivers: (skipCache?: boolean) =>
+      fetchAndUpdateCache(true, skipCache),
     clearCache,
-    syncWithServer: fetchAndUpdateCache,
+    syncWithServer: () => fetchAndUpdateCache(true, true),
     updateDrivers,
     updateDriverOptimistically,
     setProcessingDriver,

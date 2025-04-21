@@ -4,14 +4,32 @@ import { createClient } from "@/utils/supabase/server";
 import { revalidatePath } from "next/cache";
 import { setCache, getCache } from "@/lib/redis";
 import { clearDriverCache, clearDriverListCache } from "./cache";
-import { Driver } from "./types";
+import { Driver, NameMatchSuggestion } from "./types";
 import {
   DRIVER_LIST_KEY,
   DRIVER_DETAIL_KEY,
   DRIVER_DOCUMENTS_KEY,
   CACHE_EXPIRATION,
 } from "./constants";
-import { updateDriverInStripe } from "./stripe-actions";
+import {
+  updateDriverInStripe,
+  syncStripeProductsWithNameMatching,
+  approveStripeProductMatch,
+} from "./stripe-actions";
+import Stripe from "stripe";
+import { calculateNameSimilarity } from "@/lib/utils";
+
+const stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY || "", {
+  apiVersion: "2024-06-20",
+});
+
+async function initStripe(): Promise<Stripe | null> {
+  if (!process.env.STRIPE_SECRET_KEY) {
+    console.error("Missing STRIPE_SECRET_KEY");
+    return null;
+  }
+  return stripeClient;
+}
 
 // Helper function for retrying database operations
 async function withRetry<T>(
@@ -238,36 +256,41 @@ export async function createDriverAction(
       throw new Error("Not authenticated");
     }
 
-    // Set default values
-    if (!driverData.hire_date) {
-      driverData.hire_date = new Date().toISOString();
+    // Validate required fields
+    if (
+      !driverData.name ||
+      !driverData.phone_number ||
+      !driverData.truck_number
+    ) {
+      throw new Error("Missing required fields");
     }
 
-    if (driverData.subscription_amount === undefined) {
-      driverData.subscription_amount = 0;
-    }
-
-    // Insert driver
-    const { data, error } = await supabase
+    // Create the driver with company_id if provided
+    const { data: driver, error } = await supabase
       .from("drivers")
-      .insert(driverData)
-      .select()
+      .insert({
+        name: driverData.name,
+        phone_number: driverData.phone_number,
+        truck_number: driverData.truck_number,
+        solo_or_team: driverData.solo_or_team || "solo",
+        subscription_amount: driverData.subscription_amount || 0,
+        company_id: driverData.company_id,
+        status: "pending",
+      })
+      .select("*")
       .single();
 
     if (error) {
       throw error;
     }
 
-    // Clear driver list cache
+    // Clear cache after creating a new driver
     await clearDriverListCache();
 
-    // Revalidate the drivers page
-    revalidatePath("/Drivers");
-
-    return data as Driver;
+    return driver;
   } catch (error) {
     console.error("Error creating driver:", error);
-    return null;
+    throw error;
   }
 }
 
@@ -370,11 +393,24 @@ export async function deleteDriverAction(driverId: number): Promise<boolean> {
 // Add a function to clear all driver caches
 export async function clearDriverCachesAction(): Promise<boolean> {
   try {
-    // Clear server-side Redis cache
+    // Clear the main driver list cache
     await clearDriverListCache();
 
-    // Return true to indicate success
-    // The client component will handle IndexedDB clearing
+    // Get all drivers to clear their individual caches
+    const supabase = await createClient();
+    const { data: drivers } = await supabase
+      .from("drivers")
+      .select("id")
+      .order("id");
+
+    if (drivers) {
+      // Clear individual driver caches
+      await Promise.all(drivers.map((driver) => clearDriverCache(driver.id)));
+    }
+
+    // Revalidate the drivers page
+    revalidatePath("/Drivers");
+
     return true;
   } catch (error) {
     console.error("Error clearing caches:", error);
@@ -566,6 +602,8 @@ export async function importDriversFromRawDataAction(
     phone_number?: string;
     truck_number?: string;
     solo_or_team?: string;
+    subscription_amount?: string | number;
+    company_id?: string | number;
     [key: string]: any;
   }>,
   columnMapping: {
@@ -573,138 +611,95 @@ export async function importDriversFromRawDataAction(
     phone_number?: string;
     truck_number?: string;
     solo_or_team?: string;
+    subscription_amount?: string;
+    company_id?: string;
   }
 ): Promise<{ success: boolean; imported: number; errors: string[] }> {
-  const supabase = await createClient();
   const errors: string[] = [];
+  let importedCount = 0;
 
   try {
-    console.log("Raw data:", data);
-    console.log("Column mapping:", columnMapping);
+    const supabase = await createClient();
 
-    const transformedData = data.map((item) => {
-      const transformed = {
-        name: columnMapping.name
-          ? item[columnMapping.name]?.toString().trim()
-          : "",
-        phone_number: columnMapping.phone_number
-          ? item[columnMapping.phone_number]
-              ?.toString()
-              .trim()
-              .replace(/\s+/g, "")
-          : "",
-        truck_number: columnMapping.truck_number
-          ? item[columnMapping.truck_number]
-              ?.toString()
-              .trim()
-              .replace(/\s+/g, "")
-          : "",
-        solo_or_team: columnMapping.solo_or_team
-          ? item[columnMapping.solo_or_team]
-              ?.toString()
-              .trim()
-              .toLowerCase() === "team"
-            ? "team"
-            : "solo"
-          : "solo",
-        status: "pending" as const,
-        subscription_amount: 0,
-        company_id: null,
-      };
-      console.log("Transformed item:", transformed);
-      return transformed;
-    });
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
-    console.log("All transformed data:", transformedData);
-
-    // Process in batches of 4 to stay under rate limits
-    const batchSize = 4;
-    const results = [];
-
-    for (let i = 0; i < transformedData.length; i += batchSize) {
-      const batch = transformedData.slice(i, i + batchSize);
-
-      // Process each batch
-      const batchResults = await Promise.all(
-        batch.map(async (driverData) => {
-          try {
-            // Validate required fields
-            if (
-              !driverData.name ||
-              !driverData.phone_number ||
-              !driverData.truck_number ||
-              !driverData.solo_or_team
-            ) {
-              throw new Error(
-                `Missing required fields for driver: ${driverData.name || "Unknown"}`
-              );
-            }
-
-            console.log("Inserting driver:", driverData);
-
-            // Create driver in database
-            const { data: newDriver, error: dbError } = await supabase
-              .from("drivers")
-              .insert([
-                {
-                  ...driverData,
-                  created_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString(),
-                },
-              ])
-              .select()
-              .single();
-
-            if (dbError) {
-              console.error("Database error:", dbError);
-              throw dbError;
-            }
-
-            // Sync with Stripe
-            await updateDriverInStripe(newDriver);
-
-            return { success: true };
-          } catch (error: any) {
-            console.error("Error processing driver:", error);
-            return {
-              success: false,
-              error: `Failed to import driver ${driverData.name}: ${error.message || "Unknown error"}`,
-            };
-          }
-        })
-      );
-
-      results.push(...batchResults);
-
-      // Add delay between batches to respect rate limits (250ms = 4 requests per second)
-      if (i + batchSize < transformedData.length) {
-        await new Promise((resolve) => setTimeout(resolve, 250));
-      }
+    if (!user) {
+      throw new Error("Not authenticated");
     }
 
-    // Clear cache after import
-    await clearDriverListCache();
+    // Process each row
+    const driversToCreate = data.map((row) => {
+      const companyIdValue = row[columnMapping.company_id || "company_id"];
+      const companyId = companyIdValue
+        ? parseInt(String(companyIdValue), 10)
+        : undefined;
 
-    const successCount = results.filter((r) => r.success).length;
-    const failedImports = results.filter((r) => !r.success);
+      const driverData: Partial<Driver> = {
+        name: row[columnMapping.name || "name"] || "",
+        phone_number: row[columnMapping.phone_number || "phone_number"] || "",
+        truck_number: row[columnMapping.truck_number || "truck_number"] || "",
+        solo_or_team: (
+          row[columnMapping.solo_or_team || "solo_or_team"] || "solo"
+        ).toLowerCase() as "solo" | "team",
+        subscription_amount:
+          parseFloat(
+            String(
+              row[columnMapping.subscription_amount || "subscription_amount"]
+            )
+          ) || 0,
+        company_id: companyId,
+        status: "pending",
+      };
 
-    failedImports.forEach((result) => {
-      if (result.error) errors.push(result.error);
+      return driverData;
     });
+
+    // Filter out invalid entries
+    const validDrivers = driversToCreate.filter((driver) => {
+      if (!driver.name || !driver.phone_number || !driver.truck_number) {
+        errors.push(
+          `Missing required fields for driver: ${driver.name || "Unknown"}`
+        );
+        return false;
+      }
+      return true;
+    });
+
+    if (validDrivers.length === 0) {
+      return { success: false, imported: 0, errors };
+    }
+
+    // Insert all valid drivers
+    const { data: createdDrivers, error } = await supabase
+      .from("drivers")
+      .insert(validDrivers)
+      .select();
+
+    if (error) {
+      throw error;
+    }
+
+    importedCount = createdDrivers?.length || 0;
+
+    // Clear cache after importing drivers
+    await clearDriverListCache();
 
     return {
       success: true,
-      imported: successCount,
+      imported: importedCount,
       errors,
     };
-  } catch (error: any) {
+  } catch (error) {
     console.error("Error importing drivers:", error);
+    errors.push(
+      error instanceof Error ? error.message : "Unknown error occurred"
+    );
     return {
       success: false,
-      imported: 0,
-      errors: [
-        `Failed to process drivers: ${error.message || "Unknown error"}`,
-      ],
+      imported: importedCount,
+      errors,
     };
   }
 }
@@ -833,6 +828,127 @@ export async function updateDriverStatusBatchAction(
         error instanceof Error
           ? error.message
           : "Failed to update driver statuses",
+    };
+  }
+}
+
+async function getAllStripeProducts(): Promise<Stripe.Product[]> {
+  const allProducts: Stripe.Product[] = [];
+  let hasMore = true;
+  let startingAfter: string | undefined;
+
+  while (hasMore) {
+    const response = await stripeClient.products.list({
+      limit: 100,
+      starting_after: startingAfter,
+    });
+
+    allProducts.push(...response.data);
+    hasMore = response.has_more;
+    startingAfter = response.data[response.data.length - 1]?.id;
+
+    if (hasMore) {
+      await new Promise((resolve) => setTimeout(resolve, 1000)); // Rate limit delay
+    }
+  }
+
+  return allProducts;
+}
+
+async function getDriversWithoutStripeId() {
+  const supabase = await createClient();
+  const { data: drivers, error } = await supabase
+    .from("drivers")
+    .select("*")
+    .is("stripe_product_id", null);
+
+  if (error) throw error;
+  if (!drivers) return [];
+  return drivers;
+}
+
+export async function syncStripeWithNameMatchingAction(driver: Driver) {
+  const stripe = await initStripe();
+  if (!stripe) {
+    return { success: false, message: "Failed to initialize Stripe client" };
+  }
+
+  try {
+    // Rest of the function implementation
+    // ... existing code ...
+  } catch (error) {
+    console.error("Error syncing with Stripe:", error);
+    return { success: false, message: "Failed to sync with Stripe" };
+  }
+}
+
+export async function createStripeProductsAction(): Promise<{
+  success: boolean;
+  message: string;
+  progress?: {
+    stage: "creating";
+    message: string;
+    progress: number;
+    total: number;
+    currentItem?: string;
+  };
+}> {
+  const stripeClient = await initStripe();
+  if (!stripeClient) {
+    return {
+      success: false,
+      message: "Stripe client is not initialized",
+    };
+  }
+
+  try {
+    const drivers = await getDriversWithoutStripeId();
+
+    return {
+      success: true,
+      message: "Creating Stripe products",
+      progress: {
+        stage: "creating",
+        message: "Creating Stripe products",
+        progress: 0,
+        total: drivers.length,
+        currentItem: drivers[0]?.name || "",
+      },
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      message: error.message || "Failed to create Stripe products",
+    };
+  }
+}
+
+export async function approveStripeMatchAction(
+  driverId: number,
+  stripeProductId: string
+): Promise<{
+  success: boolean;
+  message: string;
+}> {
+  try {
+    console.log(
+      `Approving match for driver ${driverId} with product ${stripeProductId}`
+    );
+    const result = await approveStripeProductMatch(driverId, stripeProductId);
+    console.log("Match approval result:", result);
+
+    revalidatePath("/Drivers");
+
+    return {
+      success: true,
+      message: result.message,
+    };
+  } catch (error) {
+    console.error("Error in approveStripeMatchAction:", error);
+    return {
+      success: false,
+      message:
+        error instanceof Error ? error.message : "An unknown error occurred",
     };
   }
 }

@@ -1,0 +1,211 @@
+import { ColumnDef } from "@tanstack/react-table";
+import { Company, CompanyMeta } from "../../lib/types";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { CreditCard, ArrowUpDown, ExternalLink } from "lucide-react";
+
+function formatDate(date: string) {
+  return new Date(date).toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function formatCurrency(amount: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+  }).format(amount / 100);
+}
+
+export const columns: ColumnDef<Company>[] = [
+  {
+    accessorKey: "name",
+    header: ({ column }) => {
+      return (
+        <Button
+          variant="ghost"
+          className="-ml-4 h-8 data-[state=open]:bg-accent"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+        >
+          Company
+          <ArrowUpDown className="ml-2 h-4 w-4" />
+        </Button>
+      );
+    },
+    cell: ({ row }) => {
+      const name = row.getValue("name") as string;
+      const stripeId = row.original.stripe_customer_id;
+      return (
+        <div className="flex flex-col py-1">
+          <span className="font-medium leading-none">{name}</span>
+          {stripeId && (
+            <span className="text-[11px] text-muted-foreground truncate max-w-[200px] leading-none mt-1">
+              {stripeId}
+            </span>
+          )}
+        </div>
+      );
+    },
+  },
+  {
+    accessorKey: "contact_name",
+    header: ({ column }) => {
+      return (
+        <Button
+          variant="ghost"
+          className="-ml-4 h-8"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+        >
+          Contact
+          <ArrowUpDown className="ml-2 h-4 w-4" />
+        </Button>
+      );
+    },
+    cell: ({ row }) => {
+      const firstName = row.original.contact_first_name;
+      const lastName = row.original.contact_last_name;
+      return (
+        <div className="py-1">
+          <span className="leading-none">{`${firstName} ${lastName}`}</span>
+        </div>
+      );
+    },
+  },
+  {
+    accessorKey: "contact_email",
+    header: "Email",
+    cell: ({ row }) => {
+      const email = row.original.contact_email;
+      return (
+        <div className="py-1">
+          <span className="text-sm leading-none">{email}</span>
+        </div>
+      );
+    },
+  },
+  {
+    accessorKey: "contact_phone",
+    header: "Phone",
+    cell: ({ row }) => {
+      const phone = row.original.contact_phone;
+      return phone ? (
+        <div className="py-1">
+          <span className="text-sm leading-none">{phone}</span>
+        </div>
+      ) : null;
+    },
+  },
+  {
+    accessorKey: "subscription_amount",
+    header: ({ column }) => {
+      return (
+        <Button
+          variant="ghost"
+          className="-ml-4 h-8"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+        >
+          Subscription
+          <ArrowUpDown className="ml-2 h-4 w-4" />
+        </Button>
+      );
+    },
+    cell: ({ row }) => {
+      const amount = row.getValue("subscription_amount") as number;
+      const hasSubscription = row.original.stripe_subscription_id;
+      const nextInvoiceDate = row.original.next_invoice_date;
+
+      return (
+        <div className="flex flex-col py-1">
+          <span className="font-medium leading-none">
+            {amount ? formatCurrency(amount) : "$0.00"} / month
+          </span>
+          {hasSubscription && (
+            <>
+              <span className="text-[11px] text-muted-foreground leading-none mt-1">
+                Next invoice:{" "}
+                {nextInvoiceDate ? formatDate(nextInvoiceDate) : "N/A"}
+              </span>
+              <span className="text-[11px] text-muted-foreground truncate max-w-[150px] leading-none mt-0.5">
+                {row.original.stripe_subscription_id}
+              </span>
+            </>
+          )}
+        </div>
+      );
+    },
+  },
+  {
+    accessorKey: "status",
+    header: "Status",
+    cell: ({ row }) => {
+      const status = row.getValue("status") as string;
+      return (
+        <div className="py-1">
+          <Badge
+            variant={status === "active" ? "default" : "secondary"}
+            className="h-5"
+          >
+            {status}
+          </Badge>
+        </div>
+      );
+    },
+  },
+  {
+    accessorKey: "stripe_status",
+    header: "Stripe",
+    cell: ({ row }) => {
+      const stripeId = row.original.stripe_customer_id;
+      const lastSynced = row.original.last_synced_at;
+      const hasPaymentMethod = row.original.stripe_payment_method_id;
+
+      if (!stripeId) {
+        return (
+          <div className="py-1">
+            <Badge variant="secondary" className="h-5">
+              Not Connected
+            </Badge>
+          </div>
+        );
+      }
+
+      return (
+        <div className="flex flex-col py-1">
+          <div className="flex items-center gap-1">
+            <Badge
+              variant={hasPaymentMethod ? "default" : "secondary"}
+              className="h-5"
+            >
+              <CreditCard className="mr-1 h-3 w-3" />
+              {hasPaymentMethod ? "Active" : "No Payment"}
+            </Badge>
+            {stripeId && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-4 w-4"
+                asChild
+                onClick={(e) => e.stopPropagation()}
+              >
+                <a
+                  href={`https://dashboard.stripe.com/customers/${stripeId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              </Button>
+            )}
+          </div>
+          {lastSynced && (
+            <span className="text-[11px] text-muted-foreground leading-none mt-1">
+              {formatDate(lastSynced)}
+            </span>
+          )}
+        </div>
+      );
+    },
+  },
+];

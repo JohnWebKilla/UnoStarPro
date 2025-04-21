@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,6 +12,15 @@ import {
 } from "../server-actions";
 import { Driver } from "../types";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { getCompanies } from "../../Companies/actions";
+import { Company } from "../../Companies/types";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 // Define the required fields and their descriptions
 const REQUIRED_FIELDS = {
@@ -19,6 +28,8 @@ const REQUIRED_FIELDS = {
   phone_number: "Phone number",
   truck_number: "Truck number",
   solo_or_team: "Driver type (solo/team)",
+  subscription_amount: "Weekly price",
+  company_id: "Company",
 };
 
 type ColumnMapping = {
@@ -26,6 +37,8 @@ type ColumnMapping = {
   phone_number?: string;
   truck_number?: string;
   solo_or_team?: string;
+  subscription_amount?: string;
+  company_id?: string;
 };
 
 // Type for driver data during import
@@ -34,6 +47,8 @@ type ImportDriverData = {
   phone_number: string;
   truck_number: string;
   solo_or_team: "solo" | "team";
+  subscription_amount: number;
+  company_id?: number;
 };
 
 // Function to clean string values
@@ -72,6 +87,10 @@ const createDriverData = (
   solo_or_team: (data.solo_or_team
     ? cleanValue(data.solo_or_team).toLowerCase()
     : "solo") as "solo" | "team",
+  subscription_amount: data.subscription_amount
+    ? Number(data.subscription_amount)
+    : 0,
+  company_id: data.company_id,
 });
 
 // Function to parse CSV data
@@ -132,6 +151,30 @@ export function ImportDrivers() {
   const [fileContent, setFileContent] = useState<string>("");
   const [fileType, setFileType] = useState<"json" | "csv" | null>(null);
   const { toast } = useToast();
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [isLoadingCompanies, setIsLoadingCompanies] = useState(false);
+
+  // Fetch companies on component mount
+  useEffect(() => {
+    const fetchCompanies = async () => {
+      setIsLoadingCompanies(true);
+      try {
+        const response = await getCompanies();
+        setCompanies(response.data);
+      } catch (error) {
+        console.error("Error fetching companies:", error);
+        toast({
+          title: "Error",
+          description: "Failed to load companies list",
+          variant: "destructive",
+        });
+      } finally {
+        setIsLoadingCompanies(false);
+      }
+    };
+
+    fetchCompanies();
+  }, []);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -188,22 +231,21 @@ export function ImportDrivers() {
   const updateManualDriver = (
     index: number,
     field: keyof ImportDriverData,
-    value: string
+    value: string | number
   ) => {
     setManualDrivers((prev) => {
       const updated = [...prev];
-      let cleanedValue =
-        field === "phone_number" || field === "truck_number"
-          ? cleanNumberValue(value)
-          : cleanValue(value);
-
-      updated[index] = createDriverData({
-        ...updated[index],
-        [field]:
-          field === "solo_or_team"
-            ? (cleanedValue as "solo" | "team")
-            : cleanedValue,
-      });
+      if (field === "company_id") {
+        updated[index] = {
+          ...updated[index],
+          company_id: typeof value === "string" ? parseInt(value, 10) : value,
+        };
+      } else {
+        updated[index] = {
+          ...updated[index],
+          [field]: value,
+        };
+      }
       return updated;
     });
   };
@@ -309,13 +351,141 @@ export function ImportDrivers() {
 
   return (
     <div className="space-y-4">
-      <Tabs defaultValue="file">
-        <TabsList>
-          <TabsTrigger value="file">File Upload</TabsTrigger>
+      <Tabs defaultValue="file" className="w-full">
+        <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="manual">Manual Entry</TabsTrigger>
+          <TabsTrigger value="file">File Import</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="file">
+        <TabsContent value="manual" className="space-y-4">
+          <ScrollArea className="h-[400px] pr-4">
+            {manualDrivers.map((driver, index) => (
+              <div key={index} className="space-y-2 mb-4 p-4 border rounded-lg">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor={`name-${index}`}>Name</Label>
+                    <Input
+                      id={`name-${index}`}
+                      value={driver.name}
+                      onChange={(e) =>
+                        updateManualDriver(index, "name", e.target.value)
+                      }
+                      placeholder="Enter driver name"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor={`company-${index}`}>Company</Label>
+                    <Select
+                      value={driver.company_id?.toString()}
+                      onValueChange={(value) =>
+                        updateManualDriver(index, "company_id", value)
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select company" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {companies.map((company) => (
+                          <SelectItem
+                            key={company.id}
+                            value={company.id.toString()}
+                          >
+                            {company.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label htmlFor={`phone-${index}`}>Phone</Label>
+                    <Input
+                      id={`phone-${index}`}
+                      value={driver.phone_number}
+                      onChange={(e) =>
+                        updateManualDriver(
+                          index,
+                          "phone_number",
+                          e.target.value
+                        )
+                      }
+                      disabled={isLoading}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor={`truck-${index}`}>Truck #</Label>
+                    <Input
+                      id={`truck-${index}`}
+                      value={driver.truck_number}
+                      onChange={(e) =>
+                        updateManualDriver(
+                          index,
+                          "truck_number",
+                          e.target.value
+                        )
+                      }
+                      disabled={isLoading}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor={`type-${index}`}>Type</Label>
+                    <select
+                      id={`type-${index}`}
+                      value={driver.solo_or_team}
+                      onChange={(e) =>
+                        updateManualDriver(
+                          index,
+                          "solo_or_team",
+                          e.target.value
+                        )
+                      }
+                      disabled={isLoading}
+                      className="w-full p-2 border rounded"
+                    >
+                      <option value="solo">Solo</option>
+                      <option value="team">Team</option>
+                    </select>
+                  </div>
+                  <div>
+                    <Label htmlFor={`price-${index}`}>Weekly Price</Label>
+                    <Input
+                      id={`price-${index}`}
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      placeholder="250"
+                      value={driver.subscription_amount || ""}
+                      onChange={(e) =>
+                        updateManualDriver(
+                          index,
+                          "subscription_amount",
+                          e.target.value
+                        )
+                      }
+                      disabled={isLoading}
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </ScrollArea>
+          <div className="flex gap-4">
+            <Button
+              onClick={addManualDriver}
+              variant="outline"
+              disabled={isLoading}
+            >
+              Add Driver
+            </Button>
+            <Button
+              onClick={handleManualSubmit}
+              disabled={manualDrivers.length === 0 || isLoading}
+            >
+              {isLoading ? "Creating..." : "Create Drivers"}
+            </Button>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="file" className="space-y-4">
           <div className="space-y-4">
             <div>
               <Label htmlFor="file">Upload JSON or CSV file</Label>
@@ -329,49 +499,39 @@ export function ImportDrivers() {
             </div>
 
             {fileHeaders.length > 0 && (
-              <div className="space-y-4 border rounded-lg p-4">
-                <h3 className="font-medium">Map Columns</h3>
-                <p className="text-sm text-gray-500">
-                  Match your file's columns to our required fields
-                </p>
-                <ScrollArea className="h-[300px]">
-                  <div className="space-y-4">
-                    {(
-                      Object.entries(REQUIRED_FIELDS) as [
-                        keyof typeof REQUIRED_FIELDS,
-                        string,
-                      ][]
-                    ).map(([field, description]) => (
-                      <div key={field} className="grid gap-2">
-                        <Label htmlFor={`mapping-${field}`}>
-                          {field} <span className="text-red-500">*</span>
-                          <span className="text-sm text-gray-500 block">
-                            {description}
-                          </span>
-                        </Label>
-                        <select
-                          id={`mapping-${field}`}
-                          value={columnMapping[field] || ""}
-                          onChange={(e) =>
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold">Map Columns</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  {Object.entries(REQUIRED_FIELDS).map(
+                    ([field, description]) => (
+                      <div key={field} className="space-y-2">
+                        <Label>{description}</Label>
+                        <Select
+                          value={columnMapping[field as keyof ColumnMapping]}
+                          onValueChange={(value) =>
                             setColumnMapping((prev) => ({
                               ...prev,
-                              [field]: e.target.value,
+                              [field]: value,
                             }))
                           }
-                          className="w-full p-2 border rounded"
-                          disabled={isLoading}
                         >
-                          <option value="">Select a column</option>
-                          {fileHeaders.map((header) => (
-                            <option key={header} value={header}>
-                              {header}
-                            </option>
-                          ))}
-                        </select>
+                          <SelectTrigger>
+                            <SelectValue
+                              placeholder={`Select column for ${description}`}
+                            />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {fileHeaders.map((header) => (
+                              <SelectItem key={header} value={header}>
+                                {header}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
-                    ))}
-                  </div>
-                </ScrollArea>
+                    )
+                  )}
+                </div>
               </div>
             )}
 
@@ -381,79 +541,6 @@ export function ImportDrivers() {
             >
               {isLoading ? "Importing..." : "Import Drivers"}
             </Button>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="manual">
-          <div className="space-y-4">
-            {manualDrivers.map((driver, index) => (
-              <div key={index} className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor={`name-${index}`}>Name</Label>
-                  <Input
-                    id={`name-${index}`}
-                    value={driver.name}
-                    onChange={(e) =>
-                      updateManualDriver(index, "name", e.target.value)
-                    }
-                    disabled={isLoading}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor={`phone-${index}`}>Phone</Label>
-                  <Input
-                    id={`phone-${index}`}
-                    value={driver.phone_number}
-                    onChange={(e) =>
-                      updateManualDriver(index, "phone_number", e.target.value)
-                    }
-                    disabled={isLoading}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor={`truck-${index}`}>Truck #</Label>
-                  <Input
-                    id={`truck-${index}`}
-                    value={driver.truck_number}
-                    onChange={(e) =>
-                      updateManualDriver(index, "truck_number", e.target.value)
-                    }
-                    disabled={isLoading}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor={`type-${index}`}>Type</Label>
-                  <select
-                    id={`type-${index}`}
-                    value={driver.solo_or_team}
-                    onChange={(e) =>
-                      updateManualDriver(index, "solo_or_team", e.target.value)
-                    }
-                    disabled={isLoading}
-                    className="w-full p-2 border rounded"
-                  >
-                    <option value="solo">Solo</option>
-                    <option value="team">Team</option>
-                  </select>
-                </div>
-              </div>
-            ))}
-
-            <div className="flex gap-4">
-              <Button
-                onClick={addManualDriver}
-                variant="outline"
-                disabled={isLoading}
-              >
-                Add Driver
-              </Button>
-              <Button
-                onClick={handleManualSubmit}
-                disabled={manualDrivers.length === 0 || isLoading}
-              >
-                {isLoading ? "Creating..." : "Create Drivers"}
-              </Button>
-            </div>
           </div>
         </TabsContent>
       </Tabs>

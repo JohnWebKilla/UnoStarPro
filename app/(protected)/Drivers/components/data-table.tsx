@@ -15,6 +15,7 @@ import {
   Column,
   Row,
   Table as TableType,
+  Header,
 } from "@tanstack/react-table";
 
 import {
@@ -331,8 +332,6 @@ TablePagination.displayName = "TablePagination";
 interface DataTableProps<TData> {
   columns: ColumnDef<TData>[];
   data: TData[];
-  loadingRows?: Record<number, boolean>;
-  loading?: boolean;
   error?: string;
   onActivateSelected?: (ids: number[]) => Promise<void>;
   onDeactivateSelected?: (ids: number[]) => Promise<void>;
@@ -347,8 +346,6 @@ interface DataTableProps<TData> {
 export function DataTable<TData>({
   columns,
   data,
-  loadingRows = {},
-  loading = false,
   error,
   onActivateSelected,
   onDeactivateSelected,
@@ -520,88 +517,49 @@ export function DataTable<TData>({
       <div className="drivers-table-container rounded-md border">
         <Table className="drivers-table">
           <TableHeader>
-            {table.getHeaderGroups().map((headerGroup) => (
-              <TableRow key={headerGroup.id}>
-                <TableHead className="w-[40px] p-0 bg-background">
-                  <div className="h-8 flex items-center justify-center">
-                    <Checkbox
-                      checked={
-                        table.getIsAllPageRowsSelected() ||
-                        (table.getIsSomePageRowsSelected() && "indeterminate")
-                      }
-                      onCheckedChange={(value) =>
-                        table.toggleAllPageRowsSelected(!!value)
-                      }
-                      aria-label="Select all"
-                      className="translate-y-[2px]"
-                    />
-                  </div>
-                </TableHead>
-                {headerGroup.headers.map((header) => {
-                  if (header.id === "select") return null;
-                  return (
-                    <TableHead
-                      key={header.id}
-                      data-column={header.id}
-                      className={cn(
-                        "h-10 bg-background",
-                        header.column.getCanSort() &&
-                          "cursor-pointer select-none sticky top-0 z-10"
-                      )}
-                      onClick={header.column.getToggleSortingHandler()}
-                    >
-                      <div className="flex items-center gap-2">
-                        {flexRender(
-                          header.column.columnDef.header,
-                          header.getContext()
-                        )}
-                        {{
-                          asc: <ChevronDown className="h-4 w-4" />,
-                          desc: <ChevronDown className="h-4 w-4 rotate-180" />,
-                        }[header.column.getIsSorted() as string] ?? null}
-                      </div>
-                    </TableHead>
-                  );
-                })}
-              </TableRow>
-            ))}
+            <TableRow>
+              <TableHead className="w-[30px]">
+                <Checkbox
+                  checked={table.getIsAllPageRowsSelected()}
+                  onCheckedChange={(value) =>
+                    table.toggleAllPageRowsSelected(!!value)
+                  }
+                  aria-label="Select all"
+                  className="translate-y-[2px]"
+                />
+              </TableHead>
+              {table.getAllColumns().map((column) => {
+                if (!column.getCanHide()) return null;
+                return (
+                  <TableHead key={column.id}>
+                    {column.id.charAt(0).toUpperCase() +
+                      column.id.slice(1).replace(/_/g, " ")}
+                  </TableHead>
+                );
+              })}
+            </TableRow>
           </TableHeader>
           <TableBody>
-            {loading ? (
-              Array.from({ length: 10 }).map((_, index) => (
-                <LoadingRow key={index} />
-              ))
-            ) : table.getRowModel().rows?.length ? (
+            {table.getRowModel().rows?.length ? (
               table.getRowModel().rows.map((row) => (
                 <TableRow
                   key={row.id}
                   data-state={row.getIsSelected() && "selected"}
                 >
-                  <TableCell className="w-[40px] p-0">
-                    <div className="h-8 flex items-center justify-center">
-                      <Checkbox
-                        checked={row.getIsSelected()}
-                        onCheckedChange={(value) => row.toggleSelected(!!value)}
-                        aria-label="Select row"
-                        className="translate-y-[2px]"
-                      />
-                    </div>
+                  <TableCell className="w-[30px]">
+                    <Checkbox
+                      checked={row.getIsSelected()}
+                      onCheckedChange={(value) => row.toggleSelected(!!value)}
+                      aria-label="Select row"
+                      className="translate-y-[2px]"
+                    />
                   </TableCell>
                   {row.getVisibleCells().map((cell) => {
                     const columnId = cell.column.id;
                     const driver = row.original as Driver;
                     return (
-                      <TableCell
-                        key={cell.id}
-                        data-column={columnId}
-                        className={cn(
-                          "py-2",
-                          loadingRows[row.index] && "animate-pulse"
-                        )}
-                      >
-                        {loadingRows[row.index] ? (
-                          <LoadingCell type={columnId} />
-                        ) : columnId === "status" ? (
+                      <TableCell key={cell.id} data-column={columnId}>
+                        {columnId === "status" ? (
                           <StatusBadge
                             status={cell.getValue() as string}
                             isProcessing={processingDrivers[driver.id]}
@@ -643,7 +601,54 @@ export function DataTable<TData>({
         </Table>
       </div>
 
-      <TablePagination table={table} />
+      <div className="flex items-center justify-between space-x-2 py-4">
+        <div className="flex-1 text-sm text-muted-foreground">
+          {table.getFilteredSelectedRowModel().rows.length} of{" "}
+          {table.getFilteredRowModel().rows.length} row(s) selected.
+        </div>
+        <div className="flex items-center space-x-6 lg:space-x-8">
+          <div className="flex items-center space-x-2">
+            <p className="text-sm font-medium">Rows per page</p>
+            <Select
+              value={`${table.getState().pagination.pageSize}`}
+              onValueChange={(value) => {
+                table.setPageSize(Number(value));
+              }}
+            >
+              <SelectTrigger className="h-8 w-[70px]">
+                <SelectValue
+                  placeholder={table.getState().pagination.pageSize}
+                />
+              </SelectTrigger>
+              <SelectContent side="top">
+                {[10, 20, 30, 40, 50].map((pageSize) => (
+                  <SelectItem key={pageSize} value={`${pageSize}`}>
+                    {pageSize}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center space-x-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => table.previousPage()}
+              disabled={!table.getCanPreviousPage()}
+            >
+              Previous
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => table.nextPage()}
+              disabled={!table.getCanNextPage()}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -801,20 +806,29 @@ const QuickActions = React.memo(
 
     return (
       <div className="flex items-center justify-end gap-2">
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={handleStatusToggle}
-          disabled={isProcessing}
-        >
-          {isProcessing ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : driver.status === "active" ? (
-            <XCircle className="h-4 w-4 text-destructive" />
-          ) : (
-            <CheckCircle className="h-4 w-4 text-green-600" />
-          )}
-        </Button>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleStatusToggle}
+                disabled={isProcessing}
+              >
+                {isProcessing ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : driver.status === "active" ? (
+                  <XCircle className="h-4 w-4 text-destructive" />
+                ) : (
+                  <CheckCircle className="h-4 w-4 text-green-600" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {driver.status === "active" ? "Deactivate" : "Activate"} driver
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
 
         <TooltipProvider>
           <Tooltip>

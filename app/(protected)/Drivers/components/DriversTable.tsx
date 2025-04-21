@@ -52,6 +52,7 @@ import { useToast } from "@/components/ui/use-toast";
 import { Driver } from "../types";
 import { createClient } from "@/utils/supabase/client";
 import { UploadDocumentDialog } from "./UploadDocumentDialog";
+import { SyncStripeButton } from "./SyncStripeButton";
 
 // Dynamically import Dialog components with no SSR
 const Dialog = dynamic(

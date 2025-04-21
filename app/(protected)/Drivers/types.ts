@@ -27,6 +27,11 @@ export interface Driver {
   type: "solo" | "team";
   solo_or_team?: string; // Legacy field
   status: "active" | "inactive" | "terminated" | "pending";
+  description?: string;
+  active: boolean;
+  metadata?: Record<string, string>;
+  price_amount?: number;
+  price_currency?: string;
   documents: {
     id: string;
     name: string;
@@ -59,6 +64,7 @@ export interface Driver {
   updatedAt: string;
   created_at?: string; // Legacy field
   updated_at?: string; // Legacy field
+  last_synced_at?: string;
 }
 
 // Driver status options
@@ -92,4 +98,16 @@ export interface RealtimePayload {
   eventType: "INSERT" | "UPDATE" | "DELETE";
   new: Driver;
   old: Driver;
+}
+
+export interface NameMatchSuggestion {
+  stripeProduct: {
+    id: string;
+    name: string;
+  };
+  dbDriver: {
+    id: number;
+    name: string;
+  };
+  similarity: number;
 }

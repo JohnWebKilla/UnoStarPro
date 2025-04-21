@@ -17,6 +17,7 @@ import { updateDriverStatusLocally } from "../realtime";
 import { toast } from "@/components/ui/use-toast";
 import { Driver, Document } from "../types";
 import { ProgressIndicator } from "./ProgressIndicator";
+import { StripeSyncButton } from "./StripeSyncButton";
 
 type DriverStatus = "active" | "inactive" | "terminated" | "pending";
 
@@ -181,10 +182,18 @@ export function DriversHeader({
     <>
       <Card>
         <CardHeader>
-          <CardTitle>Drivers</CardTitle>
-          <CardDescription>
-            Manage your drivers and their Stripe integrations
-          </CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Drivers</CardTitle>
+              <CardDescription>
+                Manage your drivers and their Stripe integrations
+              </CardDescription>
+            </div>
+            <div className="flex items-center gap-4">
+              <StripeSyncButton />
+              <AddDriverDialog onDriverAdded={refreshDrivers} />
+            </div>
+          </div>
         </CardHeader>
       </Card>
       <ProgressIndicator />

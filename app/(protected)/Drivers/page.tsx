@@ -17,45 +17,44 @@ import {
 } from "@/components/ui/dialog";
 import { useState } from "react";
 import { CacheManager } from "./components/CacheManager";
-
-export default function DriversPage() {
-  return (
-    <>
-      <CacheManager />
-      <DriversProvider>
-        <PageTransition>
-          <div className="space-y-4">
-            <DriversContent />
-          </div>
-        </PageTransition>
-      </DriversProvider>
-    </>
-  );
-}
+import { deleteClientCache } from "@/utils/client-cache";
 
 function DriversContent() {
-  const { drivers, loading, error, syncWithServer, setDrivers } = useDrivers();
+  const { drivers, error, syncWithServer, setDrivers } = useDrivers();
   const { toast } = useToast();
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [selectedRows, setSelectedRows] = useState({});
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // Convert error to string for DataTable
   const errorMessage = error ? error.message : undefined;
 
   const handleClearCache = async () => {
     try {
+      // Clear server-side cache
       await clearDriverCaches();
-      await syncWithServer();
+
+      // Clear client-side cache
+      await deleteClientCache("drivers:client-list");
+      localStorage.removeItem("drivers:client-list");
+      localStorage.removeItem("drivers:client-list:timestamp");
+
+      // Trigger IndexedDB cache clear
       window.dispatchEvent(new Event("clear-drivers-cache"));
+
+      // Refresh data from server
+      await syncWithServer();
 
       toast({
         title: "Cache cleared",
-        description: "The drivers cache has been cleared and data refreshed.",
+        description:
+          "All caches have been cleared and data refreshed from the server.",
       });
     } catch (error) {
+      console.error("Error clearing cache:", error);
       toast({
         title: "Error",
-        description: "Failed to clear the drivers cache.",
+        description: "Failed to clear the drivers cache. Please try again.",
         variant: "destructive",
       });
     }
@@ -63,6 +62,7 @@ function DriversContent() {
 
   const handleSync = async () => {
     try {
+      setIsSyncing(true);
       await syncWithServer();
       toast({
         title: "Sync complete",
@@ -74,6 +74,8 @@ function DriversContent() {
         description: "Failed to synchronize with Stripe.",
         variant: "destructive",
       });
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -82,114 +84,42 @@ function DriversContent() {
   };
 
   const handleActivateSelected = async (ids: number[]) => {
-    const snapshot = [...drivers]; // Take a snapshot of current state
+    const snapshot = [...drivers];
     try {
-      // Update local state optimistically
       setDrivers(
         drivers.map((driver) => ({
           ...driver,
-          status: ids.includes(Number(driver.id))
-            ? ("active" as const)
-            : driver.status,
+          status: ids.includes(Number(driver.id)) ? "active" : driver.status,
         }))
       );
 
-      // Make a single batch request
-      const result = await updateDriverStatusBatchAction(ids, "active");
-
-      if (!result.success) {
-        throw new Error(result.error || "Failed to activate drivers");
-      }
-
-      // If we have updated drivers from the server, use them to update state
-      if (result.updatedDrivers) {
-        setDrivers((prevDrivers) => {
-          const driverMap = new Map(
-            result.updatedDrivers?.map((d) => [d.id.toString(), d])
-          );
-          return prevDrivers.map((driver) => {
-            const updatedDriver = driverMap.get(driver.id.toString());
-            return updatedDriver || driver;
-          });
-        });
-      }
-
-      // Clear row selection
-      setSelectedRows({});
-
-      toast({
-        title: "Success",
-        description: `Successfully activated ${ids.length} driver(s)`,
-      });
+      await updateDriverStatusBatchAction(ids, "active");
     } catch (error) {
-      console.error("Error activating drivers:", error);
-
-      // Restore the original state
       setDrivers(snapshot);
-
       toast({
         title: "Error",
-        description:
-          error instanceof Error
-            ? error.message
-            : "Failed to activate selected drivers",
+        description: "Failed to activate selected drivers.",
         variant: "destructive",
       });
     }
   };
 
   const handleDeactivateSelected = async (ids: number[]) => {
-    const snapshot = [...drivers]; // Take a snapshot of current state
+    const snapshot = [...drivers];
     try {
-      // Update local state optimistically
       setDrivers(
         drivers.map((driver) => ({
           ...driver,
-          status: ids.includes(Number(driver.id))
-            ? ("inactive" as const)
-            : driver.status,
+          status: ids.includes(Number(driver.id)) ? "inactive" : driver.status,
         }))
       );
 
-      // Make a single batch request
-      const result = await updateDriverStatusBatchAction(ids, "inactive");
-
-      if (!result.success) {
-        throw new Error(result.error || "Failed to deactivate drivers");
-      }
-
-      // If we have updated drivers from the server, use them to update state
-      if (result.updatedDrivers) {
-        setDrivers((prevDrivers) => {
-          const driverMap = new Map(
-            result.updatedDrivers?.map((d) => [d.id.toString(), d])
-          );
-          return prevDrivers.map((driver) => {
-            const updatedDriver = driverMap.get(driver.id.toString());
-            return updatedDriver || driver;
-          });
-        });
-      }
-
-      // Clear row selection
-      setSelectedRows({});
-
-      toast({
-        title: "Success",
-        description: `Successfully deactivated ${ids.length} driver(s)`,
-      });
+      await updateDriverStatusBatchAction(ids, "inactive");
     } catch (error) {
-      console.error("Error deactivating drivers:", error);
-
-      // Restore the original state
       setDrivers(snapshot);
-
       toast({
         title: "Error",
-        description:
-          error instanceof Error
-            ? error.message
-            : "Failed to deactivate selected drivers",
+        description: "Failed to deactivate selected drivers.",
         variant: "destructive",
       });
     }
@@ -201,7 +131,7 @@ function DriversContent() {
         onSync={handleSync}
         onClearCache={handleClearCache}
         onAddDriver={handleAddDriver}
-        isSyncing={loading}
+        isSyncing={isSyncing}
       />
       <Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>
         <DialogContent className="max-w-3xl">
@@ -213,9 +143,6 @@ function DriversContent() {
       <DataTable
         columns={columns}
         data={drivers}
-        loadingRows={
-          loading ? Object.fromEntries(drivers.map((_, i) => [i, true])) : {}
-        }
         error={errorMessage}
         onActivateSelected={handleActivateSelected}
         onDeactivateSelected={handleDeactivateSelected}
@@ -223,5 +150,16 @@ function DriversContent() {
         onRowSelectionChange={setSelectedRows}
       />
     </div>
+  );
+}
+
+export default function DriversPage() {
+  return (
+    <DriversProvider>
+      <PageTransition>
+        <CacheManager />
+        <DriversContent />
+      </PageTransition>
+    </DriversProvider>
   );
 }

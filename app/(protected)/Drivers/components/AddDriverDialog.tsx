@@ -66,7 +66,7 @@ const driverFormSchema = z.object({
   subscription_amount: z.preprocess(
     (val) =>
       val === "" || val === null || val === undefined ? 0 : Number(val),
-    z.number().min(0, "Subscription amount must be a positive number")
+    z.number().min(0, "Weekly price must be a positive number")
   ),
   hire_date: z.date({
     required_error: "Hire date is required",
@@ -109,9 +109,10 @@ export function AddDriverDialog({ onDriverAdded }: AddDriverDialogProps) {
 
   // Handle form submission with minimal possible fields
   const onSubmit = async (data: DriverFormValues) => {
+    if (isLoading) return;
+
     setIsLoading(true);
     try {
-      // Format driver data for API
       const driverData = {
         name: data.name.trim(),
         phone_number: data.phone_number.trim(),
@@ -120,14 +121,11 @@ export function AddDriverDialog({ onDriverAdded }: AddDriverDialogProps) {
         status: data.status.toLowerCase(),
         company_id: data.company_id,
         subscription_amount: Number(data.subscription_amount) || 0,
+        subscription_frequency: "weekly",
         hire_date: data.hire_date.toISOString(),
-        terminated_date: null,
       };
 
-      // Log the data being submitted for debugging
-      console.log("Submitting driver data:", driverData);
-
-      // Use the API endpoint instead of direct Supabase access
+      // Create new driver
       const response = await fetch("/api/drivers", {
         method: "POST",
         headers: {
@@ -139,14 +137,26 @@ export function AddDriverDialog({ onDriverAdded }: AddDriverDialogProps) {
       const result = await response.json();
 
       if (!response.ok) {
-        console.error("API error:", result);
-        toast({
-          variant: "destructive",
-          title: "Error adding driver",
-          description:
-            result.error || "Failed to add driver. Please try again.",
+        throw new Error(result.error || "Failed to create driver");
+      }
+
+      // Sync with Stripe if subscription amount is set
+      if (driverData.subscription_amount > 0) {
+        const syncResponse = await fetch(`/api/drivers/${result.id}/sync`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            name: driverData.name,
+            subscription_amount: driverData.subscription_amount,
+            subscription_frequency: driverData.subscription_frequency,
+          }),
         });
-        return;
+
+        if (!syncResponse.ok) {
+          throw new Error("Failed to sync with Stripe");
+        }
       }
 
       // Clear both client and server caches
@@ -158,7 +168,10 @@ export function AddDriverDialog({ onDriverAdded }: AddDriverDialogProps) {
       // Success case
       toast({
         title: "Success",
-        description: "Driver added successfully",
+        description:
+          driverData.subscription_amount > 0
+            ? "Driver added and synced with Stripe successfully"
+            : "Driver added successfully",
       });
 
       form.reset();
@@ -169,7 +182,8 @@ export function AddDriverDialog({ onDriverAdded }: AddDriverDialogProps) {
       toast({
         variant: "destructive",
         title: "Error",
-        description: "An unexpected error occurred",
+        description:
+          err instanceof Error ? err.message : "An unexpected error occurred",
       });
     } finally {
       setIsLoading(false);
@@ -299,7 +313,7 @@ export function AddDriverDialog({ onDriverAdded }: AddDriverDialogProps) {
               name="subscription_amount"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>PPD (weekly)</FormLabel>
+                  <FormLabel>Weekly Price</FormLabel>
                   <FormControl>
                     <Input
                       type="number"
@@ -317,7 +331,7 @@ export function AddDriverDialog({ onDriverAdded }: AddDriverDialogProps) {
                     />
                   </FormControl>
                   <FormMessage />
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-sm text-gray-400">
                     Weekly subscription amount per driver
                   </p>
                 </FormItem>

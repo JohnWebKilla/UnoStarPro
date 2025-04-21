@@ -377,6 +377,126 @@ class DriversIndexedDB {
       }
     });
   }
+
+  async addDriver(driver: Driver): Promise<void> {
+    await this.connect();
+    await this.ensureStoreExists(DRIVERS_STORE);
+
+    return new Promise((resolve, reject) => {
+      if (!this.db) {
+        reject(new Error("Database not initialized"));
+        return;
+      }
+
+      try {
+        const transaction = this.db.transaction(DRIVERS_STORE, "readwrite");
+        const store = transaction.objectStore(DRIVERS_STORE);
+        const request = store.add(driver);
+
+        request.onerror = () => {
+          console.error("Error adding driver:", request.error);
+          reject(request.error);
+        };
+
+        request.onsuccess = () => {
+          resolve();
+        };
+      } catch (error) {
+        console.error("Transaction error:", error);
+        reject(error);
+      }
+    });
+  }
+
+  async updateDriver(driver: Driver): Promise<void> {
+    await this.connect();
+    await this.ensureStoreExists(DRIVERS_STORE);
+
+    return new Promise((resolve, reject) => {
+      if (!this.db) {
+        reject(new Error("Database not initialized"));
+        return;
+      }
+
+      try {
+        const transaction = this.db.transaction(DRIVERS_STORE, "readwrite");
+        const store = transaction.objectStore(DRIVERS_STORE);
+        const request = store.put(driver);
+
+        request.onerror = () => {
+          console.error("Error updating driver:", request.error);
+          reject(request.error);
+        };
+
+        request.onsuccess = () => {
+          resolve();
+        };
+      } catch (error) {
+        console.error("Transaction error:", error);
+        reject(error);
+      }
+    });
+  }
+
+  async deleteDriver(id: number): Promise<void> {
+    await this.connect();
+    await this.ensureStoreExists(DRIVERS_STORE);
+
+    return new Promise((resolve, reject) => {
+      if (!this.db) {
+        reject(new Error("Database not initialized"));
+        return;
+      }
+
+      try {
+        const transaction = this.db.transaction(DRIVERS_STORE, "readwrite");
+        const store = transaction.objectStore(DRIVERS_STORE);
+        const request = store.delete(id);
+
+        request.onerror = () => {
+          console.error("Error deleting driver:", request.error);
+          reject(request.error);
+        };
+
+        request.onsuccess = () => {
+          resolve();
+        };
+      } catch (error) {
+        console.error("Transaction error:", error);
+        reject(error);
+      }
+    });
+  }
+
+  async clearDrivers(): Promise<void> {
+    await this.connect();
+    await this.ensureStoreExists(DRIVERS_STORE);
+
+    return new Promise((resolve, reject) => {
+      if (!this.db) {
+        reject(new Error("Database not initialized"));
+        return;
+      }
+
+      try {
+        const transaction = this.db.transaction(DRIVERS_STORE, "readwrite");
+        const store = transaction.objectStore(DRIVERS_STORE);
+        const request = store.clear();
+
+        request.onerror = () => {
+          console.error("Error clearing drivers:", request.error);
+          reject(request.error);
+        };
+
+        request.onsuccess = () => {
+          resolve();
+        };
+      } catch (error) {
+        console.error("Transaction error:", error);
+        reject(error);
+      }
+    });
+  }
 }
 
 // Export a singleton instance

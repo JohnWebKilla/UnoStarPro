@@ -4,6 +4,7 @@ import Stripe from "stripe";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@supabase/supabase-js";
 import { invalidatePaymentMethodsCache } from "@/lib/redis";
+import { handleProductEvent } from "./product-sync";
 
 // Add debug logging for environment variables
 console.log("Environment Check:", {
@@ -112,6 +113,12 @@ export async function POST(req: Request) {
     console.log("Processing Stripe event:", event.type);
 
     try {
+      // Handle product-related events
+      if (event.type.startsWith("product.")) {
+        await handleProductEvent(event);
+        return NextResponse.json({ received: true });
+      }
+
       let updated = false;
       let result;
 
