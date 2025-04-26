@@ -12,6 +12,64 @@ const DOCUMENT_TABLES = {
 
 type DocumentType = keyof typeof DOCUMENT_TABLES;
 
+// Add a function to ensure the documents bucket exists
+async function ensureDocumentsBucket(supabase: any) {
+  try {
+    // Check if bucket exists
+    const { data: buckets, error: listError } =
+      await supabase.storage.listBuckets();
+
+    if (listError) {
+      console.error("Error listing buckets:", listError);
+      throw new Error(`Failed to list buckets: ${listError.message}`);
+    }
+
+    const documentsBucket = buckets?.find((b: any) => b.name === "documents");
+
+    if (!documentsBucket) {
+      console.log("Documents bucket not found, creating...");
+
+      // Create the bucket
+      const { data: newBucket, error: createError } =
+        await supabase.storage.createBucket("documents", {
+          public: true,
+          allowedMimeTypes: ["application/pdf", "image/jpeg", "image/png"],
+          fileSizeLimit: 52428800, // 50MB
+        });
+
+      if (createError) {
+        console.error("Error creating bucket:", createError);
+        throw new Error(`Failed to create bucket: ${createError.message}`);
+      }
+
+      console.log("Created new bucket:", newBucket);
+      return true;
+    }
+
+    console.log("Documents bucket exists:", documentsBucket);
+
+    // Update bucket to ensure it's public
+    const { error: updateError } = await supabase.storage.updateBucket(
+      "documents",
+      {
+        public: true,
+        allowedMimeTypes: ["application/pdf", "image/jpeg", "image/png"],
+        fileSizeLimit: 52428800, // 50MB
+      }
+    );
+
+    if (updateError) {
+      console.error("Error updating bucket:", updateError);
+      throw new Error(`Failed to update bucket: ${updateError.message}`);
+    }
+
+    return true;
+  } catch (error) {
+    console.error("Error ensuring documents bucket:", error);
+    throw error;
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const cookieStore = cookies();
@@ -32,6 +90,19 @@ export async function POST(req: Request) {
 
     if (!user) {
       return new NextResponse("No active session found", { status: 401 });
+    }
+
+    // Ensure the documents bucket exists before uploading
+    try {
+      await ensureDocumentsBucket(supabase);
+    } catch (error) {
+      console.error("Failed to ensure documents bucket:", error);
+      return new NextResponse(
+        `Storage configuration error: ${error instanceof Error ? error.message : "Unknown error"}`,
+        {
+          status: 500,
+        }
+      );
     }
 
     const userId = user.id;

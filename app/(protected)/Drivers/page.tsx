@@ -6,7 +6,7 @@ import { DriversProvider, useDrivers } from "./components/DriversProvider";
 import { StatsCards } from "./components/stats-cards";
 import { useToast } from "@/components/ui/use-toast";
 import { PageHeader } from "./components/page-header";
-import { clearDriverCaches, updateDriverStatusBatchAction } from "./actions";
+import { clearDriverCaches } from "./actions";
 import { PageTransition } from "@/components/ui/page-transition";
 import { ImportDrivers } from "./components/ImportDrivers";
 import {
@@ -18,12 +18,13 @@ import {
 import { useState } from "react";
 import { CacheManager } from "./components/CacheManager";
 import { deleteClientCache } from "@/utils/client-cache";
+import { useRouter } from "next/navigation";
 
 function DriversContent() {
-  const { drivers, error, syncWithServer, setDrivers } = useDrivers();
+  const { drivers, error, syncWithServer } = useDrivers();
   const { toast } = useToast();
+  const router = useRouter();
   const [showImportDialog, setShowImportDialog] = useState(false);
-  const [selectedRows, setSelectedRows] = useState({});
   const [isSyncing, setIsSyncing] = useState(false);
 
   // Convert error to string for DataTable
@@ -83,46 +84,8 @@ function DriversContent() {
     setShowImportDialog(true);
   };
 
-  const handleActivateSelected = async (ids: number[]) => {
-    const snapshot = [...drivers];
-    try {
-      setDrivers(
-        drivers.map((driver) => ({
-          ...driver,
-          status: ids.includes(Number(driver.id)) ? "active" : driver.status,
-        }))
-      );
-
-      await updateDriverStatusBatchAction(ids, "active");
-    } catch (error) {
-      setDrivers(snapshot);
-      toast({
-        title: "Error",
-        description: "Failed to activate selected drivers.",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleDeactivateSelected = async (ids: number[]) => {
-    const snapshot = [...drivers];
-    try {
-      setDrivers(
-        drivers.map((driver) => ({
-          ...driver,
-          status: ids.includes(Number(driver.id)) ? "inactive" : driver.status,
-        }))
-      );
-
-      await updateDriverStatusBatchAction(ids, "inactive");
-    } catch (error) {
-      setDrivers(snapshot);
-      toast({
-        title: "Error",
-        description: "Failed to deactivate selected drivers.",
-        variant: "destructive",
-      });
-    }
+  const handleRowClick = (driverId: string) => {
+    router.push(`/Drivers/${driverId}`);
   };
 
   return (
@@ -144,10 +107,7 @@ function DriversContent() {
         columns={columns}
         data={drivers}
         error={errorMessage}
-        onActivateSelected={handleActivateSelected}
-        onDeactivateSelected={handleDeactivateSelected}
-        rowSelection={selectedRows}
-        onRowSelectionChange={setSelectedRows}
+        onRowClick={handleRowClick}
       />
     </div>
   );

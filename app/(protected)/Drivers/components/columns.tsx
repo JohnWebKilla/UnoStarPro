@@ -253,7 +253,9 @@ export const columns: ColumnDef<Driver>[] = [
           variant="ghost"
           size="sm"
           className="h-8 flex items-center gap-2 text-slate-900 dark:text-slate-100"
-          onClick={() => router.push(`/Drivers/${row.original.id}/documents`)}
+          onClick={() =>
+            router.push(`/Drivers/${row.original.id}?tab=documents`)
+          }
         >
           View
           {totalDocs > 0 && (
@@ -331,115 +333,6 @@ export const columns: ColumnDef<Driver>[] = [
         <span className="text-slate-900 dark:text-slate-100">
           ${displayAmount.toFixed(2)}/mo
         </span>
-      );
-    },
-  },
-  {
-    accessorKey: "subscription",
-    header: ({ column }) => {
-      return (
-        <Button
-          variant="ghost"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-          className="p-0 hover:bg-transparent"
-        >
-          Subscription
-          <ArrowUpDown className="ml-2 h-4 w-4" />
-        </Button>
-      );
-    },
-    cell: ({ row }) => {
-      // Check if there's a subscription amount to determine if subscription is active
-      const hasSubscriptionAmount = Boolean(
-        (row.original.subscription_amount ?? 0) > 0 ||
-          (row.original.subscription?.amount ?? 0) > 0
-      );
-      const status = hasSubscriptionAmount ? "active" : "inactive";
-
-      const statusConfig = {
-        active: {
-          variant: "success" as const,
-          icon: <CheckCircle2 className="h-3 w-3 mr-1" />,
-          label: "Active",
-          className:
-            "bg-green-500/10 text-green-600 dark:bg-green-500/20 dark:text-green-400",
-        },
-        inactive: {
-          variant: "secondary" as const,
-          icon: <XCircle className="h-3 w-3 mr-1" />,
-          label: "Inactive",
-          className:
-            "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300",
-        },
-        past_due: {
-          variant: "destructive" as const,
-          icon: <AlertCircle className="h-3 w-3 mr-1" />,
-          label: "Past Due",
-          className:
-            "bg-red-500/10 text-red-600 dark:bg-red-500/20 dark:text-red-400",
-        },
-        canceled: {
-          variant: "outline" as const,
-          icon: <XCircle className="h-3 w-3 mr-1" />,
-          label: "Canceled",
-          className:
-            "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300",
-        },
-      };
-
-      const config = statusConfig[status as keyof typeof statusConfig];
-
-      return (
-        <Badge
-          variant={config.variant}
-          className={cn("h-6 badge", config.className)}
-        >
-          {config.icon}
-          {config.label}
-        </Badge>
-      );
-    },
-  },
-  {
-    id: "actions",
-    cell: ({ row }) => {
-      const [showEditDialog, setShowEditDialog] = useState(false);
-      const driver = row.original;
-      const { refreshDrivers } = useDrivers();
-
-      return (
-        <div className="text-right">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                className="h-8 w-8 p-0"
-                data-dropdown-menu
-              >
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => setShowEditDialog(true)}>
-                Edit
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                className="text-destructive"
-                onClick={() => {
-                  // Handle delete
-                }}
-              >
-                Delete
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <EditDriverDialog
-            open={showEditDialog}
-            onOpenChange={setShowEditDialog}
-            driver={driver}
-            onDriverUpdated={refreshDrivers}
-          />
-        </div>
       );
     },
   },

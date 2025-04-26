@@ -335,12 +335,13 @@ interface DataTableProps<TData> {
   error?: string;
   onActivateSelected?: (ids: number[]) => Promise<void>;
   onDeactivateSelected?: (ids: number[]) => Promise<void>;
-  rowSelection: Record<string, boolean>;
-  onRowSelectionChange: (
+  rowSelection?: Record<string, boolean>;
+  onRowSelectionChange?: (
     updaterOrValue:
       | Record<string, boolean>
       | ((old: Record<string, boolean>) => Record<string, boolean>)
   ) => void;
+  onRowClick?: (id: string) => void;
 }
 
 export function DataTable<TData>({
@@ -349,8 +350,9 @@ export function DataTable<TData>({
   error,
   onActivateSelected,
   onDeactivateSelected,
-  rowSelection,
-  onRowSelectionChange,
+  rowSelection = {},
+  onRowSelectionChange = () => {},
+  onRowClick,
 }: DataTableProps<TData>) {
   const {
     processingDrivers,
@@ -545,6 +547,11 @@ export function DataTable<TData>({
                 <TableRow
                   key={row.id}
                   data-state={row.getIsSelected() && "selected"}
+                  onClick={() => onRowClick?.((row.original as any).id)}
+                  className={cn(
+                    "transition-colors cursor-pointer hover:bg-muted/50",
+                    row.getIsSelected() && "bg-muted/50"
+                  )}
                 >
                   <TableCell className="w-[30px]">
                     <Checkbox

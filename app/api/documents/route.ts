@@ -1,282 +1,160 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
+import { cookies } from "next/headers";
 
-export async function GET(request: Request): Promise<Response> {
+// Define document types
+interface LicenseDocument {
+  id: number;
+  driver_id: number;
+  license_file_url: string;
+  expiration_date: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface MedicalDocument {
+  id: number;
+  driver_id: number;
+  file_link: string;
+  expiration_date: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface MvrDocument {
+  id: number;
+  driver_id: number;
+  mvr_file_url: string;
+  expiration_date: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Mock data
+const mockLicenses: LicenseDocument[] = [
+  {
+    id: 1,
+    driver_id: 1,
+    license_file_url: "https://example.com/licenses/license1.pdf",
+    expiration_date: "2024-12-31",
+    created_at: "2023-01-15T00:00:00Z",
+    updated_at: "2023-01-15T00:00:00Z",
+  },
+  {
+    id: 2,
+    driver_id: 2,
+    license_file_url: "https://example.com/licenses/license2.pdf",
+    expiration_date: "2024-10-15",
+    created_at: "2023-02-10T00:00:00Z",
+    updated_at: "2023-02-10T00:00:00Z",
+  },
+];
+
+const mockMedicalCards: MedicalDocument[] = [
+  {
+    id: 1,
+    driver_id: 1,
+    file_link: "https://example.com/medical/card1.pdf",
+    expiration_date: "2024-06-30",
+    created_at: "2023-01-20T00:00:00Z",
+    updated_at: "2023-01-20T00:00:00Z",
+  },
+];
+
+const mockMvrFiles: MvrDocument[] = [
+  {
+    id: 1,
+    driver_id: 1,
+    mvr_file_url: "https://example.com/mvr/file1.pdf",
+    expiration_date: null,
+    created_at: "2023-01-25T00:00:00Z",
+    updated_at: "2023-01-25T00:00:00Z",
+  },
+];
+
+export async function GET(request: NextRequest) {
   try {
-    const url = new URL(request.url);
-    const id = url.searchParams.get("id");
-    const documentType = url.searchParams.get("type");
+    const { searchParams } = new URL(request.url);
+    const driverId = searchParams.get("driverId");
 
-    if (!id) {
+    if (!driverId) {
       return NextResponse.json(
-        { error: "Document ID is required" },
+        { error: "Driver ID is required" },
         { status: 400 }
       );
     }
 
-    if (!documentType) {
-      return NextResponse.json(
-        { error: "Document type is required" },
-        { status: 400 }
-      );
-    }
-
-    if (!["license", "medical", "mvr"].includes(documentType)) {
-      return NextResponse.json(
-        { error: "Invalid document type" },
-        { status: 400 }
-      );
-    }
-
+    const cookieStore = cookies();
     const supabase = await createClient();
 
-    // First check if the user is authenticated
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
+    // Get driver's licenses
+    const { data: licenses, error: licensesError } = await supabase
+      .from("driver_licenses")
+      .select("*")
+      .eq("driver_id", parseInt(driverId));
 
-    if (authError || !user) {
+    if (licensesError) {
+      console.error("Error fetching licenses:", licensesError);
       return NextResponse.json(
-        { error: "Unauthorized access" },
-        { status: 401 }
+        { error: "Failed to fetch licenses" },
+        { status: 500 }
       );
     }
 
-    let tableName = "";
-    let selectColumns = "*";
+    // Get driver's medical cards
+    const { data: medicalCards, error: medicalError } = await supabase
+      .from("medical_cards")
+      .select("*")
+      .eq("driver_id", parseInt(driverId));
 
-    if (documentType === "license") {
-      tableName = "driver_licenses";
-    } else if (documentType === "medical") {
-      tableName = "medical_cards";
-    } else if (documentType === "mvr") {
-      tableName = "mvr_records";
-    }
-
-    const { data, error } = await supabase
-      .from(tableName)
-      .select(selectColumns)
-      .eq("id", id)
-      .single();
-
-    if (error) {
-      console.error(`Error fetching ${documentType} document:`, error);
+    if (medicalError) {
+      console.error("Error fetching medical cards:", medicalError);
       return NextResponse.json(
-        { error: `Failed to fetch ${documentType} document` },
-        { status: error.code === "PGRST116" ? 404 : 500 }
+        { error: "Failed to fetch medical cards" },
+        { status: 500 }
       );
     }
 
-    return NextResponse.json(data);
+    // Get driver's MVR files
+    const { data: mvrFiles, error: mvrError } = await supabase
+      .from("mvr_files")
+      .select("*")
+      .eq("driver_id", parseInt(driverId));
+
+    if (mvrError) {
+      console.error("Error fetching MVR files:", mvrError);
+      return NextResponse.json(
+        { error: "Failed to fetch MVR files" },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      licenses: licenses || [],
+      medicalCards: medicalCards || [],
+      mvrFiles: mvrFiles || [],
+    });
   } catch (error) {
-    console.error("Error fetching document:", error);
+    console.error("Error fetching documents:", error);
     return NextResponse.json(
-      { error: "An unexpected error occurred" },
+      { error: "Failed to fetch documents" },
       { status: 500 }
     );
   }
 }
 
-export async function PATCH(request: Request): Promise<Response> {
-  try {
-    const url = new URL(request.url);
-    const id = url.searchParams.get("id");
-    const documentType = url.searchParams.get("type");
-
-    if (!id) {
-      return NextResponse.json(
-        { error: "Document ID is required" },
-        { status: 400 }
-      );
-    }
-
-    if (!documentType) {
-      return NextResponse.json(
-        { error: "Document type is required" },
-        { status: 400 }
-      );
-    }
-
-    if (!["license", "medical", "mvr"].includes(documentType)) {
-      return NextResponse.json(
-        { error: "Invalid document type" },
-        { status: 400 }
-      );
-    }
-
-    const supabase = await createClient();
-
-    // First check if the user is authenticated
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json(
-        { error: "Unauthorized access" },
-        { status: 401 }
-      );
-    }
-
-    const updateData = await request.json();
-
-    let tableName = "";
-    if (documentType === "license") {
-      tableName = "driver_licenses";
-    } else if (documentType === "medical") {
-      tableName = "medical_cards";
-    } else if (documentType === "mvr") {
-      tableName = "mvr_records";
-    }
-
-    const { data, error } = await supabase
-      .from(tableName)
-      .update(updateData)
-      .eq("id", id)
-      .select();
-
-    if (error) {
-      console.error(`Error updating ${documentType} document:`, error);
-      return NextResponse.json(
-        { error: `Failed to update ${documentType} document` },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json(data);
-  } catch (error) {
-    console.error(`Error in document PATCH API:`, error);
-    return NextResponse.json(
-      { error: "An unexpected error occurred" },
-      { status: 500 }
-    );
-  }
+export async function POST(request: NextRequest) {
+  // Redirect to the dedicated upload endpoint
+  return NextResponse.redirect(
+    new URL("/api/documents/upload", request.url),
+    308
+  );
 }
 
-export async function DELETE(request: Request): Promise<Response> {
-  try {
-    const url = new URL(request.url);
-    const id = url.searchParams.get("id");
-    const documentType = url.searchParams.get("type");
-
-    if (!id) {
-      return NextResponse.json(
-        { error: "Document ID is required" },
-        { status: 400 }
-      );
-    }
-
-    if (!documentType) {
-      return NextResponse.json(
-        { error: "Document type is required" },
-        { status: 400 }
-      );
-    }
-
-    if (!["license", "medical", "mvr"].includes(documentType)) {
-      return NextResponse.json(
-        { error: "Invalid document type" },
-        { status: 400 }
-      );
-    }
-
-    const supabase = await createClient();
-
-    // First check if the user is authenticated
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json(
-        { error: "Unauthorized access" },
-        { status: 401 }
-      );
-    }
-
-    let tableName = "";
-    let fileUrlColumn = "";
-
-    if (documentType === "license") {
-      tableName = "driver_licenses";
-      fileUrlColumn = "license_file_url";
-    } else if (documentType === "medical") {
-      tableName = "medical_cards";
-      fileUrlColumn = "file_link";
-    } else if (documentType === "mvr") {
-      tableName = "mvr_records";
-      fileUrlColumn = "mvr_file_url";
-    }
-
-    // First, get the document to find the file URL
-    const { data: documentData, error: getError } = await supabase
-      .from(tableName)
-      .select(fileUrlColumn)
-      .eq("id", id)
-      .single();
-
-    if (getError) {
-      console.error(`Error fetching ${documentType} document:`, getError);
-      return NextResponse.json(
-        { error: `Failed to fetch ${documentType} document` },
-        { status: getError.code === "PGRST116" ? 404 : 500 }
-      );
-    }
-
-    // Delete the document record
-    const { error: deleteError } = await supabase
-      .from(tableName)
-      .delete()
-      .eq("id", id);
-
-    if (deleteError) {
-      console.error(`Error deleting ${documentType} document:`, deleteError);
-      return NextResponse.json(
-        { error: `Failed to delete ${documentType} document` },
-        { status: 500 }
-      );
-    }
-
-    // If we have a file URL, try to delete the file from storage
-    const fileUrl = documentData
-      ? documentData[fileUrlColumn as keyof typeof documentData]
-      : null;
-    if (fileUrl) {
-      try {
-        // Extract the path from the URL
-        const url = new URL(fileUrl as string);
-        const pathWithBucket = url.pathname;
-        // Remove the bucket name and initial slash from the path
-        // Format is typically /bucket-name/path/to/file
-        const filePath = pathWithBucket.split("/").slice(2).join("/");
-
-        if (filePath) {
-          const { error: storageError } = await supabase.storage
-            .from("documents")
-            .remove([filePath]);
-
-          if (storageError) {
-            console.warn(
-              `Failed to delete file from storage: ${storageError.message}`
-            );
-            // We don't return an error here as the document record was deleted successfully
-          }
-        }
-      } catch (error) {
-        console.warn("Error parsing file URL or deleting file:", error);
-        // We don't return an error here as the document record was deleted successfully
-      }
-    }
-
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error(`Error in document DELETE API:`, error);
-    return NextResponse.json(
-      { error: "An unexpected error occurred" },
-      { status: 500 }
-    );
-  }
+export async function DELETE(request: NextRequest) {
+  // Redirect to the dedicated delete endpoint
+  return NextResponse.redirect(
+    new URL("/api/documents/delete", request.url),
+    308
+  );
 }
