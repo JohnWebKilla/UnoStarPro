@@ -411,18 +411,20 @@ export const columns: ColumnDef<Driver>[] = [
               transform: "translate(-50%, -100%)", // Center horizontally and position above
               zIndex: 99999,
             }}
-            className="document-tooltip-portal"
+            className="pointer-events-none filter drop-shadow"
           >
-            <div className="document-summary-card">
-              <div className="document-summary-header">Document Summary</div>
-              <div className="document-summary-body">
-                <div className="document-summary-total">
+            <div className="bg-white dark:bg-slate-800 rounded-md shadow-lg border border-slate-200 dark:border-slate-700 overflow-hidden w-[260px] text-sm">
+              <div className="px-3 py-2 font-medium border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
+                Document Summary
+              </div>
+              <div className="p-3">
+                <div className="flex justify-between mb-2">
                   <span>Total:</span>
                   <span>{docStats.total} documents</span>
                 </div>
 
                 {docStats.expired > 0 && (
-                  <div className="document-summary-alert">
+                  <div className="flex items-center gap-1.5 mb-1.5">
                     <AlertCircle className="h-4 w-4 text-red-500" />
                     <span className="text-red-500">
                       {docStats.expired} expired
@@ -431,7 +433,7 @@ export const columns: ColumnDef<Driver>[] = [
                 )}
 
                 {docStats.expiringSoon > 0 && (
-                  <div className="document-summary-alert">
+                  <div className="flex items-center gap-1.5 mb-1.5">
                     <AlertTriangle className="h-4 w-4 text-amber-500" />
                     <span className="text-amber-500">
                       {docStats.expiringSoon} expiring soon
@@ -440,37 +442,34 @@ export const columns: ColumnDef<Driver>[] = [
                 )}
 
                 {/* Document category breakdown */}
-                {docCategories
-                  .filter(
-                    (category) => docStats.byCategory[category.name].total > 0
-                  )
-                  .map((category) => (
-                    <div
-                      key={category.name}
-                      className="document-summary-category"
-                    >
-                      <span className="document-category-icon">
-                        {category.icon}
-                      </span>
-                      <span className="document-category-name">
-                        {category.name}:
-                      </span>
-                      <span className="document-category-count">
-                        {docStats.byCategory[category.name].total}
-                      </span>
+                <div className="mt-2 pt-2 border-t border-slate-200 dark:border-slate-700">
+                  {docCategories
+                    .filter(
+                      (category) => docStats.byCategory[category.name].total > 0
+                    )
+                    .map((category) => (
+                      <div
+                        key={category.name}
+                        className="flex items-center gap-1.5 mt-1.5"
+                      >
+                        <span className="mr-0.5">{category.icon}</span>
+                        <span className="font-medium">{category.name}:</span>
+                        <span>{docStats.byCategory[category.name].total}</span>
 
-                      {/* Warning icon if needed */}
-                      {docStats.byCategory[category.name].expired > 0 && (
-                        <AlertCircle className="h-4 w-4 text-red-500 ml-auto" />
-                      )}
-                      {docStats.byCategory[category.name].expired === 0 &&
-                        docStats.byCategory[category.name].expiringSoon > 0 && (
-                          <AlertTriangle className="h-4 w-4 text-amber-500 ml-auto" />
+                        {/* Warning icon if needed */}
+                        {docStats.byCategory[category.name].expired > 0 && (
+                          <AlertCircle className="h-4 w-4 text-red-500 ml-auto" />
                         )}
-                    </div>
-                  ))}
+                        {docStats.byCategory[category.name].expired === 0 &&
+                          docStats.byCategory[category.name].expiringSoon >
+                            0 && (
+                            <AlertTriangle className="h-4 w-4 text-amber-500 ml-auto" />
+                          )}
+                      </div>
+                    ))}
+                </div>
 
-                <div className="document-summary-footer">
+                <div className="mt-2 pt-1.5 border-t border-slate-200 dark:border-slate-700 text-xs text-slate-500 dark:text-slate-400 text-center">
                   Click to view all documents
                 </div>
               </div>
@@ -487,7 +486,7 @@ export const columns: ColumnDef<Driver>[] = [
                   borderRight: "15px solid transparent",
                   borderTop: "15px solid white",
                 }}
-                className="tooltip-arrow"
+                className="dark:border-t-slate-800"
               />
             </div>
           </div>,
@@ -498,15 +497,15 @@ export const columns: ColumnDef<Driver>[] = [
       return (
         <div
           ref={docContainerRef}
-          className="relative document-container"
+          className="relative group"
           onMouseEnter={() => setShowTooltip(true)}
           onMouseLeave={() => setShowTooltip(false)}
         >
           <div
-            className="flex items-center justify-center cursor-pointer document-cell w-full h-full"
+            className="flex items-center justify-center cursor-pointer h-9 w-full hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors rounded px-1 py-0.5"
             onClick={goToDocumentsTab}
           >
-            <div className="document-badge">
+            <div className="flex items-center">
               <span className="font-medium text-center">{docStats.total}</span>
               {(docStats.expired > 0 || docStats.expiringSoon > 0) && (
                 <span className="ml-2">
