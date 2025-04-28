@@ -18,10 +18,12 @@ export function StatsCards() {
     (d) => d.status?.toLowerCase() === "active"
   ).length;
   const inactiveDrivers = totalDrivers - activeDrivers;
-  const totalRevenue = drivers.reduce(
-    (sum, d) => sum + (d.subscription?.amount || d.subscription_amount || 0),
-    0
-  );
+  const totalRevenue = drivers.reduce((sum, d) => {
+    if (d.status?.toLowerCase() !== "active") return sum;
+
+    const amount = d.subscription?.amount || d.subscription_amount || 0;
+    return sum + Math.round(amount);
+  }, 0);
 
   const expiringDocuments = drivers.reduce((sum, d) => {
     const allDocs = [
@@ -57,7 +59,7 @@ export function StatsCards() {
       style: "currency",
       currency: "USD",
       minimumFractionDigits: 2,
-    }).format(amount / 100);
+    }).format(amount);
   }
 
   return (
