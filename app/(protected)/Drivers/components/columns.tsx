@@ -545,6 +545,11 @@ export const columns: ColumnDef<Driver>[] = [
       return getStatusBadge(status);
     },
   },
+  {
+    id: "actions",
+    header: () => <div className="text-center">Actions</div>,
+    cell: ({ row }) => null, // This will be handled by the QuickActions component in the data-table
+  },
 ];
 
 // Add clickable row functionality

@@ -596,3 +596,49 @@ body.cursor-progress * {
 .dark .tooltip-arrow {
     border-top-color: #1e293b !important;
 }
+
+/* Checkbox cell styles to ensure clickability */
+.checkbox-cell {
+    position: relative;
+    z-index: 5;
+    /* Ensure checkbox sits above other elements */
+}
+
+.checkbox-cell .checkbox {
+    cursor: pointer !important;
+}
+
+/* Ensure selected row styling works properly */
+[data-state="selected"] {
+    background-color: rgba(224, 242, 254, 0.5) !important;
+    /* Light blue background for selected rows */
+}
+
+/* Make sure actions in table rows are visible */
+.table-actions-visible {
+    opacity: 0.2;
+    /* Slightly visible by default */
+    transition: opacity 0.2s ease-in-out;
+}
+
+/* Make actions fully visible on selected rows */
+[data-state="selected"] .table-actions-visible {
+    opacity: 1 !important;
+}
+
+/* Also show actions on row hover */
+.tr-hoverable:hover .table-actions-visible {
+    opacity: 1 !important;
+}
+
+/* Fix z-index for action buttons to ensure they're clickable */
+.table-actions-visible button {
+    position: relative;
+    z-index: 10;
+}
+
+/* Fix actions cell to ensure proper handling */
+.actions-cell {
+    z-index: 20;
+    position: relative;
+}

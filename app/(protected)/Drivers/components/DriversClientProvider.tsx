@@ -99,11 +99,37 @@ export function DriversClientProvider({
 
   const updateDriverOptimistically = useCallback(
     (id: string, updates: Partial<Driver>) => {
-      setDrivers((prevDrivers) =>
-        prevDrivers.map((driver) =>
-          driver.id === id ? { ...driver, ...updates } : driver
-        )
-      );
+      console.log(`Optimistically updating driver ${id} with:`, updates);
+
+      setDrivers((prevDrivers) => {
+        // Find the driver to update
+        const driverIndex = prevDrivers.findIndex(
+          (driver) => String(driver.id) === id
+        );
+
+        if (driverIndex === -1) {
+          console.warn(`Driver with ID ${id} not found in local state`);
+          return prevDrivers;
+        }
+
+        // Create a new array with the updated driver
+        const updatedDrivers = [...prevDrivers];
+        const oldDriver = updatedDrivers[driverIndex];
+
+        // If updates is a complete driver object (from server), use it directly
+        // Otherwise, merge with existing driver data
+        const isFullUpdate = updates.id && updates.name && updates.created_at;
+
+        updatedDrivers[driverIndex] = isFullUpdate
+          ? { ...(updates as Driver) }
+          : { ...oldDriver, ...updates, updated_at: new Date().toISOString() };
+
+        console.log(
+          `Driver ${id} updated in local state:`,
+          updatedDrivers[driverIndex]
+        );
+        return updatedDrivers;
+      });
     },
     []
   );

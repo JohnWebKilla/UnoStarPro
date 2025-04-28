@@ -1,11 +1,11 @@
 "use client";
 
-import { Row } from "@tanstack/react-table";
+import { Row, RowSelectionState, OnChangeFn } from "@tanstack/react-table";
 import { DataTable } from "./data-table";
 import { columns } from "./columns";
 import { Driver } from "../types";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 interface DriversDataTableProps {
   data: Driver[];
@@ -13,6 +13,7 @@ interface DriversDataTableProps {
 
 export function DriversDataTable({ data }: DriversDataTableProps) {
   const router = useRouter();
+  const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
 
   // Prefetch all driver detail routes to make navigation feel instant
   useEffect(() => {
@@ -22,6 +23,14 @@ export function DriversDataTable({ data }: DriversDataTableProps) {
       }
     });
   }, [data, router]);
+
+  // Handle row selection change
+  const handleRowSelectionChange: OnChangeFn<RowSelectionState> = useCallback(
+    (updater) => {
+      setRowSelection(updater);
+    },
+    []
+  );
 
   // Create a row double-click handler with instant feedback
   const handleRowDoubleClick = useCallback(
@@ -43,11 +52,31 @@ export function DriversDataTable({ data }: DriversDataTableProps) {
     [router]
   );
 
+  // Handle activating selected drivers
+  const handleActivateSelected = async (ids: number[]) => {
+    // Implement your activation logic here
+    console.log("Activating drivers with IDs:", ids);
+    // Reset selection after action
+    setRowSelection({});
+  };
+
+  // Handle deactivating selected drivers
+  const handleDeactivateSelected = async (ids: number[]) => {
+    // Implement your deactivation logic here
+    console.log("Deactivating drivers with IDs:", ids);
+    // Reset selection after action
+    setRowSelection({});
+  };
+
   return (
     <DataTable
       columns={columns}
       data={data}
       onRowDoubleClick={handleRowDoubleClick}
+      rowSelection={rowSelection}
+      onRowSelectionChange={handleRowSelectionChange}
+      onActivateSelected={handleActivateSelected}
+      onDeactivateSelected={handleDeactivateSelected}
     />
   );
 }

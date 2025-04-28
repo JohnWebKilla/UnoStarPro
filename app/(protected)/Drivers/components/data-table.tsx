@@ -58,8 +58,10 @@ import {
   Loader2,
   AlertCircle,
   Clock,
+  MoreHorizontal,
+  Power,
 } from "lucide-react";
-import { useState, ReactNode, useCallback } from "react";
+import { useState, ReactNode, useCallback, useEffect } from "react";
 import { Driver, DRIVER_STATUS_OPTIONS, DRIVER_TEAM_OPTIONS } from "../types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -82,6 +84,7 @@ import Link from "next/link";
 import { toast } from "@/components/ui/use-toast";
 import { useRouter } from "next/navigation";
 import { updateDriverAction } from "../server-actions";
+import { useToast } from "@/components/ui/use-toast";
 
 interface TableToolbarProps {
   table: TableType<any>;
@@ -357,7 +360,29 @@ export function DataTable<TData>({
     processingDrivers: contextProcessingDrivers,
     refreshDrivers: refetchDrivers,
     updateDriverOptimistically: contextUpdateDriverOptimistically,
+    setProcessingDriver: contextSetProcessingDriver,
   } = useDrivers();
+
+  // Log processing state for debugging
+  useEffect(() => {
+    console.log("DataTable processingDrivers state:", processingDrivers);
+    console.log("Context processingDrivers state:", contextProcessingDrivers);
+  }, [processingDrivers, contextProcessingDrivers]);
+
+  // Keep local state in sync with context
+  useEffect(() => {
+    setProcessingDrivers(contextProcessingDrivers);
+  }, [contextProcessingDrivers]);
+
+  // Local processing driver state setter that also updates context
+  const setProcessingDriver = useCallback(
+    (id: string, processing: boolean) => {
+      setProcessingDrivers((prev) => ({ ...prev, [id]: processing }));
+      contextSetProcessingDriver(id, processing);
+      console.log(`Setting processing state for driver ${id} to ${processing}`);
+    },
+    [contextSetProcessingDriver]
+  );
 
   const table = useReactTable({
     data: data || [], // Ensure data is never undefined
@@ -444,13 +469,25 @@ export function DataTable<TData>({
   };
 
   const handleRowClick = (e: React.MouseEvent, row: Row<TData>) => {
-    // Prevent triggering on checkbox click
-    if ((e.target as HTMLElement).closest('[type="checkbox"]')) {
+    // Don't handle row clicks from within the checkbox cell or action buttons
+    const target = e.target as HTMLElement;
+    const isCheckboxClick =
+      target.closest('[type="checkbox"]') ||
+      target.closest(".checkbox-cell") ||
+      target.classList.contains("checkbox-cell");
+
+    const isActionButtonClick =
+      target.closest("button") ||
+      target.closest(".table-actions-visible") ||
+      target.closest('[role="tooltip"]');
+
+    if (isCheckboxClick || isActionButtonClick) {
+      // Allow the checkbox or action button click to propagate naturally
       return;
     }
 
-    // If no double click handler, do nothing
-    if (!onRowDoubleClick) return;
+    // For regular row clicks, toggle selection
+    row.toggleSelected(!row.getIsSelected());
   };
 
   const updateDriverOptimistically = useCallback(
@@ -579,7 +616,7 @@ export function DataTable<TData>({
                     data-loading={loadingRows[row.id] ? "true" : undefined}
                     className={cn(
                       "border-b border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50 data-[state=selected]:bg-slate-100 dark:data-[state=selected]:bg-slate-800/60",
-                      "cursor-pointer transition-colors duration-200",
+                      "cursor-pointer transition-colors duration-200 tr-hoverable",
                       loadingRows[row.id] && "opacity-70 pointer-events-none",
                       (processingDrivers as any)?.[(row.original as any)?.id] &&
                         "opacity-50"
@@ -587,12 +624,12 @@ export function DataTable<TData>({
                     onClick={(e) => handleRowClick(e, row)}
                     onDoubleClick={() => onRowDoubleClick?.(row)}
                   >
-                    <TableCell className="w-[30px] p-4 align-middle">
+                    <TableCell className="w-[30px] p-4 align-middle checkbox-cell">
                       <Checkbox
                         checked={row.getIsSelected()}
                         onCheckedChange={(value) => row.toggleSelected(!!value)}
                         aria-label="Select row"
-                        className="translate-y-[2px]"
+                        className="translate-y-[2px] checkbox"
                       />
                     </TableCell>
                     {row.getVisibleCells().map((cell) => {
@@ -602,25 +639,34 @@ export function DataTable<TData>({
                         <TableCell
                           key={cell.id}
                           data-column={columnId}
-                          className="p-4 align-middle"
+                          className={`p-4 align-middle ${columnId === "actions" ? "text-center" : ""}`}
                         >
+                          {(columnId === "status" || columnId === "actions") &&
+                            (() => {
+                              console.log(
+                                `Rendering ${columnId} for driver ${String(driver.id)}`,
+                                {
+                                  isProcessing:
+                                    processingDrivers[String(driver.id)],
+                                  processingDrivers,
+                                }
+                              );
+                              return null;
+                            })()}
+
                           {columnId === "status" ? (
                             <StatusBadge
                               status={cell.getValue() as string}
                               isProcessing={
-                                processingDrivers[String(driver.id)]
+                                processingDrivers[String(driver.id)] || false
                               }
+                              driverId={String(driver.id)}
                             />
                           ) : columnId === "actions" ? (
                             <QuickActions
                               row={row as Row<Driver>}
                               processingDrivers={processingDrivers}
-                              setProcessingDriver={(
-                                id: string,
-                                processing: boolean
-                              ) => {
-                                setIsProcessing(processing);
-                              }}
+                              setProcessingDriver={setProcessingDriver}
                               updateDriverOptimistically={
                                 updateDriverOptimistically
                               }
@@ -732,17 +778,66 @@ function LoadingRow() {
 interface StatusBadgeProps {
   status: string;
   isProcessing?: boolean;
+  driverId?: string;
 }
 
-function StatusBadge({ status, isProcessing = false }: StatusBadgeProps) {
+function StatusBadge({
+  status,
+  isProcessing = false,
+  driverId,
+}: StatusBadgeProps) {
+  const [previousStatus, setPreviousStatus] = useState(status);
+  const [showSuccess, setShowSuccess] = useState(false);
+
+  // Debug logging to verify the processing state
+  useEffect(() => {
+    if (driverId && isProcessing) {
+      console.log(
+        `StatusBadge for driver ${driverId} showing processing state:`,
+        isProcessing
+      );
+    }
+  }, [driverId, isProcessing]);
+
+  // Show success animation when status changes
+  useEffect(() => {
+    if (status !== previousStatus && !isProcessing && previousStatus) {
+      // Status has changed and is not in processing state anymore
+      setShowSuccess(true);
+
+      // Reset after animation completes
+      const timer = setTimeout(() => {
+        setShowSuccess(false);
+        setPreviousStatus(status);
+      }, 500);
+
+      return () => clearTimeout(timer);
+    } else if (status !== previousStatus) {
+      // Just update the previous status without animation
+      setPreviousStatus(status);
+    }
+  }, [status, previousStatus, isProcessing]);
+
   if (isProcessing) {
     return (
       <Badge
         variant="outline"
-        className="bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-600"
+        className="bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-600 transition-all duration-300 animate-pulse"
       >
         <Loader2 className="mr-1 h-3 w-3 animate-spin" />
         Updating...
+      </Badge>
+    );
+  }
+
+  if (showSuccess) {
+    return (
+      <Badge
+        variant="outline"
+        className="bg-green-500/30 text-green-600 dark:bg-green-500/40 dark:text-green-400 border-green-500/40 transition-all duration-300 animate-pulse"
+      >
+        <CheckCircle className="mr-1 h-3 w-3" />
+        Updated!
       </Badge>
     );
   }
@@ -809,97 +904,171 @@ interface QuickActionsProps {
   updateDrivers: (id: number, data: Partial<Driver>) => Promise<Driver>;
 }
 
-const QuickActions = React.memo(
-  ({
-    row,
-    processingDrivers,
+function QuickActions({
+  row,
+  processingDrivers,
+  setProcessingDriver,
+  updateDriverOptimistically,
+  updateDrivers,
+}: QuickActionsProps): JSX.Element {
+  const router = useRouter();
+  const driver = row.original;
+  const driverId = String(driver.id);
+  const isProcessing = processingDrivers[driverId];
+  const { toast } = useToast();
+  const [localProcessing, setLocalProcessing] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
+
+  // For debugging
+  useEffect(() => {
+    console.log(`Driver ${driverId} processing state:`, {
+      isProcessing,
+      localProcessing,
+      showSuccess,
+    });
+  }, [driverId, isProcessing, localProcessing, showSuccess]);
+
+  // Handle status toggle with optimistic updates
+  const handleStatusToggle = useCallback(async () => {
+    try {
+      console.log(`Starting status toggle for driver ${driverId}`);
+      const newStatus = driver.status === "active" ? "inactive" : "active";
+
+      // Set both states to true
+      setLocalProcessing(true);
+      setProcessingDriver(driverId, true);
+      console.log(`Set processing states to true for driver ${driverId}`);
+
+      // Apply optimistic update immediately
+      updateDriverOptimistically(driverId, { status: newStatus });
+      console.log(`Applied optimistic update for driver ${driverId}`);
+
+      // Actual API call
+      const updatedDriver = await updateDrivers(Number(driver.id), {
+        status: newStatus,
+      });
+      console.log(`API call completed for driver ${driverId}`);
+
+      // Apply the changes from the server response directly to ensure UI is in sync
+      updateDriverOptimistically(driverId, updatedDriver);
+
+      // Show success state
+      setShowSuccess(true);
+
+      toast({
+        title: "Success",
+        description: `Driver status updated to ${newStatus}`,
+      });
+
+      // Clear success state after a delay
+      setTimeout(() => {
+        setShowSuccess(false);
+      }, 1000);
+
+      // Wait a short time to show animation before resetting the processing state
+      setTimeout(() => {
+        setLocalProcessing(false);
+        setProcessingDriver(driverId, false);
+        console.log(`Reset processing states for driver ${driverId}`);
+      }, 300); // Short delay so user can see the success animation
+    } catch (err) {
+      console.error(`Error updating driver ${driverId}:`, err);
+
+      // Revert optimistic update
+      updateDriverOptimistically(driverId, {
+        status: driver.status,
+      });
+
+      toast({
+        title: "Error",
+        description: `Failed to update driver status: ${err instanceof Error ? err.message : String(err)}`,
+        variant: "destructive",
+      });
+
+      // Reset processing states on error
+      setLocalProcessing(false);
+      setProcessingDriver(driverId, false);
+    }
+  }, [
+    driver.id,
+    driverId,
+    driver.status,
     setProcessingDriver,
+    toast,
     updateDriverOptimistically,
     updateDrivers,
-  }: QuickActionsProps): JSX.Element => {
-    const driver = row.original;
-    const isProcessing = processingDrivers[driver.id];
+  ]);
 
-    const handleStatusToggle = React.useCallback(async () => {
-      const newStatus = driver.status === "active" ? "inactive" : "active";
-      try {
-        setProcessingDriver(driver.id.toString(), true);
-        updateDriverOptimistically(driver.id.toString(), { status: newStatus });
-        await updateDrivers(Number(driver.id), { status: newStatus });
-      } catch (error) {
-        console.error("Error updating driver status:", error);
-        updateDriverOptimistically(driver.id.toString(), {
-          status: driver.status,
-        });
-        toast({
-          title: "Error",
-          description: "Failed to update driver status. Please try again.",
-          variant: "destructive",
-        });
-      } finally {
-        setProcessingDriver(driver.id.toString(), false);
-      }
-    }, [
-      driver,
-      setProcessingDriver,
-      updateDriverOptimistically,
-      updateDrivers,
-    ]);
+  // Show loading if either state is true
+  const showLoading = isProcessing || localProcessing;
 
-    return (
-      <div className="flex items-center justify-end gap-2">
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={handleStatusToggle}
-                disabled={isProcessing}
-              >
-                {isProcessing ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : driver.status === "active" ? (
-                  <XCircle className="h-4 w-4 text-destructive" />
-                ) : (
-                  <CheckCircle className="h-4 w-4 text-green-600" />
-                )}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {driver.status === "active" ? "Deactivate" : "Activate"} driver
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+  // Handle view action
+  const handleView = useCallback(() => {
+    router.push(`/Drivers/${driver.id}`);
+  }, [driver.id, router]);
 
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-8 w-8" asChild>
-                <Link href={`/Drivers/${driver.id}`}>
-                  <Eye className="h-4 w-4" />
-                </Link>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>View driver details</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+  // Handle edit action
+  const handleEdit = useCallback(() => {
+    router.push(`/Drivers/${driver.id}/edit`);
+  }, [driver.id, router]);
 
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-8 w-8" asChild>
-                <Link href={`/Drivers/${driver.id}/edit`}>
-                  <Edit className="h-4 w-4" />
-                </Link>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Edit driver</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      </div>
-    );
-  }
-);
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+        <Button
+          variant="ghost"
+          size="icon"
+          className={`h-8 w-8 mx-auto flex items-center justify-center transition-colors duration-200 ${
+            showSuccess
+              ? "bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400"
+              : ""
+          }`}
+          disabled={showLoading}
+        >
+          {showLoading ? (
+            <Loader2 className="h-5 w-5 animate-spin" />
+          ) : showSuccess ? (
+            <CheckCircle className="h-5 w-5" />
+          ) : (
+            <MoreHorizontal className="h-5 w-5" />
+          )}
+          <span className="sr-only">Open menu</span>
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+        <DropdownMenuLabel>Actions</DropdownMenuLabel>
+        <DropdownMenuItem onClick={handleView} disabled={showLoading}>
+          <Eye className="mr-2 h-4 w-4" />
+          View Details
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={handleEdit} disabled={showLoading}>
+          <Edit className="mr-2 h-4 w-4" />
+          Edit
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onClick={handleStatusToggle}
+          disabled={showLoading}
+          className={
+            driver.status === "active" ? "text-destructive" : "text-green-600"
+          }
+        >
+          {showLoading ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : driver.status === "active" ? (
+            <Power className="mr-2 h-4 w-4" />
+          ) : (
+            <CheckCircle className="mr-2 h-4 w-4" />
+          )}
+          {showLoading
+            ? "Processing..."
+            : driver.status === "active"
+              ? "Deactivate"
+              : "Activate"}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 QuickActions.displayName = "QuickActions";
