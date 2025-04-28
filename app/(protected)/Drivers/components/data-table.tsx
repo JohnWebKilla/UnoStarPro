@@ -340,7 +340,7 @@ interface DataTableProps<TData> {
   onDeactivateSelected?: (ids: number[]) => Promise<void>;
   rowSelection?: RowSelectionState;
   onRowSelectionChange?: OnChangeFn<RowSelectionState>;
-  onRowClick?: (row: Row<TData>) => void;
+  onRowDoubleClick?: (row: Row<TData>) => void;
 }
 
 export function DataTable<TData>({
@@ -351,7 +351,7 @@ export function DataTable<TData>({
   onDeactivateSelected,
   rowSelection = {},
   onRowSelectionChange,
-  onRowClick,
+  onRowDoubleClick,
 }: DataTableProps<TData>) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -446,10 +446,10 @@ export function DataTable<TData>({
     link.click();
   };
 
-  // Function to handle row click with loading state
-  const handleRowClickWithLoading = React.useCallback(
+  // Function to handle row double click with loading state
+  const handleRowDoubleClickWithLoading = React.useCallback(
     (row: Row<TData>, e: React.MouseEvent) => {
-      if (typeof onRowClick === "function") {
+      if (typeof onRowDoubleClick === "function") {
         // Apply visual feedback immediately
         const target = e.currentTarget;
         target.classList.add("row-clicked");
@@ -457,11 +457,11 @@ export function DataTable<TData>({
         // Set row as loading
         setLoadingRows((prev) => ({ ...prev, [row.id]: true }));
 
-        // Call the actual click handler
-        onRowClick(row);
+        // Call the actual double click handler
+        onRowDoubleClick(row);
       }
     },
-    [onRowClick]
+    [onRowDoubleClick]
   );
 
   return (
@@ -568,11 +568,12 @@ export function DataTable<TData>({
                   key={row.id}
                   data-state={row.getIsSelected() && "selected"}
                   data-loading={loadingRows[row.id] ? "true" : undefined}
-                  onClick={(e) => handleRowClickWithLoading(row, e)}
+                  onDoubleClick={(e) => handleRowDoubleClickWithLoading(row, e)}
                   className={cn(
                     "transition-colors cursor-pointer hover:bg-muted/50",
-                    row.getIsSelected() && "bg-muted/50",
-                    loadingRows[row.id] && "opacity-70"
+                    loadingRows[row.id] && "opacity-70 pointer-events-none",
+                    (processingDrivers as any)?.[(row.original as any)?.id] &&
+                      "opacity-50"
                   )}
                 >
                   <TableCell className="w-[30px]">

@@ -23,8 +23,8 @@ export function DriversDataTable({ data }: DriversDataTableProps) {
     });
   }, [data, router]);
 
-  // Create a row click handler with instant feedback
-  const handleRowClick = useCallback(
+  // Create a row double-click handler with instant feedback
+  const handleRowDoubleClick = useCallback(
     (row: Row<Driver>) => {
       const driverId = row?.original?.id;
       if (driverId) {
@@ -37,13 +37,17 @@ export function DriversDataTable({ data }: DriversDataTableProps) {
           document.body.classList.remove("cursor-progress");
         }, 500);
       } else {
-        console.warn("Row clicked but no driver ID found", row);
+        console.warn("Row double-clicked but no driver ID found", row);
       }
     },
     [router]
   );
 
   return (
-    <DataTable columns={columns} data={data} onRowClick={handleRowClick} />
+    <DataTable
+      columns={columns}
+      data={data}
+      onRowDoubleClick={handleRowDoubleClick}
+    />
   );
 }

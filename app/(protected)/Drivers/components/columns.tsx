@@ -233,31 +233,226 @@ export const columns: ColumnDef<Driver>[] = [
         driver.subscription_amount || driver.price_amount;
 
       return (
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center">
-            {hasStripeProduct ? (
+        <div className="flex items-center gap-2">
+          {hasStripeProduct ? (
+            <Badge
+              variant="outline"
+              className="bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400"
+            >
+              <CreditCard className="mr-1 h-3 w-3" />
+              Connected
+            </Badge>
+          ) : (
+            <Badge variant="outline" className="text-slate-500">
+              <XCircle className="mr-1 h-3 w-3" />
+              Not Connected
+            </Badge>
+          )}
+
+          {subscriptionAmount && (
+            <span className="text-sm font-medium">
+              ${subscriptionAmount}/mo
+            </span>
+          )}
+
+          <SyncDriverButton driver={driver} size="icon" />
+        </div>
+      );
+    },
+  },
+  {
+    accessorKey: "documents",
+    header: "Documents",
+    cell: ({ row }) => {
+      const router = useRouter();
+
+      // Get all document types
+      const documents =
+        (row.getValue("documents") as Driver["documents"]) || [];
+      const driverLicenses = row.original.driver_licenses || [];
+      const medicalCards = row.original.medical_cards || [];
+      const mvrFiles = row.original.mvr_files || [];
+
+      const today = new Date();
+
+      // Function to check if a document is expired or expiring soon
+      const checkDocumentStatus = (doc: any) => {
+        if (!doc.expiration_date && !doc.expiryDate) return "no-expiry";
+
+        const expiryDate = parseISO(doc.expiration_date || doc.expiryDate);
+
+        if (isBefore(expiryDate, today)) {
+          return "expired";
+        } else if (isBefore(expiryDate, addDays(today, 30))) {
+          return "expiring-soon";
+        }
+        return "valid";
+      };
+
+      // Categorize documents by type and status
+      const docCategories = [
+        { name: "General", docs: documents, icon: "📄" },
+        { name: "Driver License", docs: driverLicenses, icon: "🪪" },
+        { name: "Medical Card", docs: medicalCards, icon: "🏥" },
+        { name: "MVR", docs: mvrFiles, icon: "🚗" },
+      ];
+
+      // Count documents by status
+      const docStats = {
+        expired: 0,
+        expiringSoon: 0,
+        valid: 0,
+        noExpiry: 0,
+        total: 0,
+        byCategory: {} as Record<
+          string,
+          {
+            expired: number;
+            expiringSoon: number;
+            valid: number;
+            noExpiry: number;
+            total: number;
+          }
+        >,
+      };
+
+      // Process all documents and build statistics
+      docCategories.forEach((category) => {
+        docStats.byCategory[category.name] = {
+          expired: 0,
+          expiringSoon: 0,
+          valid: 0,
+          noExpiry: 0,
+          total: 0,
+        };
+
+        category.docs.forEach((doc) => {
+          const status = checkDocumentStatus(doc);
+          docStats.total++;
+          docStats.byCategory[category.name].total++;
+
+          if (status === "expired") {
+            docStats.expired++;
+            docStats.byCategory[category.name].expired++;
+          } else if (status === "expiring-soon") {
+            docStats.expiringSoon++;
+            docStats.byCategory[category.name].expiringSoon++;
+          } else if (status === "valid") {
+            docStats.valid++;
+            docStats.byCategory[category.name].valid++;
+          } else {
+            docStats.noExpiry++;
+            docStats.byCategory[category.name].noExpiry++;
+          }
+        });
+      });
+
+      // Navigate to documents tab
+      const goToDocumentsTab = (e: React.MouseEvent) => {
+        e.stopPropagation(); // Prevent row click from triggering
+        router.push(`/Drivers/${row.original.id}?tab=documents`);
+      };
+
+      return (
+        <div className="relative group">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 flex items-center gap-2 text-slate-900 dark:text-slate-100 px-3"
+            onClick={goToDocumentsTab}
+          >
+            <div className="flex items-center gap-1.5">
               <Badge
                 variant="outline"
-                className="bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400"
+                className="rounded-full bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
               >
-                <CreditCard className="mr-1 h-3 w-3" />
-                Connected
+                {docStats.total}
               </Badge>
-            ) : (
-              <Badge variant="outline" className="text-slate-500">
-                <XCircle className="mr-1 h-3 w-3" />
-                Not Connected
-              </Badge>
-            )}
-          </div>
 
-          {subscriptionAmount ? (
-            <div className="text-xs text-slate-500">
-              ${subscriptionAmount} {driver.subscription_frequency || "monthly"}
+              {/* Status indicators - restored */}
+              {(docStats.expired > 0 || docStats.expiringSoon > 0) && (
+                <div className="flex space-x-1">
+                  {docStats.expired > 0 && (
+                    <AlertCircle className="h-4 w-4 text-red-500 dark:text-red-400" />
+                  )}
+                  {docStats.expiringSoon > 0 && docStats.expired === 0 && (
+                    <AlertTriangle className="h-4 w-4 text-amber-500 dark:text-amber-400" />
+                  )}
+                </div>
+              )}
             </div>
-          ) : null}
+          </Button>
 
-          <SyncDriverButton driver={driver} size="sm" />
+          {/* Enhanced tooltip with document breakdown */}
+          <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 hidden group-hover:flex flex-col items-center z-50">
+            <div className="bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs rounded-md py-2 px-3 shadow-lg border border-slate-200 dark:border-slate-700 min-w-[200px]">
+              <div className="font-medium border-b border-slate-200 dark:border-slate-700 pb-1 mb-1">
+                Document Summary
+              </div>
+
+              {/* Overall status */}
+              <div className="flex justify-between mb-2">
+                <span>Total:</span>
+                <span className="font-medium">{docStats.total} documents</span>
+              </div>
+
+              {docStats.expired > 0 && (
+                <div className="flex items-center gap-1 whitespace-nowrap text-red-600 dark:text-red-400">
+                  <AlertCircle className="h-3 w-3" />
+                  <span>{docStats.expired} expired</span>
+                </div>
+              )}
+
+              {docStats.expiringSoon > 0 && (
+                <div className="flex items-center gap-1 whitespace-nowrap text-amber-600 dark:text-amber-400">
+                  <AlertTriangle className="h-3 w-3" />
+                  <span>{docStats.expiringSoon} expiring soon</span>
+                </div>
+              )}
+
+              {/* Document breakdown by category */}
+              {docStats.total > 0 && (
+                <>
+                  <div className="border-t border-slate-200 dark:border-slate-700 my-1 pt-1">
+                    {docCategories.map(
+                      (category) =>
+                        docStats.byCategory[category.name].total > 0 && (
+                          <div key={category.name} className="mt-1">
+                            <div className="flex items-center gap-1">
+                              <span>{category.icon}</span>
+                              <span className="font-medium">
+                                {category.name}:
+                              </span>
+                              <span>
+                                {docStats.byCategory[category.name].total}
+                              </span>
+
+                              {/* Show warning icons if needed */}
+                              {docStats.byCategory[category.name].expired >
+                                0 && (
+                                <AlertCircle className="h-3 w-3 text-red-500 ml-auto" />
+                              )}
+                              {docStats.byCategory[category.name].expired ===
+                                0 &&
+                                docStats.byCategory[category.name]
+                                  .expiringSoon > 0 && (
+                                  <AlertTriangle className="h-3 w-3 text-amber-500 ml-auto" />
+                                )}
+                            </div>
+                          </div>
+                        )
+                    )}
+                  </div>
+                </>
+              )}
+
+              {/* Click instruction */}
+              <div className="text-center text-[10px] text-slate-500 dark:text-slate-400 mt-1 pt-1 border-t border-slate-200 dark:border-slate-700">
+                Click to view all documents
+              </div>
+            </div>
+            <div className="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[6px] border-t-white dark:border-t-slate-800"></div>
+          </div>
         </div>
       );
     },
@@ -279,182 +474,6 @@ export const columns: ColumnDef<Driver>[] = [
     cell: ({ row }) => {
       const status = row.getValue("status") as string;
       return getStatusBadge(status);
-    },
-  },
-  {
-    accessorKey: "documents",
-    header: "Documents",
-    cell: ({ row }) => {
-      const router = useRouter();
-      const documents =
-        (row.getValue("documents") as Driver["documents"]) || [];
-      const driverLicenses = row.original.driver_licenses || [];
-      const medicalCards = row.original.medical_cards || [];
-      const mvrFiles = row.original.mvr_files || [];
-
-      const today = new Date();
-
-      // Function to check if a document is expired or expiring soon
-      const checkDocumentStatus = (doc: any) => {
-        if (!doc.expiration_date && !doc.expiryDate) return null;
-
-        const expiryDate = parseISO(doc.expiration_date || doc.expiryDate);
-
-        if (isBefore(expiryDate, today)) {
-          return "expired";
-        } else if (isBefore(expiryDate, addDays(today, 30))) {
-          return "expiring-soon";
-        }
-        return "valid";
-      };
-
-      // Check all document types
-      const allDocs = [
-        ...documents,
-        ...driverLicenses,
-        ...medicalCards,
-        ...mvrFiles,
-      ];
-
-      const expiredCount = allDocs.filter(
-        (doc) => checkDocumentStatus(doc) === "expired"
-      ).length;
-      const expiringSoonCount = allDocs.filter(
-        (doc) => checkDocumentStatus(doc) === "expiring-soon"
-      ).length;
-      const validCount = allDocs.length - expiredCount - expiringSoonCount;
-      const totalDocs = allDocs.length;
-
-      // Navigate to documents tab
-      const goToDocumentsTab = (e: React.MouseEvent) => {
-        e.stopPropagation(); // Prevent row click from triggering
-        router.push(`/Drivers/${row.original.id}?tab=documents`);
-      };
-
-      return (
-        <div className="relative group">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 flex items-center gap-2 text-slate-900 dark:text-slate-100 px-3"
-            onClick={goToDocumentsTab}
-          >
-            <div className="flex items-center">
-              <Badge
-                variant="secondary"
-                className={cn(
-                  "rounded-full",
-                  (expiredCount > 0 || expiringSoonCount > 0) && "mr-1"
-                )}
-              >
-                {totalDocs}
-              </Badge>
-
-              {(expiredCount > 0 || expiringSoonCount > 0) && (
-                <div className="flex -space-x-1">
-                  {expiredCount > 0 && (
-                    <div className="h-2.5 w-2.5 rounded-full bg-red-500 border border-white dark:border-gray-800 z-10"></div>
-                  )}
-
-                  {expiringSoonCount > 0 && (
-                    <div className="h-2.5 w-2.5 rounded-full bg-amber-400 border border-white dark:border-gray-800"></div>
-                  )}
-                </div>
-              )}
-            </div>
-          </Button>
-
-          {/* Tooltip that appears on hover */}
-          {(expiredCount > 0 || expiringSoonCount > 0) && (
-            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 hidden group-hover:block z-50 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-              <div className="bg-slate-800 dark:bg-slate-900 text-white text-xs rounded py-1 px-2 shadow-lg">
-                {expiredCount > 0 && (
-                  <div className="flex items-center gap-1 whitespace-nowrap">
-                    <AlertCircle className="h-3 w-3 text-red-400" />
-                    <span>{expiredCount} expired</span>
-                  </div>
-                )}
-                {expiringSoonCount > 0 && (
-                  <div className="flex items-center gap-1 whitespace-nowrap">
-                    <AlertTriangle className="h-3 w-3 text-amber-400" />
-                    <span>{expiringSoonCount} expiring soon</span>
-                  </div>
-                )}
-              </div>
-              <div className="arrow-down"></div>
-            </div>
-          )}
-        </div>
-      );
-    },
-  },
-  {
-    accessorKey: "stripe_status",
-    header: ({ column }) => {
-      return (
-        <Button
-          variant="ghost"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-          className="p-0 hover:bg-transparent"
-        >
-          Stripe Status
-          <ArrowUpDown className="ml-2 h-4 w-4" />
-        </Button>
-      );
-    },
-    cell: ({ row }) => {
-      // Check if there's a subscription amount to determine if Stripe is connected
-      const hasSubscriptionAmount = Boolean(
-        (row.original.subscription_amount ?? 0) > 0 ||
-          (row.original.subscription?.amount ?? 0) > 0
-      );
-
-      return (
-        <Badge
-          variant={hasSubscriptionAmount ? "success" : "secondary"}
-          className={cn(
-            "h-6 badge",
-            hasSubscriptionAmount
-              ? "bg-green-500/10 text-green-600 dark:bg-green-500/20 dark:text-green-400"
-              : "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300"
-          )}
-        >
-          {hasSubscriptionAmount ? (
-            <CheckCircle2 className="h-3 w-3 mr-1" />
-          ) : (
-            <XCircle className="h-3 w-3 mr-1" />
-          )}
-          {hasSubscriptionAmount ? "Connected" : "Disconnected"}
-        </Badge>
-      );
-    },
-  },
-  {
-    accessorKey: "subscription_amount",
-    header: ({ column }) => {
-      return (
-        <Button
-          variant="ghost"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-          className="p-0 hover:bg-transparent"
-        >
-          Monthly Price
-          <ArrowUpDown className="ml-2 h-4 w-4" />
-        </Button>
-      );
-    },
-    cell: ({ row }) => {
-      const amount =
-        row.original.subscription?.amount ||
-        row.original.subscription_amount ||
-        0;
-      // Check if the amount is already in dollars
-      const displayAmount = amount >= 1000 ? amount / 100 : amount;
-      return (
-        <span className="text-slate-900 dark:text-slate-100">
-          ${displayAmount.toFixed(2)}/mo
-        </span>
-      );
     },
   },
 ];

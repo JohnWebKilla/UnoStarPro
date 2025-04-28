@@ -7,6 +7,12 @@ import { syncDriverWithStripeAction } from "../server-actions";
 import { Loader2, RefreshCw } from "lucide-react";
 import { useDrivers } from "./DriversClientProvider";
 import { Driver } from "../types";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface SyncDriverButtonProps {
   driver: Driver;
@@ -52,7 +58,17 @@ export function SyncDriverButton({
     }
   };
 
-  return (
+  const buttonContent = isLoading ? (
+    <Loader2
+      className={
+        size === "icon" ? "h-4 w-4 animate-spin" : "mr-2 h-4 w-4 animate-spin"
+      }
+    />
+  ) : (
+    <RefreshCw className={size === "icon" ? "h-4 w-4" : "mr-2 h-4 w-4"} />
+  );
+
+  const button = (
     <Button
       variant={variant}
       size={size}
@@ -60,17 +76,23 @@ export function SyncDriverButton({
       disabled={isLoading}
       className={className}
     >
-      {isLoading ? (
-        <>
-          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          Syncing...
-        </>
-      ) : (
-        <>
-          <RefreshCw className="mr-2 h-4 w-4" />
-          Sync with Stripe
-        </>
-      )}
+      {buttonContent}
+      {size !== "icon" && (isLoading ? "Syncing..." : "Sync with Stripe")}
     </Button>
   );
+
+  if (size === "icon") {
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>{button}</TooltipTrigger>
+          <TooltipContent>
+            <p>Sync driver with Stripe</p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
+
+  return button;
 }
