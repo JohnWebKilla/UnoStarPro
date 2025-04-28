@@ -24,6 +24,8 @@ import {
   addDays,
   parseISO,
 } from "date-fns";
+import { createPortal } from "react-dom";
+import { useState, useEffect, useRef } from "react";
 
 // Import the SyncDriverButton component
 import { SyncDriverButton } from "./SyncDriverButton";
@@ -101,10 +103,10 @@ export const columns: ColumnDef<Driver>[] = [
         <Button
           variant="ghost"
           onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-          className="p-0 hover:bg-transparent"
+          className="p-0 hover:bg-transparent text-slate-700 dark:text-slate-300 font-medium"
         >
           Created At
-          <ArrowUpDown className="ml-2 h-4 w-4" />
+          <ArrowUpDown className="ml-2 h-4 w-4 opacity-50" />
         </Button>
       );
     },
@@ -128,10 +130,10 @@ export const columns: ColumnDef<Driver>[] = [
         <Button
           variant="ghost"
           onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-          className="p-0 hover:bg-transparent"
+          className="p-0 hover:bg-transparent text-slate-700 dark:text-slate-300 font-medium"
         >
           Name
-          <ArrowUpDown className="ml-2 h-4 w-4" />
+          <ArrowUpDown className="ml-2 h-4 w-4 opacity-50" />
         </Button>
       );
     },
@@ -157,10 +159,10 @@ export const columns: ColumnDef<Driver>[] = [
         <Button
           variant="ghost"
           onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-          className="p-0 hover:bg-transparent"
+          className="p-0 hover:bg-transparent text-slate-700 dark:text-slate-300 font-medium"
         >
           Phone
-          <ArrowUpDown className="ml-2 h-4 w-4" />
+          <ArrowUpDown className="ml-2 h-4 w-4 opacity-50" />
         </Button>
       );
     },
@@ -181,10 +183,10 @@ export const columns: ColumnDef<Driver>[] = [
         <Button
           variant="ghost"
           onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-          className="p-0 hover:bg-transparent"
+          className="p-0 hover:bg-transparent text-slate-700 dark:text-slate-300 font-medium"
         >
           Truck #
-          <ArrowUpDown className="ml-2 h-4 w-4" />
+          <ArrowUpDown className="ml-2 h-4 w-4 opacity-50" />
         </Button>
       );
     },
@@ -205,10 +207,10 @@ export const columns: ColumnDef<Driver>[] = [
         <Button
           variant="ghost"
           onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-          className="p-0 hover:bg-transparent"
+          className="p-0 hover:bg-transparent text-slate-700 dark:text-slate-300 font-medium"
         >
           Type
-          <ArrowUpDown className="ml-2 h-4 w-4" />
+          <ArrowUpDown className="ml-2 h-4 w-4 opacity-50" />
         </Button>
       );
     },
@@ -224,7 +226,11 @@ export const columns: ColumnDef<Driver>[] = [
   },
   {
     id: "stripe",
-    header: "Stripe",
+    header: () => (
+      <span className="text-slate-700 dark:text-slate-300 font-medium">
+        Stripe
+      </span>
+    ),
     cell: ({ row }) => {
       const driver = row.original;
       const hasStripeProduct = !!driver.stripe_product_id;
@@ -265,6 +271,13 @@ export const columns: ColumnDef<Driver>[] = [
     header: "Documents",
     cell: ({ row }) => {
       const router = useRouter();
+      const [showTooltip, setShowTooltip] = useState(false);
+      const [tooltipPosition, setTooltipPosition] = useState({
+        top: 0,
+        left: 0,
+        rowPosition: "top",
+      });
+      const docContainerRef = useRef<HTMLDivElement>(null);
 
       // Get all document types
       const documents =
@@ -353,106 +366,162 @@ export const columns: ColumnDef<Driver>[] = [
         router.push(`/Drivers/${row.original.id}?tab=documents`);
       };
 
+      // Update tooltip position when hovering over the badge
+      useEffect(() => {
+        const updateTooltipPosition = () => {
+          if (docContainerRef.current) {
+            const rect = docContainerRef.current.getBoundingClientRect();
+
+            setTooltipPosition({
+              top: rect.top,
+              left: rect.left + rect.width / 2,
+              rowPosition: rect.top < window.innerHeight / 2 ? "top" : "bottom",
+            });
+          }
+        };
+
+        if (showTooltip) {
+          updateTooltipPosition();
+          // Add window resize listener to update position
+          window.addEventListener("resize", updateTooltipPosition);
+          window.addEventListener("scroll", updateTooltipPosition, true);
+        }
+
+        return () => {
+          window.removeEventListener("resize", updateTooltipPosition);
+          window.removeEventListener("scroll", updateTooltipPosition, true);
+        };
+      }, [showTooltip]);
+
+      // Tooltip component that will be rendered via portal
+      const TooltipContent = () => {
+        if (!showTooltip || !docContainerRef.current) return null;
+
+        const badgeRect = docContainerRef.current.getBoundingClientRect();
+
+        // Set fixed distance from badge to tooltip
+        const spacing = 15;
+
+        return createPortal(
+          <div
+            style={{
+              position: "fixed",
+              top: badgeRect.top - spacing, // Position tooltip directly above the badge
+              left: badgeRect.left + badgeRect.width / 2,
+              transform: "translate(-50%, -100%)", // Center horizontally and position above
+              zIndex: 99999,
+            }}
+            className="document-tooltip-portal"
+          >
+            <div className="document-summary-card">
+              <div className="document-summary-header">Document Summary</div>
+              <div className="document-summary-body">
+                <div className="document-summary-total">
+                  <span>Total:</span>
+                  <span>{docStats.total} documents</span>
+                </div>
+
+                {docStats.expired > 0 && (
+                  <div className="document-summary-alert">
+                    <AlertCircle className="h-4 w-4 text-red-500" />
+                    <span className="text-red-500">
+                      {docStats.expired} expired
+                    </span>
+                  </div>
+                )}
+
+                {docStats.expiringSoon > 0 && (
+                  <div className="document-summary-alert">
+                    <AlertTriangle className="h-4 w-4 text-amber-500" />
+                    <span className="text-amber-500">
+                      {docStats.expiringSoon} expiring soon
+                    </span>
+                  </div>
+                )}
+
+                {/* Document category breakdown */}
+                {docCategories
+                  .filter(
+                    (category) => docStats.byCategory[category.name].total > 0
+                  )
+                  .map((category) => (
+                    <div
+                      key={category.name}
+                      className="document-summary-category"
+                    >
+                      <span className="document-category-icon">
+                        {category.icon}
+                      </span>
+                      <span className="document-category-name">
+                        {category.name}:
+                      </span>
+                      <span className="document-category-count">
+                        {docStats.byCategory[category.name].total}
+                      </span>
+
+                      {/* Warning icon if needed */}
+                      {docStats.byCategory[category.name].expired > 0 && (
+                        <AlertCircle className="h-4 w-4 text-red-500 ml-auto" />
+                      )}
+                      {docStats.byCategory[category.name].expired === 0 &&
+                        docStats.byCategory[category.name].expiringSoon > 0 && (
+                          <AlertTriangle className="h-4 w-4 text-amber-500 ml-auto" />
+                        )}
+                    </div>
+                  ))}
+
+                <div className="document-summary-footer">
+                  Click to view all documents
+                </div>
+              </div>
+              {/* Add a visible arrow pointing to the badge */}
+              <div
+                style={{
+                  position: "absolute",
+                  bottom: "-15px",
+                  left: "50%",
+                  transform: "translateX(-50%)",
+                  width: "0",
+                  height: "0",
+                  borderLeft: "15px solid transparent",
+                  borderRight: "15px solid transparent",
+                  borderTop: "15px solid white",
+                }}
+                className="tooltip-arrow"
+              />
+            </div>
+          </div>,
+          document.body
+        );
+      };
+
       return (
-        <div className="relative group">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 flex items-center gap-2 text-slate-900 dark:text-slate-100 px-3"
+        <div
+          ref={docContainerRef}
+          className="relative document-container"
+          onMouseEnter={() => setShowTooltip(true)}
+          onMouseLeave={() => setShowTooltip(false)}
+        >
+          <div
+            className="flex items-center justify-center cursor-pointer document-cell w-full h-full"
             onClick={goToDocumentsTab}
           >
-            <div className="flex items-center gap-1.5">
-              <Badge
-                variant="outline"
-                className="rounded-full bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
-              >
-                {docStats.total}
-              </Badge>
-
-              {/* Status indicators - restored */}
+            <div className="document-badge">
+              <span className="font-medium text-center">{docStats.total}</span>
               {(docStats.expired > 0 || docStats.expiringSoon > 0) && (
-                <div className="flex space-x-1">
-                  {docStats.expired > 0 && (
-                    <AlertCircle className="h-4 w-4 text-red-500 dark:text-red-400" />
-                  )}
-                  {docStats.expiringSoon > 0 && docStats.expired === 0 && (
-                    <AlertTriangle className="h-4 w-4 text-amber-500 dark:text-amber-400" />
-                  )}
-                </div>
+                <span className="ml-2">
+                  {docStats.expired > 0 ? (
+                    <AlertCircle className="h-4 w-4 text-red-500" />
+                  ) : docStats.expiringSoon > 0 ? (
+                    <AlertTriangle className="h-4 w-4 text-amber-500" />
+                  ) : null}
+                </span>
               )}
             </div>
-          </Button>
-
-          {/* Enhanced tooltip with document breakdown */}
-          <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 hidden group-hover:flex flex-col items-center z-50">
-            <div className="bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs rounded-md py-2 px-3 shadow-lg border border-slate-200 dark:border-slate-700 min-w-[200px]">
-              <div className="font-medium border-b border-slate-200 dark:border-slate-700 pb-1 mb-1">
-                Document Summary
-              </div>
-
-              {/* Overall status */}
-              <div className="flex justify-between mb-2">
-                <span>Total:</span>
-                <span className="font-medium">{docStats.total} documents</span>
-              </div>
-
-              {docStats.expired > 0 && (
-                <div className="flex items-center gap-1 whitespace-nowrap text-red-600 dark:text-red-400">
-                  <AlertCircle className="h-3 w-3" />
-                  <span>{docStats.expired} expired</span>
-                </div>
-              )}
-
-              {docStats.expiringSoon > 0 && (
-                <div className="flex items-center gap-1 whitespace-nowrap text-amber-600 dark:text-amber-400">
-                  <AlertTriangle className="h-3 w-3" />
-                  <span>{docStats.expiringSoon} expiring soon</span>
-                </div>
-              )}
-
-              {/* Document breakdown by category */}
-              {docStats.total > 0 && (
-                <>
-                  <div className="border-t border-slate-200 dark:border-slate-700 my-1 pt-1">
-                    {docCategories.map(
-                      (category) =>
-                        docStats.byCategory[category.name].total > 0 && (
-                          <div key={category.name} className="mt-1">
-                            <div className="flex items-center gap-1">
-                              <span>{category.icon}</span>
-                              <span className="font-medium">
-                                {category.name}:
-                              </span>
-                              <span>
-                                {docStats.byCategory[category.name].total}
-                              </span>
-
-                              {/* Show warning icons if needed */}
-                              {docStats.byCategory[category.name].expired >
-                                0 && (
-                                <AlertCircle className="h-3 w-3 text-red-500 ml-auto" />
-                              )}
-                              {docStats.byCategory[category.name].expired ===
-                                0 &&
-                                docStats.byCategory[category.name]
-                                  .expiringSoon > 0 && (
-                                  <AlertTriangle className="h-3 w-3 text-amber-500 ml-auto" />
-                                )}
-                            </div>
-                          </div>
-                        )
-                    )}
-                  </div>
-                </>
-              )}
-
-              {/* Click instruction */}
-              <div className="text-center text-[10px] text-slate-500 dark:text-slate-400 mt-1 pt-1 border-t border-slate-200 dark:border-slate-700">
-                Click to view all documents
-              </div>
-            </div>
-            <div className="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[6px] border-t-white dark:border-t-slate-800"></div>
           </div>
+
+          {/* Render the tooltip via portal */}
+          <TooltipContent />
         </div>
       );
     },

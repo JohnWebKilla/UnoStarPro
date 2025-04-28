@@ -56,8 +56,10 @@ import {
   FileDown,
   RefreshCw,
   Loader2,
+  AlertCircle,
+  Clock,
 } from "lucide-react";
-import { useState, ReactNode } from "react";
+import { useState, ReactNode, useCallback } from "react";
 import { Driver, DRIVER_STATUS_OPTIONS, DRIVER_TEAM_OPTIONS } from "../types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -109,17 +111,17 @@ const TableToolbar = React.memo(function TableToolbar({
   setShowAdvancedFilters,
 }: TableToolbarProps): ReactNode {
   return (
-    <div className="flex items-center justify-between">
+    <div className="flex items-center justify-between pb-4">
       <div className="flex flex-1 items-center space-x-2">
         <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400 dark:text-slate-500" />
           <Input
             placeholder="Search drivers..."
             value={(table.getColumn("name")?.getFilterValue() as string) ?? ""}
             onChange={(event) =>
               table.getColumn("name")?.setFilterValue(event.target.value)
             }
-            className="pl-8 h-10"
+            className="pl-9 h-10 bg-white dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 rounded-md"
           />
         </div>
 
@@ -130,8 +132,9 @@ const TableToolbar = React.memo(function TableToolbar({
                 variant="outline"
                 size="icon"
                 onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                className="h-10 w-10 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/40"
               >
-                <Filter className="h-4 w-4" />
+                <Filter className="h-4 w-4 text-slate-500 dark:text-slate-400" />
               </Button>
             </TooltipTrigger>
             <TooltipContent>Toggle advanced filters</TooltipContent>
@@ -143,8 +146,12 @@ const TableToolbar = React.memo(function TableToolbar({
             <Tooltip>
               <TooltipTrigger asChild>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="icon">
-                    <SlidersHorizontal className="h-4 w-4" />
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-10 w-10 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/40"
+                  >
+                    <SlidersHorizontal className="h-4 w-4 text-slate-500 dark:text-slate-400" />
                   </Button>
                 </DropdownMenuTrigger>
               </TooltipTrigger>
@@ -182,7 +189,7 @@ const TableToolbar = React.memo(function TableToolbar({
       <div className="flex items-center gap-2">
         {hasSelectedRows ? (
           <>
-            <div className="text-sm text-muted-foreground">
+            <div className="text-sm text-slate-500 dark:text-slate-400">
               {selectedRowCount} of {totalRows} selected
             </div>
             {!allSelectedActive && (
@@ -233,9 +240,9 @@ const TableToolbar = React.memo(function TableToolbar({
                     variant="outline"
                     size="icon"
                     onClick={exportToCSV}
-                    className="h-10 w-10"
+                    className="h-10 w-10 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/40"
                   >
-                    <FileDown className="h-4 w-4" />
+                    <FileDown className="h-4 w-4 text-slate-500 dark:text-slate-400" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>Export to CSV</TooltipContent>
@@ -258,20 +265,23 @@ const TablePagination = React.memo(function TablePagination({
   table,
 }: TablePaginationProps): ReactNode {
   return (
-    <div className="flex items-center justify-end space-x-2 py-4">
-      <div className="flex-1 text-sm text-muted-foreground">
-        {table.getFilteredRowModel().rows.length} driver(s) total.
+    <div className="flex items-center justify-between pt-4 border-t border-slate-200 dark:border-slate-700">
+      <div className="flex-1 text-sm text-slate-500 dark:text-slate-400">
+        {table.getFilteredSelectedRowModel().rows.length} of{" "}
+        {table.getFilteredRowModel().rows.length} row(s) selected.
       </div>
       <div className="flex items-center space-x-6 lg:space-x-8">
         <div className="flex items-center space-x-2">
-          <p className="text-sm font-medium">Rows per page</p>
+          <p className="text-sm font-medium text-slate-600 dark:text-slate-300">
+            Rows per page
+          </p>
           <Select
             value={`${table.getState().pagination.pageSize}`}
             onValueChange={(value) => {
               table.setPageSize(Number(value));
             }}
           >
-            <SelectTrigger className="h-8 w-[70px]">
+            <SelectTrigger className="h-8 w-[70px] bg-white dark:bg-slate-800/40 border-slate-200 dark:border-slate-700">
               <SelectValue placeholder={table.getState().pagination.pageSize} />
             </SelectTrigger>
             <SelectContent side="top">
@@ -283,46 +293,24 @@ const TablePagination = React.memo(function TablePagination({
             </SelectContent>
           </Select>
         </div>
-        <div className="flex w-[100px] items-center justify-center text-sm font-medium">
-          Page {table.getState().pagination.pageIndex + 1} of{" "}
-          {table.getPageCount()}
-        </div>
         <div className="flex items-center space-x-2">
           <Button
             variant="outline"
-            className="hidden h-8 w-8 p-0 lg:flex"
-            onClick={() => table.setPageIndex(0)}
-            disabled={!table.getCanPreviousPage()}
-          >
-            <span className="sr-only">Go to first page</span>
-            <ChevronDown className="h-4 w-4 rotate-90" />
-          </Button>
-          <Button
-            variant="outline"
-            className="h-8 w-8 p-0"
+            size="sm"
             onClick={() => table.previousPage()}
             disabled={!table.getCanPreviousPage()}
+            className="h-8 w-24 bg-white dark:bg-slate-800/40 border-slate-200 dark:border-slate-700"
           >
-            <span className="sr-only">Go to previous page</span>
-            <ChevronDown className="h-4 w-4 rotate-90" />
+            Previous
           </Button>
           <Button
             variant="outline"
-            className="h-8 w-8 p-0"
+            size="sm"
             onClick={() => table.nextPage()}
             disabled={!table.getCanNextPage()}
+            className="h-8 w-24 bg-white dark:bg-slate-800/40 border-slate-200 dark:border-slate-700"
           >
-            <span className="sr-only">Go to next page</span>
-            <ChevronDown className="h-4 w-4 -rotate-90" />
-          </Button>
-          <Button
-            variant="outline"
-            className="hidden h-8 w-8 p-0 lg:flex"
-            onClick={() => table.setPageIndex(table.getPageCount() - 1)}
-            disabled={!table.getCanNextPage()}
-          >
-            <span className="sr-only">Go to last page</span>
-            <ChevronDown className="h-4 w-4 -rotate-90" />
+            Next
           </Button>
         </div>
       </div>
@@ -357,10 +345,19 @@ export function DataTable<TData>({
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
   const [loadingRows, setLoadingRows] = useState<Record<string, boolean>>({});
-  const { processingDrivers, handleRowClick, updateDriverOptimistically } =
-    useDrivers();
+  const [isLoading, setIsLoading] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingDrivers, setProcessingDrivers] = useState<
+    Record<string, boolean>
+  >({});
+
+  const {
+    drivers,
+    processingDrivers: contextProcessingDrivers,
+    refreshDrivers: refetchDrivers,
+    updateDriverOptimistically: contextUpdateDriverOptimistically,
+  } = useDrivers();
 
   const table = useReactTable({
     data: data || [], // Ensure data is never undefined
@@ -446,22 +443,21 @@ export function DataTable<TData>({
     link.click();
   };
 
-  // Function to handle row double click with loading state
-  const handleRowDoubleClickWithLoading = React.useCallback(
-    (row: Row<TData>, e: React.MouseEvent) => {
-      if (typeof onRowDoubleClick === "function") {
-        // Apply visual feedback immediately
-        const target = e.currentTarget;
-        target.classList.add("row-clicked");
+  const handleRowClick = (e: React.MouseEvent, row: Row<TData>) => {
+    // Prevent triggering on checkbox click
+    if ((e.target as HTMLElement).closest('[type="checkbox"]')) {
+      return;
+    }
 
-        // Set row as loading
-        setLoadingRows((prev) => ({ ...prev, [row.id]: true }));
+    // If no double click handler, do nothing
+    if (!onRowDoubleClick) return;
+  };
 
-        // Call the actual double click handler
-        onRowDoubleClick(row);
-      }
+  const updateDriverOptimistically = useCallback(
+    (id: string, updates: Partial<Driver>) => {
+      contextUpdateDriverOptimistically(id, updates);
     },
-    [onRowDoubleClick]
+    [contextUpdateDriverOptimistically]
   );
 
   return (
@@ -487,279 +483,247 @@ export function DataTable<TData>({
       />
 
       {showAdvancedFilters && (
-        <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-4">
-          <Select
-            value={
-              (table.getColumn("status")?.getFilterValue() as string) ?? "all"
-            }
-            onValueChange={(value) =>
-              table
-                .getColumn("status")
-                ?.setFilterValue(value === "all" ? "" : value)
-            }
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Filter by status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All statuses</SelectItem>
-              {DRIVER_STATUS_OPTIONS.map((status) => (
-                <SelectItem key={status} value={status.toLowerCase()}>
-                  {status}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Select
-            value={
-              (table.getColumn("type")?.getFilterValue() as string) ?? "all"
-            }
-            onValueChange={(value) =>
-              table
-                .getColumn("type")
-                ?.setFilterValue(value === "all" ? "" : value)
-            }
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Filter by type" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All types</SelectItem>
-              {DRIVER_TEAM_OPTIONS.map((type) => (
-                <SelectItem key={type} value={type.toLowerCase()}>
-                  {type}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
-
-      <div className="drivers-table-container rounded-md border">
-        <Table className="drivers-table">
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-[30px]">
-                <Checkbox
-                  checked={table.getIsAllPageRowsSelected()}
-                  onCheckedChange={(value) =>
-                    table.toggleAllPageRowsSelected(!!value)
-                  }
-                  aria-label="Select all"
-                  className="translate-y-[2px]"
-                />
-              </TableHead>
-              {table.getAllColumns().map((column) => {
-                if (!column.getCanHide()) return null;
-                return (
-                  <TableHead key={column.id}>
-                    {column.id.charAt(0).toUpperCase() +
-                      column.id.slice(1).replace(/_/g, " ")}
-                  </TableHead>
-                );
-              })}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {table.getRowModel().rows?.length ? (
-              table.getRowModel().rows.map((row) => (
-                <TableRow
-                  key={row.id}
-                  data-state={row.getIsSelected() && "selected"}
-                  data-loading={loadingRows[row.id] ? "true" : undefined}
-                  onDoubleClick={(e) => handleRowDoubleClickWithLoading(row, e)}
-                  className={cn(
-                    "transition-colors cursor-pointer hover:bg-muted/50",
-                    loadingRows[row.id] && "opacity-70 pointer-events-none",
-                    (processingDrivers as any)?.[(row.original as any)?.id] &&
-                      "opacity-50"
-                  )}
-                >
-                  <TableCell className="w-[30px]">
-                    <Checkbox
-                      checked={row.getIsSelected()}
-                      onCheckedChange={(value) => row.toggleSelected(!!value)}
-                      aria-label="Select row"
-                      className="translate-y-[2px]"
-                    />
-                  </TableCell>
-                  {row.getVisibleCells().map((cell) => {
-                    const columnId = cell.column.id;
-                    const driver = row.original as Driver;
-                    return (
-                      <TableCell key={cell.id} data-column={columnId}>
-                        {columnId === "status" ? (
-                          <StatusBadge
-                            status={cell.getValue() as string}
-                            isProcessing={processingDrivers[driver.id]}
-                          />
-                        ) : columnId === "actions" ? (
-                          <QuickActions
-                            row={row as Row<Driver>}
-                            processingDrivers={processingDrivers}
-                            setProcessingDriver={(id, processing) => {
-                              setIsProcessing(processing);
-                            }}
-                            updateDriverOptimistically={
-                              updateDriverOptimistically
-                            }
-                            updateDrivers={async (id, data) => {
-                              try {
-                                return await updateDriverAction(id, data);
-                              } catch (error) {
-                                console.error(
-                                  "Failed to update driver:",
-                                  error
-                                );
-                                throw error;
-                              }
-                            }}
-                          />
-                        ) : (
-                          <div className="truncate">
-                            {flexRender(
-                              cell.column.columnDef.cell,
-                              cell.getContext()
-                            )}
-                          </div>
-                        )}
-                      </TableCell>
-                    );
-                  })}
-                </TableRow>
-              ))
-            ) : (
-              <TableRow>
-                <TableCell
-                  colSpan={columns.length + 1}
-                  className="h-24 text-center"
-                >
-                  No results.
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </div>
-
-      <div className="flex items-center justify-between space-x-2 py-4">
-        <div className="flex-1 text-sm text-muted-foreground">
-          {table.getFilteredSelectedRowModel().rows.length} of{" "}
-          {table.getFilteredRowModel().rows.length} row(s) selected.
-        </div>
-        <div className="flex items-center space-x-6 lg:space-x-8">
-          <div className="flex items-center space-x-2">
-            <p className="text-sm font-medium">Rows per page</p>
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-4 border rounded-md bg-slate-50 dark:bg-slate-800/50">
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Status</label>
             <Select
-              value={`${table.getState().pagination.pageSize}`}
-              onValueChange={(value) => {
-                table.setPageSize(Number(value));
-              }}
+              value={
+                (table.getColumn("status")?.getFilterValue() as string) ?? ""
+              }
+              onValueChange={(value) =>
+                table.getColumn("status")?.setFilterValue(value)
+              }
             >
-              <SelectTrigger className="h-8 w-[70px]">
-                <SelectValue
-                  placeholder={table.getState().pagination.pageSize}
-                />
+              <SelectTrigger className="h-8">
+                <SelectValue placeholder="All statuses" />
               </SelectTrigger>
-              <SelectContent side="top">
-                {[10, 20, 30, 40, 50].map((pageSize) => (
-                  <SelectItem key={pageSize} value={`${pageSize}`}>
-                    {pageSize}
+              <SelectContent>
+                <SelectItem value="">All statuses</SelectItem>
+                {DRIVER_STATUS_OPTIONS.map((status) => (
+                  <SelectItem key={status} value={status.toLowerCase()}>
+                    {status}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
-          <div className="flex items-center space-x-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => table.previousPage()}
-              disabled={!table.getCanPreviousPage()}
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Type</label>
+            <Select
+              value={
+                (table.getColumn("type")?.getFilterValue() as string) ?? ""
+              }
+              onValueChange={(value) =>
+                table.getColumn("type")?.setFilterValue(value)
+              }
             >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => table.nextPage()}
-              disabled={!table.getCanNextPage()}
-            >
-              Next
-            </Button>
+              <SelectTrigger className="h-8">
+                <SelectValue placeholder="All types" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">All types</SelectItem>
+                {DRIVER_TEAM_OPTIONS.map((type) => (
+                  <SelectItem key={type} value={type.toLowerCase()}>
+                    {type}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
+      )}
+
+      <div className="rounded-md border overflow-hidden bg-white dark:bg-slate-800/30">
+        <div className="relative w-full overflow-auto">
+          <Table className="w-full caption-bottom text-sm">
+            <TableHeader className="bg-slate-50 dark:bg-slate-800/50 relative z-10">
+              <TableRow className="border-b border-slate-200 dark:border-slate-700 hover:bg-transparent">
+                <TableHead className="w-[30px] h-12 px-4 text-slate-700 dark:text-slate-300 font-medium text-left">
+                  <Checkbox
+                    checked={table.getIsAllPageRowsSelected()}
+                    onCheckedChange={(value) =>
+                      table.toggleAllPageRowsSelected(!!value)
+                    }
+                    aria-label="Select all"
+                    className="translate-y-[2px]"
+                  />
+                </TableHead>
+                {table.getHeaderGroups().map((headerGroup) => (
+                  <React.Fragment key={headerGroup.id}>
+                    {headerGroup.headers.map((header) => {
+                      if (!header.column.getCanHide()) return null;
+                      return (
+                        <TableHead
+                          key={header.id}
+                          className="h-12 px-4 text-slate-700 dark:text-slate-300 font-medium text-left"
+                        >
+                          {header.isPlaceholder
+                            ? null
+                            : flexRender(
+                                header.column.columnDef.header,
+                                header.getContext()
+                              )}
+                        </TableHead>
+                      );
+                    })}
+                  </React.Fragment>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {table.getRowModel().rows?.length ? (
+                table.getRowModel().rows.map((row) => (
+                  <TableRow
+                    key={row.id}
+                    data-state={row.getIsSelected() && "selected"}
+                    data-loading={loadingRows[row.id] ? "true" : undefined}
+                    className={cn(
+                      "border-b border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50 data-[state=selected]:bg-slate-100 dark:data-[state=selected]:bg-slate-800/60",
+                      "cursor-pointer transition-colors duration-200",
+                      loadingRows[row.id] && "opacity-70 pointer-events-none",
+                      (processingDrivers as any)?.[(row.original as any)?.id] &&
+                        "opacity-50"
+                    )}
+                    onClick={(e) => handleRowClick(e, row)}
+                    onDoubleClick={() => onRowDoubleClick?.(row)}
+                  >
+                    <TableCell className="w-[30px] p-4 align-middle">
+                      <Checkbox
+                        checked={row.getIsSelected()}
+                        onCheckedChange={(value) => row.toggleSelected(!!value)}
+                        aria-label="Select row"
+                        className="translate-y-[2px]"
+                      />
+                    </TableCell>
+                    {row.getVisibleCells().map((cell) => {
+                      const columnId = cell.column.id;
+                      const driver = row.original as Driver;
+                      return (
+                        <TableCell
+                          key={cell.id}
+                          data-column={columnId}
+                          className="p-4 align-middle"
+                        >
+                          {columnId === "status" ? (
+                            <StatusBadge
+                              status={cell.getValue() as string}
+                              isProcessing={
+                                processingDrivers[String(driver.id)]
+                              }
+                            />
+                          ) : columnId === "actions" ? (
+                            <QuickActions
+                              row={row as Row<Driver>}
+                              processingDrivers={processingDrivers}
+                              setProcessingDriver={(
+                                id: string,
+                                processing: boolean
+                              ) => {
+                                setIsProcessing(processing);
+                              }}
+                              updateDriverOptimistically={
+                                updateDriverOptimistically
+                              }
+                              updateDrivers={async (
+                                id: number,
+                                data: Partial<Driver>
+                              ) => {
+                                try {
+                                  return await updateDriverAction(id, data);
+                                } catch (error) {
+                                  console.error(
+                                    "Failed to update driver:",
+                                    error
+                                  );
+                                  throw error;
+                                }
+                              }}
+                            />
+                          ) : (
+                            flexRender(
+                              cell.column.columnDef.cell,
+                              cell.getContext()
+                            )
+                          )}
+                        </TableCell>
+                      );
+                    })}
+                  </TableRow>
+                ))
+              ) : !isLoading && !error ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={columns.length + 1}
+                    className="h-24 text-center"
+                  >
+                    No results.
+                  </TableCell>
+                </TableRow>
+              ) : null}
+
+              {isLoading &&
+                Array.from({ length: 5 }).map((_, i) => <LoadingRow key={i} />)}
+
+              {error && (
+                <TableRow>
+                  <TableCell
+                    colSpan={columns.length + 1}
+                    className="h-24 text-center text-red-500"
+                  >
+                    <div className="flex flex-col items-center justify-center gap-2">
+                      <AlertCircle className="h-5 w-5" />
+                      <p>Error loading drivers: {error}</p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => refetchDrivers()}
+                      >
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                        Retry
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
       </div>
-    </div>
-  );
-}
 
-interface LoadingCellProps {
-  type: string;
-}
-
-function LoadingCell({ type }: LoadingCellProps) {
-  const getSkeletonWidth = () => {
-    switch (type) {
-      case "name":
-        return "w-[150px]";
-      case "phone":
-        return "w-[120px]";
-      case "status":
-        return "w-[80px]";
-      case "type":
-        return "w-[60px]";
-      default:
-        return "w-[100px]";
-    }
-  };
-
-  return (
-    <div className="flex items-center space-x-2">
-      <Skeleton className={cn("h-4", getSkeletonWidth())} />
+      <TablePagination table={table} />
     </div>
   );
 }
 
 function LoadingRow() {
   return (
-    <TableRow>
-      <TableCell className="w-[40px] p-0">
-        <div className="h-8 flex items-center justify-center">
-          <Skeleton className="h-4 w-4" />
+    <TableRow className="border-b border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+      <TableCell className="p-4 align-middle w-[30px]">
+        <Skeleton className="h-4 w-4" />
+      </TableCell>
+      <TableCell className="p-4 align-middle">
+        <div className="flex flex-col space-y-2">
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="h-3 w-16" />
         </div>
       </TableCell>
-      <TableCell data-column="name">
-        <LoadingCell type="name" />
+      <TableCell className="p-4 align-middle">
+        <Skeleton className="h-4 w-32" />
       </TableCell>
-      <TableCell data-column="phone">
-        <LoadingCell type="phone" />
+      <TableCell className="p-4 align-middle">
+        <Skeleton className="h-4 w-24" />
       </TableCell>
-      <TableCell data-column="created_at">
-        <LoadingCell type="created_at" />
+      <TableCell className="p-4 align-middle">
+        <Skeleton className="h-4 w-16" />
       </TableCell>
-      <TableCell data-column="type">
-        <LoadingCell type="type" />
+      <TableCell className="p-4 align-middle">
+        <Skeleton className="h-4 w-16" />
       </TableCell>
-      <TableCell data-column="status">
-        <LoadingCell type="status" />
+      <TableCell className="p-4 align-middle">
+        <Skeleton className="h-6 w-24" />
       </TableCell>
-      <TableCell data-column="documents">
-        <LoadingCell type="documents" />
-      </TableCell>
-      <TableCell data-column="stripe_status">
-        <LoadingCell type="stripe_status" />
-      </TableCell>
-      <TableCell data-column="subscription">
-        <LoadingCell type="subscription" />
-      </TableCell>
-      <TableCell data-column="actions">
-        <div className="action-buttons">
-          <Skeleton className="h-8 w-8 rounded" />
-          <Skeleton className="h-8 w-8 rounded" />
-          <Skeleton className="h-8 w-8 rounded" />
-        </div>
+      <TableCell className="p-4 align-middle">
+        <Skeleton className="h-4 w-24" />
       </TableCell>
     </TableRow>
   );
@@ -770,36 +734,72 @@ interface StatusBadgeProps {
   isProcessing?: boolean;
 }
 
-const StatusBadge = React.memo(
-  ({ status, isProcessing }: StatusBadgeProps): JSX.Element => {
-    const getStatusColor = React.useMemo(
-      () => (status: string) => {
-        switch (status.toLowerCase()) {
-          case "active":
-            return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300";
-          case "inactive":
-            return "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300";
-          default:
-            return "bg-gray-100 text-gray-800";
-        }
-      },
-      []
-    );
-
+function StatusBadge({ status, isProcessing = false }: StatusBadgeProps) {
+  if (isProcessing) {
     return (
-      <div className="flex items-center gap-2">
-        <Badge className={cn("capitalize", getStatusColor(status))}>
-          {status}
-        </Badge>
-        {isProcessing && (
-          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-        )}
-      </div>
+      <Badge
+        variant="outline"
+        className="bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-600"
+      >
+        <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+        Updating...
+      </Badge>
     );
   }
-);
 
-StatusBadge.displayName = "StatusBadge";
+  switch (status?.toLowerCase()) {
+    case "active":
+      return (
+        <Badge
+          variant="outline"
+          className="bg-green-500/10 text-green-600 dark:bg-green-500/20 dark:text-green-400 hover:bg-green-500/20 dark:hover:bg-green-500/30 border-green-500/20 dark:border-green-500/30"
+        >
+          <CheckCircle className="mr-1 h-3 w-3" />
+          Active
+        </Badge>
+      );
+    case "inactive":
+      return (
+        <Badge
+          variant="outline"
+          className="bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600"
+        >
+          <XCircle className="mr-1 h-3 w-3" />
+          Inactive
+        </Badge>
+      );
+    case "pending":
+      return (
+        <Badge
+          variant="outline"
+          className="bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400 hover:bg-blue-500/20 dark:hover:bg-blue-500/30 border-blue-500/20 dark:border-blue-500/30"
+        >
+          <Clock className="mr-1 h-3 w-3" />
+          Pending
+        </Badge>
+      );
+    case "terminated":
+      return (
+        <Badge
+          variant="outline"
+          className="bg-red-500/10 text-red-600 dark:bg-red-500/20 dark:text-red-400 hover:bg-red-500/20 dark:hover:bg-red-500/30 border-red-500/20 dark:border-red-500/30"
+        >
+          <XCircle className="mr-1 h-3 w-3" />
+          Terminated
+        </Badge>
+      );
+    default:
+      return (
+        <Badge
+          variant="outline"
+          className="bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600"
+        >
+          <AlertCircle className="mr-1 h-3 w-3" />
+          {status || "Unknown"}
+        </Badge>
+      );
+  }
+}
 
 interface QuickActionsProps {
   row: Row<Driver>;
