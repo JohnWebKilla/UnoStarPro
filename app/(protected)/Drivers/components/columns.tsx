@@ -11,6 +11,7 @@ import {
   Clock,
   AlertTriangle,
   AlertCircle,
+  CreditCard,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -23,6 +24,9 @@ import {
   addDays,
   parseISO,
 } from "date-fns";
+
+// Import the SyncDriverButton component
+import { SyncDriverButton } from "./SyncDriverButton";
 
 function getStatusBadge(status: string | undefined | null) {
   if (!status) return null;
@@ -215,6 +219,46 @@ export const columns: ColumnDef<Driver>[] = [
         <span className="capitalize text-slate-900 dark:text-slate-100">
           {type?.toLowerCase()}
         </span>
+      );
+    },
+  },
+  {
+    id: "stripe",
+    header: "Stripe",
+    cell: ({ row }) => {
+      const driver = row.original;
+      const hasStripeProduct = !!driver.stripe_product_id;
+      const hasStripePrice = !!driver.stripe_price_id;
+      const subscriptionAmount =
+        driver.subscription_amount || driver.price_amount;
+
+      return (
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center">
+            {hasStripeProduct ? (
+              <Badge
+                variant="outline"
+                className="bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400"
+              >
+                <CreditCard className="mr-1 h-3 w-3" />
+                Connected
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="text-slate-500">
+                <XCircle className="mr-1 h-3 w-3" />
+                Not Connected
+              </Badge>
+            )}
+          </div>
+
+          {subscriptionAmount ? (
+            <div className="text-xs text-slate-500">
+              ${subscriptionAmount} {driver.subscription_frequency || "monthly"}
+            </div>
+          ) : null}
+
+          <SyncDriverButton driver={driver} size="sm" />
+        </div>
       );
     },
   },

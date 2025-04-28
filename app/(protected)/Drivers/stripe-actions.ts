@@ -481,15 +481,47 @@ export async function syncStripeProductsWithNameMatching() {
             }
           }
 
+          // Split names for better comparison
+          const driverNameParts = (dbDriver.name || "")
+            .toLowerCase()
+            .trim()
+            .split(/\s+/);
+          const driverFirstName = driverNameParts[0] || "";
+          const driverLastName =
+            driverNameParts.length > 1
+              ? driverNameParts[driverNameParts.length - 1]
+              : "";
+
           // Look for exact name match in Stripe
           const exactMatch = stripeProducts.find((product) => {
-            const productName = product.name.toLowerCase().trim();
-            const driverName = dbDriver.name.toLowerCase().trim();
+            const productNameClean = product.name
+              .toLowerCase()
+              .trim()
+              .replace(/^driver service -\s*/i, ""); // Remove "Driver Service - " prefix
+
+            // Full name exact match
+            if (
+              productNameClean === (dbDriver.name || "").toLowerCase().trim()
+            ) {
+              return true;
+            }
+
+            // Compare first and last name components
+            const productNameParts = productNameClean.split(/\s+/);
+            const productFirstName = productNameParts[0] || "";
+            const productLastName =
+              productNameParts.length > 1
+                ? productNameParts[productNameParts.length - 1]
+                : "";
+
             return (
-              productName === driverName ||
-              productName === `Driver Service - ${driverName}` ||
-              productName.replace(/[^a-z0-9]/g, "") ===
-                driverName.replace(/[^a-z0-9]/g, "")
+              // Match on both first and last name
+              driverFirstName &&
+              productFirstName &&
+              driverFirstName === productFirstName &&
+              driverLastName &&
+              productLastName &&
+              driverLastName === productLastName
             );
           });
 
@@ -523,25 +555,69 @@ export async function syncStripeProductsWithNameMatching() {
         batch.map(async (dbDriver) => {
           if (dbDriver.stripe_product_id) return;
 
+          // Split driver name into parts for better comparison
+          const driverNameParts = (dbDriver.name || "")
+            .toLowerCase()
+            .trim()
+            .split(/\s+/);
+          const driverFirstName = driverNameParts[0] || "";
+          const driverLastName =
+            driverNameParts.length > 1
+              ? driverNameParts[driverNameParts.length - 1]
+              : "";
+
           for (const stripeProduct of stripeProducts) {
             if (exactMatches[stripeProduct.id]) continue;
 
             // Clean up names for comparison
             const cleanStripeProduct = stripeProduct.name
               .toLowerCase()
-              .replace(/^driver service -/, "")
+              .replace(/^driver service -\s*/i, "")
               .trim();
-            const cleanDriverName = dbDriver.name.toLowerCase().trim();
 
-            const similarity = calculateNameSimilarity(
-              cleanDriverName,
+            // Split Stripe product name into parts
+            const productNameParts = cleanStripeProduct.split(/\s+/);
+            const productFirstName = productNameParts[0] || "";
+            const productLastName =
+              productNameParts.length > 1
+                ? productNameParts[productNameParts.length - 1]
+                : "";
+
+            // Calculate similarity based on full name
+            const fullNameSimilarity = calculateNameSimilarity(
+              (dbDriver.name || "").toLowerCase().trim(),
               cleanStripeProduct
             );
+
+            // Calculate part-based similarity with emphasis on last name matches
+            let partSimilarity = 0;
+            if (
+              driverFirstName &&
+              productFirstName &&
+              driverLastName &&
+              productLastName
+            ) {
+              const firstNameSimilarity = calculateNameSimilarity(
+                driverFirstName,
+                productFirstName
+              );
+              const lastNameSimilarity = calculateNameSimilarity(
+                driverLastName,
+                productLastName
+              );
+
+              // Weighted average - last name is more important
+              partSimilarity =
+                firstNameSimilarity * 0.4 + lastNameSimilarity * 0.6;
+            }
+
+            // Use the better of the two similarity scores
+            const similarity = Math.max(fullNameSimilarity, partSimilarity);
 
             // If names are similar but not exact matches
             if (similarity > 0.7 && similarity < 1) {
               console.log(
-                `Found similar match: ${cleanDriverName} <-> ${cleanStripeProduct} (${similarity})`
+                `Found similar match: ${(dbDriver.name || "").toLowerCase().trim()} <-> ${cleanStripeProduct} (${similarity})`
               );
               suggestions.push({
                 stripeProduct,
@@ -575,13 +651,35 @@ export async function syncStripeProductsWithNameMatching() {
             console.log(
               `Creating new Stripe product for driver ${dbDriver.name}`
             );
-            // Create new product in Stripe
+
+            // Get company name if available
+            let companyName = "";
+            if (dbDriver.company_id) {
+              const { data: company } = await supabase
+                .from("companies")
+                .select("name")
+                .eq("id", dbDriver.company_id)
+                .single();
+
+              if (company) {
+                companyName = company.name;
+              }
+            }
+
+            // Create a detailed description with driver information
+            const description = `Driver: ${dbDriver.name} | Phone: ${dbDriver.phone_number || "N/A"} | Truck: ${dbDriver.truck_number || "N/A"}${companyName ? ` | Company: ${companyName}` : ""}`;
+
+            // Create new product in Stripe - without "Driver Service -" prefix
             const newProduct = await stripe.products.create({
-              name: `Driver Service - ${dbDriver.name}`,
-              description: `Driver service subscription for ${dbDriver.name}`,
+              name: dbDriver.name,
+              description: description,
               metadata: {
                 driver_id: String(dbDriver.id),
                 phone_number: dbDriver.phone_number || "",
+                truck_number: dbDriver.truck_number || "",
+                solo_or_team: dbDriver.solo_or_team || "",
+                company_id: String(dbDriver.company_id || ""),
+                company_name: companyName,
               },
             });
 
@@ -616,18 +714,33 @@ export async function syncStripeProductsWithNameMatching() {
           );
 
           if (!matchingSuggestion) {
+            // Extract driver name from product name, handling both formats
+            // (with or without "Driver Service -" prefix)
             const driverName = stripeProduct.name
-              .replace(/^Driver Service -/, "")
+              .replace(/^Driver Service -\s*/i, "") // Remove prefix if it exists
               .trim();
+
             console.log(`Creating new driver for Stripe product ${driverName}`);
 
-            // Create new driver in our DB
+            // Create new driver in our DB with all required fields
             await supabase.from("drivers").insert({
               name: driverName,
               stripe_product_id: stripeProduct.id,
               phone_number: stripeProduct.metadata?.phone_number || null,
+              truck_number: stripeProduct.metadata?.truck_number || null,
+              solo_or_team: stripeProduct.metadata?.solo_or_team || null,
+              company_id: stripeProduct.metadata?.company_id || null,
               status: "pending",
+              active: true, // Add required active field
               last_synced_at: new Date().toISOString(),
+              // Add these fields to satisfy Driver type requirements
+              phone: stripeProduct.metadata?.phone_number || "",
+              truckNumber: stripeProduct.metadata?.truck_number || "",
+              type: (stripeProduct.metadata?.solo_or_team || "solo") as
+                | "solo"
+                | "team",
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
             });
           }
         })
@@ -649,12 +762,15 @@ export async function syncStripeProductsWithNameMatching() {
 
     return {
       success: true,
-      suggestions,
       message,
+      suggestions: suggestions.slice(0, 10), // Limit to top 10 suggestions
     };
   } catch (error) {
-    console.error("Error syncing Stripe products:", error);
-    throw error;
+    console.error("Error in syncStripeProductsWithNameMatching:", error);
+    return {
+      success: false,
+      message: error instanceof Error ? error.message : "Unknown error",
+    };
   }
 }
 
@@ -995,5 +1111,226 @@ export async function syncStripeProduct(driverId: string) {
     }
     console.error("Error syncing Stripe product:", error);
     throw error;
+  }
+}
+
+/**
+ * Syncs a driver with Stripe, creating or updating a product and price objects
+ * If the driver doesn't have a Stripe product ID, creates one
+ * If the driver has a product ID but it doesn't exist in Stripe, creates a new one
+ * Only creates new price objects if necessary - checks for existing prices first
+ */
+export async function syncDriverWithStripe(driver: Driver): Promise<{
+  success: boolean;
+  message: string;
+  driver?: Driver;
+}> {
+  if (!stripe) {
+    throw new Error("Stripe is not configured");
+  }
+
+  const supabase = await createClient();
+
+  try {
+    let stripeProduct: Stripe.Product | null = null;
+    let updates: Partial<Driver> = {
+      last_synced_at: new Date().toISOString(),
+    };
+
+    // Get company name if available
+    let companyName = "";
+    if (driver.company_id) {
+      const { data: company } = await supabase
+        .from("companies")
+        .select("name")
+        .eq("id", driver.company_id)
+        .single();
+
+      if (company) {
+        companyName = company.name;
+      }
+    }
+
+    // Create a detailed description with driver information
+    const description = `Driver: ${driver.name} | Phone: ${driver.phone_number || "N/A"} | Truck: ${driver.truck_number || "N/A"}${companyName ? ` | Company: ${companyName}` : ""}`;
+
+    // Step 1: Get or create Stripe product
+    if (driver.stripe_product_id) {
+      try {
+        // Try to retrieve the product
+        stripeProduct = await stripe.products.retrieve(
+          driver.stripe_product_id
+        );
+
+        // Update product details to ensure they're in sync
+        stripeProduct = await stripe.products.update(driver.stripe_product_id, {
+          name: driver.name, // Remove "Driver Service -" prefix
+          description,
+          metadata: {
+            driver_id: String(driver.id),
+            phone_number: driver.phone_number || "",
+            truck_number: driver.truck_number || "",
+            solo_or_team: driver.solo_or_team || "",
+            company_id: driver.company_id ? String(driver.company_id) : "",
+            company_name: companyName,
+          },
+        });
+      } catch (error) {
+        // Product doesn't exist in Stripe, create a new one
+        console.log(
+          `Product ${driver.stripe_product_id} not found in Stripe, creating a new one`
+        );
+        stripeProduct = await stripe.products.create({
+          name: driver.name, // Remove "Driver Service -" prefix
+          description,
+          metadata: {
+            driver_id: String(driver.id),
+            phone_number: driver.phone_number || "",
+            truck_number: driver.truck_number || "",
+            solo_or_team: driver.solo_or_team || "",
+            company_id: driver.company_id ? String(driver.company_id) : "",
+            company_name: companyName,
+          },
+        });
+
+        // Update the product ID in our updates object
+        updates.stripe_product_id = stripeProduct.id;
+      }
+    } else {
+      // Create a new product in Stripe
+      stripeProduct = await stripe.products.create({
+        name: driver.name, // Remove "Driver Service -" prefix
+        description,
+        metadata: {
+          driver_id: String(driver.id),
+          phone_number: driver.phone_number || "",
+          truck_number: driver.truck_number || "",
+          solo_or_team: driver.solo_or_team || "",
+          company_id: driver.company_id ? String(driver.company_id) : "",
+          company_name: companyName,
+        },
+      });
+
+      // Update the product ID in our updates object
+      updates.stripe_product_id = stripeProduct.id;
+    }
+
+    // Step 2: Handle price objects based on subscription amount
+    if (
+      stripeProduct &&
+      driver.subscription_amount &&
+      driver.subscription_amount > 0
+    ) {
+      // Default to monthly if not specified
+      const frequency = driver.subscription_frequency || "monthly";
+
+      // Set up interval and interval count based on frequency
+      const interval: Stripe.PriceCreateParams.Recurring.Interval =
+        frequency === "weekly" ? "week" : "month";
+      const intervalCount = 1;
+
+      // Convert subscription amount to cents for Stripe
+      const unitAmount = Math.round(
+        parseFloat(String(driver.subscription_amount)) * 100
+      );
+
+      // Check if we already have a price that matches our requirements to avoid duplicates
+      let existingPrice: Stripe.Price | null = null;
+
+      if (driver.stripe_price_id) {
+        try {
+          // Check if the existing price ID matches our requirements
+          const currentPrice = await stripe.prices.retrieve(
+            driver.stripe_price_id
+          );
+
+          if (
+            currentPrice.product === stripeProduct.id &&
+            currentPrice.unit_amount === unitAmount &&
+            currentPrice.recurring?.interval === interval
+          ) {
+            existingPrice = currentPrice;
+            console.log("Using existing price object - matches requirements");
+          } else {
+            console.log(
+              "Existing price doesn't match requirements - will create new one"
+            );
+          }
+        } catch (error) {
+          console.log("Error retrieving price, will create a new one:", error);
+        }
+      }
+
+      // If no matching price found, check other prices for this product
+      if (!existingPrice) {
+        const prices = await stripe.prices.list({
+          product: stripeProduct.id,
+          active: true,
+          limit: 100,
+        });
+
+        existingPrice =
+          prices.data.find(
+            (price) =>
+              price.unit_amount === unitAmount &&
+              price.recurring?.interval === interval &&
+              price.currency === "usd"
+          ) || null;
+
+        if (existingPrice) {
+          console.log("Found matching existing price for this product");
+        }
+      }
+
+      // Create new price only if we don't have a matching one
+      if (!existingPrice) {
+        console.log("Creating new price object");
+        const newPrice = await stripe.prices.create({
+          product: stripeProduct.id,
+          unit_amount: unitAmount,
+          currency: "usd",
+          recurring: {
+            interval,
+            interval_count: intervalCount,
+          },
+          metadata: {
+            driver_id: String(driver.id),
+            frequency,
+          },
+        });
+
+        updates.stripe_price_id = newPrice.id;
+      } else {
+        // Use existing price - only update in our database if different
+        if (driver.stripe_price_id !== existingPrice.id) {
+          updates.stripe_price_id = existingPrice.id;
+        }
+      }
+    }
+
+    // Step 3: Update the driver in the database with new Stripe info
+    const { data: updatedDriver, error: updateError } = await supabase
+      .from("drivers")
+      .update(updates)
+      .eq("id", driver.id)
+      .select()
+      .single();
+
+    if (updateError) {
+      throw updateError;
+    }
+
+    return {
+      success: true,
+      message: "Driver synced with Stripe successfully",
+      driver: updatedDriver || undefined,
+    };
+  } catch (error) {
+    console.error("Error syncing driver with Stripe:", error);
+    return {
+      success: false,
+      message:
+        error instanceof Error ? error.message : "Unknown error occurred",
+    };
   }
 }

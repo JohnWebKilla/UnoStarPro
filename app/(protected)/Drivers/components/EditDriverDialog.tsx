@@ -42,9 +42,10 @@ import {
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
-import { Driver } from "../types";
+import { Driver, SUBSCRIPTION_FREQUENCY_OPTIONS } from "../types";
 import { useDrivers } from "./DriversClientProvider";
 import { clearDriverCaches } from "../actions";
+import { SyncDriverButton } from "./SyncDriverButton";
 
 const driverFormSchema = z.object({
   name: z
@@ -66,6 +67,7 @@ const driverFormSchema = z.object({
       val === "" || val === null || val === undefined ? 0 : Number(val),
     z.number().min(0, "Subscription amount must be a positive number")
   ),
+  subscription_frequency: z.enum(["weekly", "monthly"]),
   company_id: z.coerce.number({
     required_error: "Please select a company",
     invalid_type_error: "Please select a valid company",
@@ -111,6 +113,7 @@ export function EditDriverDialog({
       solo_or_team: driver.solo_or_team as "solo" | "team",
       status: driver.status.toLowerCase() as "active" | "inactive",
       subscription_amount: driver.subscription_amount,
+      subscription_frequency: driver.subscription_frequency || "monthly",
       company_id: driver.company_id,
       hire_date: hireDate,
     }),
@@ -171,6 +174,7 @@ export function EditDriverDialog({
         status: data.status.toLowerCase(),
         company_id: data.company_id,
         subscription_amount: Number(data.subscription_amount) || 0,
+        subscription_frequency: data.subscription_frequency,
         hire_date: data.hire_date.toISOString(),
       };
 
@@ -441,43 +445,6 @@ export function EditDriverDialog({
 
               <FormField
                 control={form.control}
-                name="subscription_amount"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>PPD (weekly)</FormLabel>
-                    <FormControl>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        placeholder="250"
-                        onChange={(e) => {
-                          const value =
-                            e.target.value === ""
-                              ? 0
-                              : parseFloat(e.target.value);
-                          field.onChange(!isNaN(value) ? value : 0);
-                        }}
-                        value={field.value || ""}
-                        className="
-                          transition-colors
-                          focus:ring-2 
-                          focus:ring-offset-2 
-                          focus:ring-blue-500
-                          hover:bg-gray-50
-                        "
-                      />
-                    </FormControl>
-                    <FormMessage />
-                    <p className="text-sm text-gray-400">
-                      Weekly subscription amount per driver
-                    </p>
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
                 name="status"
                 render={({ field }) => (
                   <FormItem>
@@ -549,6 +516,87 @@ export function EditDriverDialog({
                   </FormItem>
                 )}
               />
+            </div>
+
+            <div className="flex flex-col gap-4">
+              <FormField
+                control={form.control}
+                name="subscription_amount"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Subscription Amount ($)</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder="0.00"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="subscription_frequency"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Billing Frequency</FormLabel>
+                    <Select
+                      onValueChange={field.onChange}
+                      defaultValue={field.value}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select frequency" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {SUBSCRIPTION_FREQUENCY_OPTIONS.map((option) => (
+                          <SelectItem key={option} value={option}>
+                            {option.charAt(0).toUpperCase() + option.slice(1)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              {driver.stripe_product_id && (
+                <div className="mt-2 flex flex-col gap-2">
+                  <div className="text-sm text-muted-foreground">
+                    Stripe Product ID: {driver.stripe_product_id}
+                  </div>
+                  {driver.stripe_price_id && (
+                    <div className="text-sm text-muted-foreground">
+                      Stripe Price ID: {driver.stripe_price_id}
+                    </div>
+                  )}
+                  {driver.last_synced_at && (
+                    <div className="text-sm text-muted-foreground">
+                      Last Synced:{" "}
+                      {format(
+                        new Date(driver.last_synced_at),
+                        "MMM d, yyyy h:mm a"
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="mt-4">
+                <SyncDriverButton
+                  driver={driver}
+                  variant="secondary"
+                  size="default"
+                  className="w-full"
+                />
+              </div>
             </div>
 
             <DialogFooter className="pt-6 gap-3">

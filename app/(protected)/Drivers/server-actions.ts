@@ -15,6 +15,7 @@ import {
   updateDriverInStripe,
   syncStripeProductsWithNameMatching,
   approveStripeProductMatch,
+  syncDriverWithStripe,
 } from "./stripe-actions";
 import Stripe from "stripe";
 import { calculateNameSimilarity } from "@/lib/utils";
@@ -936,6 +937,46 @@ export async function approveStripeMatchAction(
     };
   } catch (error) {
     console.error("Error in approveStripeMatchAction:", error);
+    return {
+      success: false,
+      message:
+        error instanceof Error ? error.message : "An unknown error occurred",
+    };
+  }
+}
+
+// Add this new action near the other Stripe-related actions
+export async function syncDriverWithStripeAction(driverId: number): Promise<{
+  success: boolean;
+  message: string;
+  driver?: Driver;
+}> {
+  try {
+    const supabase = await createClient();
+
+    // Get driver data
+    const { data: driver, error: driverError } = await supabase
+      .from("drivers")
+      .select()
+      .eq("id", driverId)
+      .single();
+
+    if (driverError) throw driverError;
+    if (!driver) throw new Error("Driver not found");
+
+    // Call the syncDriverWithStripe function
+    const result = await syncDriverWithStripe(driver);
+
+    // Revalidate the drivers path
+    revalidatePath("/Drivers");
+
+    // Clear cache for this driver
+    await clearDriverCache(driverId);
+
+    // Return the result
+    return result;
+  } catch (error) {
+    console.error("Error in syncDriverWithStripeAction:", error);
     return {
       success: false,
       message:

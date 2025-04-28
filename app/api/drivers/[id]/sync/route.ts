@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import Stripe from "stripe";
+import { syncDriverWithStripe } from "@/app/(protected)/Drivers/stripe-actions";
+import { clearDriverCache } from "@/app/(protected)/Drivers/cache";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: "2024-06-20",
@@ -8,106 +10,86 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
 
 export const dynamic = "force-dynamic";
 
-export async function POST(req: NextRequest): Promise<Response> {
-  if (!stripe) {
-    return NextResponse.json(
-      { error: "Stripe is not configured" },
-      { status: 500 }
-    );
-  }
-
+export async function POST(
+  request: Request,
+  { params }: { params: { id: string } }
+) {
   try {
+    const driverId = parseInt(params.id);
+
+    if (isNaN(driverId)) {
+      return NextResponse.json({ error: "Invalid driver ID" }, { status: 400 });
+    }
+
     const supabase = await createClient();
 
-    // Extract driver ID from the URL
-    const url = new URL(req.url);
-    const segments = url.pathname.split("/");
-    const id = segments[segments.length - 2]; // assumes /api/drivers/[id]/sync
-
-    // Get driver details
+    // Get driver data
     const { data: driver, error: driverError } = await supabase
       .from("drivers")
-      .select("*")
-      .eq("id", id)
+      .select()
+      .eq("id", driverId)
       .single();
 
-    if (driverError || !driver) {
+    if (driverError) {
+      return NextResponse.json({ error: driverError.message }, { status: 500 });
+    }
+
+    if (!driver) {
       return NextResponse.json({ error: "Driver not found" }, { status: 404 });
     }
 
-    let product;
-    let price;
+    // Update driver data with any data from the request
+    const requestData = await request.json().catch(() => ({}));
 
-    // If driver already has a Stripe product, update it
-    if (driver.stripe_product_id) {
-      try {
-        product = await stripe.products.update(driver.stripe_product_id, {
-          name: driver.name,
-          metadata: { driver_id: driver.id.toString() },
-        });
+    if (requestData && Object.keys(requestData).length > 0) {
+      const { error: updateError } = await supabase
+        .from("drivers")
+        .update({
+          ...requestData,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", driverId);
 
-        if (driver.stripe_price_id) {
-          const existingPrice = await stripe.prices.retrieve(
-            driver.stripe_price_id
-          );
-          if (existingPrice.unit_amount !== driver.subscription_amount * 100) {
-            price = await stripe.prices.create({
-              product: product.id,
-              unit_amount: driver.subscription_amount * 100,
-              currency: "usd",
-              recurring: {
-                interval:
-                  driver.subscription_frequency === "monthly"
-                    ? "month"
-                    : "week",
-              },
-            });
-          } else {
-            price = existingPrice;
-          }
-        }
-      } catch (stripeError: any) {
-        if (stripeError.code === "resource_missing") {
-          product = null;
-        } else {
-          throw stripeError;
-        }
+      if (updateError) {
+        return NextResponse.json(
+          { error: updateError.message },
+          { status: 500 }
+        );
       }
+
+      // Get updated driver data
+      const { data: updatedDriver, error: getError } = await supabase
+        .from("drivers")
+        .select()
+        .eq("id", driverId)
+        .single();
+
+      if (getError || !updatedDriver) {
+        return NextResponse.json(
+          { error: getError?.message || "Failed to get updated driver" },
+          { status: 500 }
+        );
+      }
+
+      driver.name = updatedDriver.name;
+      driver.subscription_amount = updatedDriver.subscription_amount;
+      driver.subscription_frequency = updatedDriver.subscription_frequency;
+      driver.phone_number = updatedDriver.phone_number;
+      driver.truck_number = updatedDriver.truck_number;
+      driver.solo_or_team = updatedDriver.solo_or_team;
     }
 
-    if (!product) {
-      product = await stripe.products.create({
-        name: driver.name,
-        metadata: { driver_id: driver.id.toString() },
-      });
+    // Sync driver with Stripe
+    const result = await syncDriverWithStripe(driver);
 
-      price = await stripe.prices.create({
-        product: product.id,
-        unit_amount: driver.subscription_amount * 100,
-        currency: "usd",
-        recurring: {
-          interval:
-            driver.subscription_frequency === "monthly" ? "month" : "week",
-        },
-      });
-    }
+    // Clear cache for this driver
+    await clearDriverCache(driverId);
 
-    const { error: updateError } = await supabase
-      .from("drivers")
-      .update({
-        stripe_product_id: product.id,
-        stripe_price_id: price?.id || driver.stripe_price_id,
-      })
-      .eq("id", id);
-
-    if (updateError) {
-      throw updateError;
-    }
-
+    // Return the result
     return NextResponse.json({
-      success: true,
-      product_id: product.id,
-      price_id: price?.id || driver.stripe_price_id,
+      success: result.success,
+      message: result.message,
+      driver: result.driver,
     });
   } catch (error) {
     console.error("Error syncing driver with Stripe:", error);
