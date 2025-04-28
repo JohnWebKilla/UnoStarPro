@@ -58,7 +58,7 @@ export async function getDriversAction(): Promise<Driver[]> {
   console.log("Fetching drivers...");
 
   try {
-    // Try to get from cache first - do this before creating supabase client to save time
+    // Try to get from cache first using Redis
     const cachedDrivers = await getCache<Driver[]>(DRIVER_LIST_KEY);
 
     if (cachedDrivers) {
@@ -393,27 +393,18 @@ export async function deleteDriverAction(driverId: number): Promise<boolean> {
 // Add a function to clear all driver caches
 export async function clearDriverCachesAction(): Promise<boolean> {
   try {
-    // Clear the main driver list cache
+    console.log("Clearing all driver caches");
+
+    // Clear Redis cache
     await clearDriverListCache();
 
-    // Get all drivers to clear their individual caches
-    const supabase = await createClient();
-    const { data: drivers } = await supabase
-      .from("drivers")
-      .select("id")
-      .order("id");
-
-    if (drivers) {
-      // Clear individual driver caches
-      await Promise.all(drivers.map((driver) => clearDriverCache(driver.id)));
-    }
-
-    // Revalidate the drivers page
+    // Trigger revalidation of the Drivers path
     revalidatePath("/Drivers");
 
+    console.log("All driver caches cleared");
     return true;
   } catch (error) {
-    console.error("Error clearing caches:", error);
+    console.error("Error clearing driver caches:", error);
     return false;
   }
 }

@@ -15,7 +15,7 @@ export default function ProtectedLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { userRole, userName, userEmail, isLoading } = useUser();
+  const { userRole, userName, userEmail, isLoading, isInitialLoad } = useUser();
   const router = useRouter();
 
   // Redirect to sign-in if not authenticated after loading
@@ -36,7 +36,7 @@ export default function ProtectedLayout({
             isLoading={isLoading}
           >
             <AnimatePresence mode="wait">
-              {isLoading ? (
+              {isLoading && isInitialLoad ? (
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}

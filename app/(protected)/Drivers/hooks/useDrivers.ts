@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { createClient } from "@/utils/supabase/client";
+import { getRealTimeClient } from "@/utils/supabase/client";
 import { Driver } from "../types";
 import { useToast } from "@/components/ui/use-toast";
 import { openDB, IDBPDatabase } from "idb";
@@ -21,7 +21,7 @@ export function useDrivers() {
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
-  const supabase = createClient();
+  const supabase = getRealTimeClient();
 
   // Load initial data from IndexedDB
   useEffect(() => {
@@ -42,6 +42,7 @@ export function useDrivers() {
   const refreshDrivers = useCallback(async () => {
     try {
       setError(null);
+      console.log("Fetching drivers from database...");
 
       const { data, error: fetchError } = await supabase
         .from("drivers")
@@ -50,6 +51,8 @@ export function useDrivers() {
 
       if (fetchError) throw fetchError;
 
+      console.log(`Fetched ${data?.length || 0} drivers from database`);
+
       // Update state
       setDrivers(data || []);
 
@@ -57,6 +60,7 @@ export function useDrivers() {
       try {
         const db = await initDB();
         await db.put(STORE_NAME, data, "driversList");
+        console.log("Saved drivers to IndexedDB");
       } catch (err) {
         console.error("Error saving to IndexedDB:", err);
       }

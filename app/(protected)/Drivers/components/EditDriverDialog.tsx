@@ -43,7 +43,7 @@ import {
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { Driver } from "../types";
-import { useDrivers } from "./DriversProvider";
+import { useDrivers } from "./DriversClientProvider";
 import { clearDriverCaches } from "../actions";
 
 const driverFormSchema = z.object({

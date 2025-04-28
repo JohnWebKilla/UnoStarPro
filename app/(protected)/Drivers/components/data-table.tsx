@@ -16,6 +16,8 @@ import {
   Row,
   Table as TableType,
   Header,
+  RowSelectionState,
+  OnChangeFn,
 } from "@tanstack/react-table";
 
 import {
@@ -60,7 +62,7 @@ import { Driver, DRIVER_STATUS_OPTIONS, DRIVER_TEAM_OPTIONS } from "../types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { Checkbox } from "@/components/ui/checkbox";
-import { useDrivers } from "./DriversProvider";
+import { useDrivers } from "./DriversClientProvider";
 import {
   Tooltip,
   TooltipContent,
@@ -77,6 +79,7 @@ import {
 import Link from "next/link";
 import { toast } from "@/components/ui/use-toast";
 import { useRouter } from "next/navigation";
+import { updateDriverAction } from "../server-actions";
 
 interface TableToolbarProps {
   table: TableType<any>;
@@ -331,17 +334,13 @@ TablePagination.displayName = "TablePagination";
 
 interface DataTableProps<TData> {
   columns: ColumnDef<TData>[];
-  data: TData[];
+  data: TData[] | undefined;
   error?: string;
   onActivateSelected?: (ids: number[]) => Promise<void>;
   onDeactivateSelected?: (ids: number[]) => Promise<void>;
-  rowSelection?: Record<string, boolean>;
-  onRowSelectionChange?: (
-    updaterOrValue:
-      | Record<string, boolean>
-      | ((old: Record<string, boolean>) => Record<string, boolean>)
-  ) => void;
-  onRowClick?: (id: string) => void;
+  rowSelection?: RowSelectionState;
+  onRowSelectionChange?: OnChangeFn<RowSelectionState>;
+  onRowClick?: (row: Row<TData>) => void;
 }
 
 export function DataTable<TData>({
@@ -351,27 +350,24 @@ export function DataTable<TData>({
   onActivateSelected,
   onDeactivateSelected,
   rowSelection = {},
-  onRowSelectionChange = () => {},
+  onRowSelectionChange,
   onRowClick,
 }: DataTableProps<TData>) {
-  const {
-    processingDrivers,
-    updateDriverOptimistically,
-    setProcessingDriver,
-    updateDrivers,
-  } = useDrivers();
-
-  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
-  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [sorting, setSorting] = useState<SortingState>([]);
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [loadingRows, setLoadingRows] = useState<Record<string, boolean>>({});
+  const { processingDrivers, handleRowClick, updateDriverOptimistically } =
+    useDrivers();
 
   const table = useReactTable({
     data: data || [], // Ensure data is never undefined
     columns,
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
-    onRowSelectionChange: onRowSelectionChange,
+    onRowSelectionChange,
     onSortingChange: setSorting,
     getSortedRowModel: getSortedRowModel(),
     onColumnFiltersChange: setColumnFilters,
@@ -450,6 +446,24 @@ export function DataTable<TData>({
     link.click();
   };
 
+  // Function to handle row click with loading state
+  const handleRowClickWithLoading = React.useCallback(
+    (row: Row<TData>, e: React.MouseEvent) => {
+      if (typeof onRowClick === "function") {
+        // Apply visual feedback immediately
+        const target = e.currentTarget;
+        target.classList.add("row-clicked");
+
+        // Set row as loading
+        setLoadingRows((prev) => ({ ...prev, [row.id]: true }));
+
+        // Call the actual click handler
+        onRowClick(row);
+      }
+    },
+    [onRowClick]
+  );
+
   return (
     <div className="space-y-4">
       {error && (
@@ -465,7 +479,7 @@ export function DataTable<TData>({
         totalRows={data?.length || 0}
         allSelectedActive={allSelectedActive}
         allSelectedInactive={allSelectedInactive}
-        isProcessing={false}
+        isProcessing={isProcessing}
         handleBulkAction={handleBulkAction}
         exportToCSV={exportToCSV}
         showAdvancedFilters={showAdvancedFilters}
@@ -476,17 +490,19 @@ export function DataTable<TData>({
         <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-4">
           <Select
             value={
-              (table.getColumn("status")?.getFilterValue() as string) ?? ""
+              (table.getColumn("status")?.getFilterValue() as string) ?? "all"
             }
             onValueChange={(value) =>
-              table.getColumn("status")?.setFilterValue(value)
+              table
+                .getColumn("status")
+                ?.setFilterValue(value === "all" ? "" : value)
             }
           >
             <SelectTrigger>
               <SelectValue placeholder="Filter by status" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">All statuses</SelectItem>
+              <SelectItem value="all">All statuses</SelectItem>
               {DRIVER_STATUS_OPTIONS.map((status) => (
                 <SelectItem key={status} value={status.toLowerCase()}>
                   {status}
@@ -496,16 +512,20 @@ export function DataTable<TData>({
           </Select>
 
           <Select
-            value={(table.getColumn("type")?.getFilterValue() as string) ?? ""}
+            value={
+              (table.getColumn("type")?.getFilterValue() as string) ?? "all"
+            }
             onValueChange={(value) =>
-              table.getColumn("type")?.setFilterValue(value)
+              table
+                .getColumn("type")
+                ?.setFilterValue(value === "all" ? "" : value)
             }
           >
             <SelectTrigger>
               <SelectValue placeholder="Filter by type" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">All types</SelectItem>
+              <SelectItem value="all">All types</SelectItem>
               {DRIVER_TEAM_OPTIONS.map((type) => (
                 <SelectItem key={type} value={type.toLowerCase()}>
                   {type}
@@ -547,10 +567,12 @@ export function DataTable<TData>({
                 <TableRow
                   key={row.id}
                   data-state={row.getIsSelected() && "selected"}
-                  onClick={() => onRowClick?.((row.original as any).id)}
+                  data-loading={loadingRows[row.id] ? "true" : undefined}
+                  onClick={(e) => handleRowClickWithLoading(row, e)}
                   className={cn(
                     "transition-colors cursor-pointer hover:bg-muted/50",
-                    row.getIsSelected() && "bg-muted/50"
+                    row.getIsSelected() && "bg-muted/50",
+                    loadingRows[row.id] && "opacity-70"
                   )}
                 >
                   <TableCell className="w-[30px]">
@@ -575,11 +597,23 @@ export function DataTable<TData>({
                           <QuickActions
                             row={row as Row<Driver>}
                             processingDrivers={processingDrivers}
-                            setProcessingDriver={setProcessingDriver}
+                            setProcessingDriver={(id, processing) => {
+                              setIsProcessing(processing);
+                            }}
                             updateDriverOptimistically={
                               updateDriverOptimistically
                             }
-                            updateDrivers={updateDrivers}
+                            updateDrivers={async (id, data) => {
+                              try {
+                                return await updateDriverAction(id, data);
+                              } catch (error) {
+                                console.error(
+                                  "Failed to update driver:",
+                                  error
+                                );
+                                throw error;
+                              }
+                            }}
                           />
                         ) : (
                           <div className="truncate">

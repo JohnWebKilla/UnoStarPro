@@ -6,8 +6,16 @@ const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 const isBrowser = typeof window !== "undefined";
 
-export const createClient = () =>
-  createBrowserClient(supabaseUrl, supabaseKey, {
+export const createClient = () => {
+  // Log that we're creating a client
+  if (isBrowser) {
+    console.log(
+      "Creating Supabase client with URL:",
+      supabaseUrl.substring(0, 15) + "..."
+    );
+  }
+
+  return createBrowserClient(supabaseUrl, supabaseKey, {
     cookies: {
       get(name: string) {
         if (!isBrowser) return undefined;
@@ -31,6 +39,31 @@ export const createClient = () =>
         this.set(name, "", { ...options, maxAge: -1 });
       },
     },
+    auth: {
+      autoRefreshToken: true,
+      persistSession: true,
+    },
   });
+};
 
-export default createClient;
+// Modify the client after creation to ensure realtime is enabled
+// This approach avoids TypeScript errors with the direct configuration
+export const getRealTimeClient = () => {
+  const client = createClient();
+
+  if (isBrowser) {
+    // Log that we're ensuring realtime is enabled
+    console.log("Ensuring realtime is enabled for Supabase client");
+
+    // Access the underlying Realtime instance and enable it
+    // @ts-ignore - We're using a workaround to enable realtime
+    if (client.realtime) {
+      // @ts-ignore
+      client.realtime.setAuth(client.auth.getSession());
+    }
+  }
+
+  return client;
+};
+
+export default getRealTimeClient;

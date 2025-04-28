@@ -145,7 +145,8 @@
 
 /* Row hover and selection styles */
 .drivers-table tbody tr:hover {
-    background-color: var(--muted) !important;
+    background-color: rgba(59, 130, 246, 0.1) !important;
+    /* Light blue */
 }
 
 .drivers-table tr[data-state="selected"] {
@@ -153,7 +154,82 @@
 }
 
 .drivers-table tr[data-state="selected"]:hover {
-    background-color: var(--accent) !important;
+    background-color: rgba(59, 130, 246, 0.2) !important;
+    /* Slightly darker blue */
+}
+
+/* Immediate visual feedback on click */
+.drivers-table tbody tr:active {
+    background-color: rgba(59, 130, 246, 0.3) !important;
+    /* Darker blue for active state */
+    transform: scale(0.99) !important;
+    transition: transform 0.05s ease-out !important;
+}
+
+/* Row clicked state */
+.drivers-table tbody tr.row-clicked {
+    background-color: rgba(59, 130, 246, 0.3) !important;
+    /* Consistent with active state */
+    transform: scale(0.99) !important;
+    transition: transform 0.1s ease-out, background-color 0.1s ease-out !important;
+}
+
+/* Loading row state */
+.drivers-table tbody tr[data-loading="true"] {
+    position: relative !important;
+    background-color: rgba(59, 130, 246, 0.2) !important;
+    pointer-events: none !important;
+}
+
+/* Document tooltip arrow */
+.arrow-down {
+    position: absolute !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    width: 0 !important;
+    height: 0 !important;
+    border-left: 6px solid transparent !important;
+    border-right: 6px solid transparent !important;
+    border-top: 6px solid rgb(30, 41, 59) !important;
+    /* slate-800 */
+    bottom: -6px !important;
+}
+
+/* Dark mode tooltip arrow */
+.dark .arrow-down {
+    border-top-color: rgb(15, 23, 42) !important;
+    /* dark:slate-900 */
+}
+
+.drivers-table tbody tr[data-loading="true"]::after {
+    content: '' !important;
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    background: linear-gradient(90deg,
+            transparent 25%,
+            rgba(59, 130, 246, 0.3) 50%,
+            transparent 75%) !important;
+    background-size: 200% 100% !important;
+    animation: loading-shimmer 1.5s infinite !important;
+    z-index: 1 !important;
+}
+
+@keyframes loading-shimmer {
+    0% {
+        background-position: 200% 0;
+    }
+
+    100% {
+        background-position: -200% 0;
+    }
+}
+
+/* Progress cursor for the whole page when navigating */
+body.cursor-progress * {
+    cursor: progress !important;
 }
 
 /* Scrollbar styles */

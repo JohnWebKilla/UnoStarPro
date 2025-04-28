@@ -40,7 +40,7 @@ import {
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
-import { useDrivers } from "./DriversProvider";
+import { useDrivers } from "./DriversClientProvider";
 import { clearDriverCaches } from "../actions";
 
 // Update schema to include company_id and hire_date

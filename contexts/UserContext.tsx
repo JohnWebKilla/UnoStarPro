@@ -28,6 +28,7 @@ interface UserContextType {
   setUserRole: (role: Role | null) => void;
   setUserName: (name: string | null) => void;
   setUserEmail: (email: string | null) => void;
+  isInitialLoad: boolean;
 }
 
 const STORAGE_KEY = "unostar_session";
@@ -42,6 +43,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [sessionChecked, setSessionChecked] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
 
   const initRef = useRef(false);
   const authListenerRef = useRef<{ unsubscribe: () => void } | null>(null);
@@ -93,7 +95,10 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
     console.log("Checking session...");
     checkingSessionRef.current = true;
-    setIsLoading(true);
+
+    if (isInitialLoad) {
+      setIsLoading(true);
+    }
 
     try {
       const {
@@ -146,9 +151,17 @@ export function UserProvider({ children }: { children: ReactNode }) {
       handleSignOut();
     } finally {
       setIsLoading(false);
+      setIsInitialLoad(false);
       checkingSessionRef.current = false;
     }
-  }, [supabase, handleSignOut, pathname, router, storeSessionData]);
+  }, [
+    supabase,
+    handleSignOut,
+    pathname,
+    router,
+    storeSessionData,
+    isInitialLoad,
+  ]);
 
   const restoreSessionFromStorage = useCallback(async () => {
     try {
@@ -255,18 +268,16 @@ export function UserProvider({ children }: { children: ReactNode }) {
     };
   }, [supabase, checkSession, handleSignOut, restoreSessionFromStorage]);
 
-  const value = useMemo(
-    () => ({
-      userRole,
-      userName,
-      userEmail,
-      isLoading,
-      setUserRole,
-      setUserName,
-      setUserEmail,
-    }),
-    [userRole, userName, userEmail, isLoading]
-  );
+  const value: UserContextType = {
+    userRole,
+    userName,
+    userEmail,
+    isLoading,
+    setUserRole,
+    setUserName,
+    setUserEmail,
+    isInitialLoad,
+  };
 
   if (!sessionChecked) {
     return null;

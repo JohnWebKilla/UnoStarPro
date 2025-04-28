@@ -1,6 +1,6 @@
 "use client";
 
-import { useDrivers } from "./DriversProvider";
+import { useDrivers } from "./DriversClientProvider";
 import {
   Users,
   Receipt,

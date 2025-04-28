@@ -1,35 +1,28 @@
+"use client";
+
 import { ColumnDef } from "@tanstack/react-table";
 import { Driver } from "../types";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  MoreHorizontal,
-  Info,
   ArrowUpDown,
   CheckCircle2,
   XCircle,
   Clock,
+  AlertTriangle,
   AlertCircle,
 } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
-import { EditDriverDialog } from "./EditDriverDialog";
-import { useDrivers } from "./DriversProvider";
-import { differenceInDays, formatDistanceToNow, format } from "date-fns";
-
-function formatCurrency(amount: number) {
-  // If amount is already in dollars (less than 1000), treat as dollars
-  // If amount is in cents (greater than or equal to 1000), convert to dollars
-  const dollars = amount >= 1000 ? amount / 100 : amount;
-  return dollars ? `$${dollars.toFixed(2)}` : "$0.00";
-}
+import {
+  differenceInDays,
+  formatDistanceToNow,
+  format,
+  isBefore,
+  addDays,
+  parseISO,
+} from "date-fns";
 
 function getStatusBadge(status: string | undefined | null) {
   if (!status) return null;
@@ -84,6 +77,17 @@ function getStatusBadge(status: string | undefined | null) {
     </Badge>
   );
 }
+
+// Create a row click handler to navigate to driver details
+const useDriverRowClick = () => {
+  const router = useRouter();
+
+  return (driverId: string | number) => {
+    if (driverId) {
+      router.push(`/Drivers/${driverId}`);
+    }
+  };
+};
 
 export const columns: ColumnDef<Driver>[] = [
   {
@@ -244,26 +248,99 @@ export const columns: ColumnDef<Driver>[] = [
       const medicalCards = row.original.medical_cards || [];
       const mvrFiles = row.original.mvr_files || [];
 
-      const totalDocs = Array.isArray(documents)
-        ? documents.length
-        : driverLicenses.length + medicalCards.length + mvrFiles.length;
+      const today = new Date();
+
+      // Function to check if a document is expired or expiring soon
+      const checkDocumentStatus = (doc: any) => {
+        if (!doc.expiration_date && !doc.expiryDate) return null;
+
+        const expiryDate = parseISO(doc.expiration_date || doc.expiryDate);
+
+        if (isBefore(expiryDate, today)) {
+          return "expired";
+        } else if (isBefore(expiryDate, addDays(today, 30))) {
+          return "expiring-soon";
+        }
+        return "valid";
+      };
+
+      // Check all document types
+      const allDocs = [
+        ...documents,
+        ...driverLicenses,
+        ...medicalCards,
+        ...mvrFiles,
+      ];
+
+      const expiredCount = allDocs.filter(
+        (doc) => checkDocumentStatus(doc) === "expired"
+      ).length;
+      const expiringSoonCount = allDocs.filter(
+        (doc) => checkDocumentStatus(doc) === "expiring-soon"
+      ).length;
+      const validCount = allDocs.length - expiredCount - expiringSoonCount;
+      const totalDocs = allDocs.length;
+
+      // Navigate to documents tab
+      const goToDocumentsTab = (e: React.MouseEvent) => {
+        e.stopPropagation(); // Prevent row click from triggering
+        router.push(`/Drivers/${row.original.id}?tab=documents`);
+      };
 
       return (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-8 flex items-center gap-2 text-slate-900 dark:text-slate-100"
-          onClick={() =>
-            router.push(`/Drivers/${row.original.id}?tab=documents`)
-          }
-        >
-          View
-          {totalDocs > 0 && (
-            <Badge variant="secondary" className="ml-2">
-              {totalDocs}
-            </Badge>
+        <div className="relative group">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 flex items-center gap-2 text-slate-900 dark:text-slate-100 px-3"
+            onClick={goToDocumentsTab}
+          >
+            <div className="flex items-center">
+              <Badge
+                variant="secondary"
+                className={cn(
+                  "rounded-full",
+                  (expiredCount > 0 || expiringSoonCount > 0) && "mr-1"
+                )}
+              >
+                {totalDocs}
+              </Badge>
+
+              {(expiredCount > 0 || expiringSoonCount > 0) && (
+                <div className="flex -space-x-1">
+                  {expiredCount > 0 && (
+                    <div className="h-2.5 w-2.5 rounded-full bg-red-500 border border-white dark:border-gray-800 z-10"></div>
+                  )}
+
+                  {expiringSoonCount > 0 && (
+                    <div className="h-2.5 w-2.5 rounded-full bg-amber-400 border border-white dark:border-gray-800"></div>
+                  )}
+                </div>
+              )}
+            </div>
+          </Button>
+
+          {/* Tooltip that appears on hover */}
+          {(expiredCount > 0 || expiringSoonCount > 0) && (
+            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 hidden group-hover:block z-50 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+              <div className="bg-slate-800 dark:bg-slate-900 text-white text-xs rounded py-1 px-2 shadow-lg">
+                {expiredCount > 0 && (
+                  <div className="flex items-center gap-1 whitespace-nowrap">
+                    <AlertCircle className="h-3 w-3 text-red-400" />
+                    <span>{expiredCount} expired</span>
+                  </div>
+                )}
+                {expiringSoonCount > 0 && (
+                  <div className="flex items-center gap-1 whitespace-nowrap">
+                    <AlertTriangle className="h-3 w-3 text-amber-400" />
+                    <span>{expiringSoonCount} expiring soon</span>
+                  </div>
+                )}
+              </div>
+              <div className="arrow-down"></div>
+            </div>
           )}
-        </Button>
+        </div>
       );
     },
   },
@@ -337,3 +414,23 @@ export const columns: ColumnDef<Driver>[] = [
     },
   },
 ];
+
+// Add clickable row functionality
+export const enhanceColumnsWithRowClick = (columns: ColumnDef<Driver>[]) => {
+  const handleDriverRowClick = useDriverRowClick();
+
+  return {
+    columns,
+    meta: {
+      onRowClick: (row: any) => {
+        // Get the driver ID from the row object
+        const driverId = row?.original?.id;
+        if (driverId) {
+          handleDriverRowClick(driverId);
+        } else {
+          console.warn("Row clicked but no driver ID found", row);
+        }
+      },
+    },
+  };
+};
