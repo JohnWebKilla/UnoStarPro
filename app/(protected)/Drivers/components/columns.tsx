@@ -215,12 +215,27 @@ export const columns: ColumnDef<Driver>[] = [
       );
     },
     cell: ({ row }) => {
+      // Get the driver type, handling both fields
       const type = (row.getValue("type") ||
         row.original.solo_or_team) as string;
       return (
         <span className="capitalize text-slate-900 dark:text-slate-100">
-          {type?.toLowerCase()}
+          {type?.toLowerCase() || "N/A"}
         </span>
+      );
+    },
+    filterFn: (row, id, value) => {
+      // Handle both type and solo_or_team fields for filtering
+      if (value === "all" || !value) return true;
+
+      const typeField = String(row.getValue(id) || "").toLowerCase();
+      const soloTeamField = String(
+        row.original.solo_or_team || ""
+      ).toLowerCase();
+
+      return (
+        typeField === value.toLowerCase() ||
+        soloTeamField === value.toLowerCase()
       );
     },
   },

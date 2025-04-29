@@ -332,6 +332,7 @@ interface DataTableProps<TData> {
   rowSelection?: RowSelectionState;
   onRowSelectionChange?: OnChangeFn<RowSelectionState>;
   onRowDoubleClick?: (row: Row<TData>) => void;
+  onViewDetails?: (driver: TData) => void;
 }
 
 export function DataTable<TData>({
@@ -343,6 +344,7 @@ export function DataTable<TData>({
   rowSelection = {},
   onRowSelectionChange,
   onRowDoubleClick,
+  onViewDetails,
 }: DataTableProps<TData>) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -525,17 +527,19 @@ export function DataTable<TData>({
             <label className="text-sm font-medium">Status</label>
             <Select
               value={
-                (table.getColumn("status")?.getFilterValue() as string) ?? ""
+                (table.getColumn("status")?.getFilterValue() as string) ?? "all"
               }
               onValueChange={(value) =>
-                table.getColumn("status")?.setFilterValue(value)
+                table
+                  .getColumn("status")
+                  ?.setFilterValue(value === "all" ? undefined : value)
               }
             >
               <SelectTrigger className="h-8">
                 <SelectValue placeholder="All statuses" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All statuses</SelectItem>
+                <SelectItem value="all">All statuses</SelectItem>
                 {DRIVER_STATUS_OPTIONS.map((status) => (
                   <SelectItem key={status} value={status.toLowerCase()}>
                     {status}
@@ -548,17 +552,19 @@ export function DataTable<TData>({
             <label className="text-sm font-medium">Type</label>
             <Select
               value={
-                (table.getColumn("type")?.getFilterValue() as string) ?? ""
+                (table.getColumn("type")?.getFilterValue() as string) ?? "all"
               }
               onValueChange={(value) =>
-                table.getColumn("type")?.setFilterValue(value)
+                table
+                  .getColumn("type")
+                  ?.setFilterValue(value === "all" ? undefined : value)
               }
             >
               <SelectTrigger className="h-8">
                 <SelectValue placeholder="All types" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All types</SelectItem>
+                <SelectItem value="all">All types</SelectItem>
                 {DRIVER_TEAM_OPTIONS.map((type) => (
                   <SelectItem key={type} value={type.toLowerCase()}>
                     {type}
@@ -684,6 +690,11 @@ export function DataTable<TData>({
                                   throw error;
                                 }
                               }}
+                              onViewDetails={
+                                onViewDetails as
+                                  | ((driver: Driver) => void)
+                                  | undefined
+                              }
                             />
                           ) : (
                             flexRender(
@@ -789,34 +800,35 @@ function StatusBadge({
   const [previousStatus, setPreviousStatus] = useState(status);
   const [showSuccess, setShowSuccess] = useState(false);
 
-  // Debug logging to verify the processing state
+  // Debug logging to verify the processing state and status changes
   useEffect(() => {
-    if (driverId && isProcessing) {
+    console.log(`StatusBadge for driver ${driverId} rendering with:`, {
+      status,
+      previousStatus,
+      isProcessing,
+      showSuccess,
+    });
+
+    // Always update previous status when status prop changes to ensure we track changes
+    if (status !== previousStatus) {
       console.log(
-        `StatusBadge for driver ${driverId} showing processing state:`,
-        isProcessing
+        `Status changed for driver ${driverId}: ${previousStatus} -> ${status}`
       );
-    }
-  }, [driverId, isProcessing]);
-
-  // Show success animation when status changes
-  useEffect(() => {
-    if (status !== previousStatus && !isProcessing && previousStatus) {
-      // Status has changed and is not in processing state anymore
-      setShowSuccess(true);
-
-      // Reset after animation completes
-      const timer = setTimeout(() => {
-        setShowSuccess(false);
-        setPreviousStatus(status);
-      }, 500);
-
-      return () => clearTimeout(timer);
-    } else if (status !== previousStatus) {
-      // Just update the previous status without animation
       setPreviousStatus(status);
+
+      // If not processing and there was a prior status, show success animation
+      if (!isProcessing && previousStatus) {
+        setShowSuccess(true);
+
+        // Reset after animation completes
+        const timer = setTimeout(() => {
+          setShowSuccess(false);
+        }, 800); // Longer animation to make it more visible
+
+        return () => clearTimeout(timer);
+      }
     }
-  }, [status, previousStatus, isProcessing]);
+  }, [status, previousStatus, isProcessing, driverId]);
 
   if (isProcessing) {
     return (
@@ -902,6 +914,7 @@ interface QuickActionsProps {
   setProcessingDriver: (id: string, processing: boolean) => void;
   updateDriverOptimistically: (id: string, updates: Partial<Driver>) => void;
   updateDrivers: (id: number, data: Partial<Driver>) => Promise<Driver>;
+  onViewDetails?: (driver: Driver) => void;
 }
 
 function QuickActions({
@@ -910,6 +923,7 @@ function QuickActions({
   setProcessingDriver,
   updateDriverOptimistically,
   updateDrivers,
+  onViewDetails,
 }: QuickActionsProps): JSX.Element {
   const router = useRouter();
   const driver = row.original;
@@ -1002,15 +1016,42 @@ function QuickActions({
   // Show loading if either state is true
   const showLoading = isProcessing || localProcessing;
 
-  // Handle view action
+  // Handle view action - Updated to fix navigation issue
   const handleView = useCallback(() => {
-    router.push(`/Drivers/${driver.id}`);
-  }, [driver.id, router]);
+    console.log("View details clicked for driver:", driver.id);
 
-  // Handle edit action
+    if (onViewDetails) {
+      onViewDetails(driver);
+    } else {
+      // Store data first
+      sessionStorage.setItem("selectedDriver", JSON.stringify(driver));
+
+      // Force a hard navigation by using window.location instead of router
+      console.log("Forcing hard navigation to:", `/Drivers/${driver.id}`);
+
+      // Add a small delay to ensure the session storage is set
+      setTimeout(() => {
+        window.location.href = `/Drivers/${driver.id}`;
+      }, 10);
+    }
+  }, [driver, onViewDetails]);
+
+  // Handle edit action - Updated to use window.location
   const handleEdit = useCallback(() => {
-    router.push(`/Drivers/${driver.id}/edit`);
-  }, [driver.id, router]);
+    // Store data first
+    sessionStorage.setItem("selectedDriver", JSON.stringify(driver));
+
+    // Force a hard navigation for edit page
+    console.log(
+      "Forcing hard navigation to edit page:",
+      `/Drivers/${driver.id}/edit`
+    );
+
+    // Add a small delay to ensure the session storage is set
+    setTimeout(() => {
+      window.location.href = `/Drivers/${driver.id}/edit`;
+    }, 10);
+  }, [driver]);
 
   return (
     <DropdownMenu>

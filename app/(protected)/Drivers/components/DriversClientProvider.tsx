@@ -11,7 +11,7 @@ import { useToast } from "@/components/ui/use-toast";
 import { Driver, RealtimePayload } from "../types";
 import { useRouter } from "next/navigation";
 import { clearDriverCaches } from "../actions";
-import { updateDriverAction } from "../server-actions";
+import { updateDriverAction, getDriverAction } from "../server-actions";
 import { getRealTimeClient } from "@/utils/supabase/client";
 import {
   RealtimeChannel,
@@ -33,6 +33,9 @@ interface DriversContextType {
   handleRowClick: (driverId: string) => void;
   refreshDrivers: (skipCache?: boolean) => Promise<void>;
   companies: Array<{ id: number; name: string }>;
+  selectedDriver: Driver | null;
+  setSelectedDriver: (driver: Driver | null) => void;
+  getDriverById: (id: string | number) => Driver | null;
 }
 
 const DriversContext = createContext<DriversContextType | undefined>(undefined);
@@ -86,6 +89,7 @@ export function DriversClientProvider({
     Record<string, boolean>
   >({});
   const [showImportDialog, setShowImportDialog] = useState(false);
+  const [selectedDriver, setSelectedDriver] = useState<Driver | null>(null);
   const { toast } = useToast();
   const router = useRouter();
   const [companies] = useState<Array<{ id: number; name: string }>>([]);
@@ -182,14 +186,74 @@ export function DriversClientProvider({
     }
   };
 
-  const handleRowClick = (driverId: string) => {
-    router.push(`/Drivers/${driverId}`);
-  };
+  // Function to get a driver by ID from the local state
+  const getDriverById = useCallback(
+    (id: string | number): Driver | null => {
+      const driverId = typeof id === "string" ? id : String(id);
+      return drivers.find((driver) => String(driver.id) === driverId) || null;
+    },
+    [drivers]
+  );
+
+  // Modified handleRowClick to set the selected driver before navigation
+  const handleRowClick = useCallback(
+    (driverId: string) => {
+      const driver = getDriverById(driverId);
+      if (driver) {
+        setSelectedDriver(driver);
+        // Store in sessionStorage to preserve across page navigations
+        sessionStorage.setItem("selectedDriver", JSON.stringify(driver));
+      }
+
+      // Force hard navigation with window.location
+      console.log("Row clicked, forcing hard navigation to driver:", driverId);
+
+      // Add a small delay to ensure the session storage is set
+      setTimeout(() => {
+        window.location.href = `/Drivers/${driverId}`;
+      }, 10);
+    },
+    [getDriverById]
+  );
+
+  // Load selected driver from sessionStorage on mount
+  useEffect(() => {
+    try {
+      const storedDriver = sessionStorage.getItem("selectedDriver");
+      if (storedDriver) {
+        setSelectedDriver(JSON.parse(storedDriver));
+      }
+    } catch (error) {
+      console.error("Error loading stored driver:", error);
+    }
+  }, []);
 
   const refreshDrivers = async (skipCache?: boolean) => {
     try {
       setIsLoading(true);
+
+      // Trigger a refresh of the page data
       router.refresh();
+
+      // Also update the selected driver if we have one
+      if (selectedDriver) {
+        try {
+          const freshDriver = await getDriverAction(Number(selectedDriver.id));
+          if (freshDriver) {
+            // Update selected driver with fresh data
+            setSelectedDriver(freshDriver);
+
+            // Also update session storage
+            sessionStorage.setItem(
+              "selectedDriver",
+              JSON.stringify(freshDriver)
+            );
+          }
+        } catch (error) {
+          console.error("Failed to refresh selected driver:", error);
+        }
+      }
+
       setLastUpdateTime(Date.now());
       return Promise.resolve();
     } catch (error) {
@@ -199,6 +263,161 @@ export function DriversClientProvider({
       setIsLoading(false);
     }
   };
+
+  // Shared update function for realtime updates
+  const updateFromRealtimeChange = useCallback(
+    async (payload: any, event: "UPDATE" | "INSERT" | "DELETE") => {
+      try {
+        console.log(`Received ${event} event:`, payload);
+
+        // Clear server-side cache
+        await clearDriverCaches();
+
+        // Fetch fresh data from server
+        const { data: freshData, error: fetchError } = await supabase
+          .from("drivers")
+          .select("*")
+          .order("created_at", { ascending: false });
+
+        if (fetchError) {
+          console.error(
+            `Error fetching updated drivers after ${event}:`,
+            fetchError
+          );
+          return;
+        }
+
+        if (freshData) {
+          console.log(
+            `Updating drivers state with fresh data (${freshData.length} items)`
+          );
+
+          // Create a completely new array to ensure React detects the state change
+          const updatedDrivers = [...freshData];
+          setDrivers(updatedDrivers);
+          console.log(
+            `Updated drivers data after ${event} event`,
+            updatedDrivers
+          );
+
+          // For updates, also update the selectedDriver if it's the same one
+          if (event === "UPDATE") {
+            const updatedRecord = payload.new as Driver;
+
+            // Check if this is the currently selected driver
+            if (
+              selectedDriver &&
+              String(selectedDriver.id) === String(updatedRecord.id)
+            ) {
+              // Deep clone the record to force React to recognize it as a new value
+              const freshDriverCopy = JSON.parse(JSON.stringify(updatedRecord));
+              console.log(
+                "Updating selected driver with real-time data",
+                freshDriverCopy
+              );
+
+              // Update the selected driver with a new object reference
+              setSelectedDriver(freshDriverCopy);
+
+              // Update session storage too (no need to stringify twice)
+              sessionStorage.setItem(
+                "selectedDriver",
+                JSON.stringify(freshDriverCopy)
+              );
+            }
+
+            // Show notification
+            const oldRecord = payload.old as Driver;
+            const changedFields = getChangedFields(oldRecord, updatedRecord);
+
+            if (changedFields.length > 0) {
+              toast({
+                title: "Driver Updated",
+                description: `${updatedRecord.name}: Updated ${changedFields.join(", ")}.`,
+              });
+            } else {
+              toast({
+                title: "Driver Updated",
+                description: `${updatedRecord.name} has been updated.`,
+              });
+            }
+          }
+          // For inserts, show appropriate notification
+          else if (event === "INSERT") {
+            const newRecord = payload.new as Driver;
+
+            let details = [];
+            if (newRecord.status) details.push(`Status: ${newRecord.status}`);
+            if (newRecord.type) details.push(`Type: ${newRecord.type}`);
+            if (newRecord.truckNumber)
+              details.push(`Truck: ${newRecord.truckNumber}`);
+
+            const detailsText =
+              details.length > 0 ? ` (${details.join(", ")})` : "";
+
+            toast({
+              title: "New Driver Added",
+              description: `${newRecord.name}${detailsText} has been added.`,
+            });
+          }
+          // For deletes, check if we need to navigate away
+          else if (event === "DELETE") {
+            const oldRecord = payload.old as Driver;
+            const deletedId = String(oldRecord.id);
+
+            // If the deleted driver is the currently selected one, navigate back to list
+            if (selectedDriver && String(selectedDriver.id) === deletedId) {
+              toast({
+                title: "Current Driver Deleted",
+                description:
+                  "The driver you're viewing has been deleted. Redirecting to drivers list.",
+                variant: "destructive",
+              });
+
+              // Clear selected driver
+              setSelectedDriver(null);
+              sessionStorage.removeItem("selectedDriver");
+
+              // Navigate back to drivers list after a brief delay
+              setTimeout(() => {
+                router.push("/Drivers");
+              }, 1500);
+            } else {
+              // Just show notification
+              let statusInfo = oldRecord.status ? ` (${oldRecord.status})` : "";
+
+              toast({
+                title: "Driver Removed",
+                description: `${oldRecord.name}${statusInfo} has been removed from the system.`,
+                variant: "destructive",
+              });
+            }
+          }
+
+          // Force router refresh to update server components
+          router.refresh();
+
+          // Force a re-render by updating last update time with a new Date object
+          setLastUpdateTime(Date.now());
+
+          // Explicitly update all drivers who need processing flags reset
+          setProcessingDrivers({});
+
+          console.log("Realtime update complete - UI should refresh now");
+        }
+      } catch (error) {
+        console.error(`Error processing ${event} event:`, error);
+      }
+    },
+    [
+      selectedDriver,
+      supabase,
+      clearDriverCaches,
+      toast,
+      router,
+      setProcessingDrivers,
+    ]
+  );
 
   // Set up real-time subscription directly in the provider
   useEffect(() => {
@@ -234,51 +453,7 @@ export function DriversClientProvider({
             table: "drivers",
           },
           async (payload: RealtimePostgresChangesPayload<any>) => {
-            console.log("Received UPDATE event:", payload);
-            try {
-              // Clear server-side cache to ensure fresh data
-              await clearDriverCaches();
-
-              // Fetch fresh data from the server instead of just updating the local state
-              const { data: freshData, error: fetchError } = await supabase
-                .from("drivers")
-                .select("*")
-                .order("created_at", { ascending: false });
-
-              if (fetchError) {
-                console.error("Error fetching updated drivers:", fetchError);
-                return;
-              }
-
-              if (freshData) {
-                setDrivers(freshData);
-                console.log("Updated drivers data after real-time change");
-
-                // Show detailed update information
-                const newRecord = payload.new as Driver;
-                const oldRecord = payload.old as Driver;
-
-                const changedFields = getChangedFields(oldRecord, newRecord);
-
-                if (changedFields.length > 0) {
-                  toast({
-                    title: "Driver Updated",
-                    description: `${newRecord.name}: Updated ${changedFields.join(", ")}.`,
-                  });
-                } else {
-                  toast({
-                    title: "Driver Updated",
-                    description: `${newRecord.name} has been updated.`,
-                  });
-                }
-
-                // Force router refresh to update any server components
-                router.refresh();
-                setLastUpdateTime(Date.now());
-              }
-            } catch (error) {
-              console.error("Error processing UPDATE event:", error);
-            }
+            await updateFromRealtimeChange(payload, "UPDATE");
           }
         )
         .on(
@@ -289,51 +464,7 @@ export function DriversClientProvider({
             table: "drivers",
           },
           async (payload: RealtimePostgresChangesPayload<any>) => {
-            console.log("Received INSERT event:", payload);
-            try {
-              // Clear server-side cache to ensure fresh data
-              await clearDriverCaches();
-
-              // Fetch fresh data from the server
-              const { data: freshData, error: fetchError } = await supabase
-                .from("drivers")
-                .select("*")
-                .order("created_at", { ascending: false });
-
-              if (fetchError) {
-                console.error("Error fetching updated drivers:", fetchError);
-                return;
-              }
-
-              if (freshData) {
-                setDrivers(freshData);
-                console.log("Updated drivers data after real-time change");
-
-                // Show detailed new driver information
-                const newRecord = payload.new as Driver;
-
-                let details = [];
-                if (newRecord.status)
-                  details.push(`Status: ${newRecord.status}`);
-                if (newRecord.type) details.push(`Type: ${newRecord.type}`);
-                if (newRecord.truckNumber)
-                  details.push(`Truck: ${newRecord.truckNumber}`);
-
-                const detailsText =
-                  details.length > 0 ? ` (${details.join(", ")})` : "";
-
-                toast({
-                  title: "New Driver Added",
-                  description: `${newRecord.name}${detailsText} has been added.`,
-                });
-
-                // Force router refresh to update any server components
-                router.refresh();
-                setLastUpdateTime(Date.now());
-              }
-            } catch (error) {
-              console.error("Error processing INSERT event:", error);
-            }
+            await updateFromRealtimeChange(payload, "INSERT");
           }
         )
         .on(
@@ -344,47 +475,7 @@ export function DriversClientProvider({
             table: "drivers",
           },
           async (payload: RealtimePostgresChangesPayload<any>) => {
-            console.log("Received DELETE event:", payload);
-            try {
-              // Clear server-side cache to ensure fresh data
-              await clearDriverCaches();
-
-              // Fetch fresh data from the server
-              const { data: freshData, error: fetchError } = await supabase
-                .from("drivers")
-                .select("*")
-                .order("created_at", { ascending: false });
-
-              if (fetchError) {
-                console.error("Error fetching updated drivers:", fetchError);
-                return;
-              }
-
-              if (freshData) {
-                setDrivers(freshData);
-                console.log("Updated drivers data after real-time change");
-
-                // Show detailed driver removal information
-                const oldRecord = payload.old as Driver;
-                let statusInfo = "";
-
-                if (oldRecord.status) {
-                  statusInfo = ` (${oldRecord.status})`;
-                }
-
-                toast({
-                  title: "Driver Removed",
-                  description: `${oldRecord.name}${statusInfo} has been removed from the system.`,
-                  variant: "destructive", // Use destructive variant for deletions
-                });
-
-                // Force router refresh to update any server components
-                router.refresh();
-                setLastUpdateTime(Date.now());
-              }
-            } catch (error) {
-              console.error("Error processing DELETE event:", error);
-            }
+            await updateFromRealtimeChange(payload, "DELETE");
           }
         )
         .subscribe((status, err) => {
@@ -405,7 +496,7 @@ export function DriversClientProvider({
         supabase.removeChannel(channel).catch(console.error);
       }
     };
-  }, [supabase, toast]);
+  }, [supabase, updateFromRealtimeChange]);
 
   // Add a visibility change handler to avoid unnecessary refreshes
   useEffect(() => {
@@ -467,6 +558,9 @@ export function DriversClientProvider({
     handleRowClick,
     refreshDrivers,
     companies,
+    selectedDriver,
+    setSelectedDriver,
+    getDriverById,
   };
 
   return (

@@ -30,6 +30,9 @@ import {
   Download,
   Trash2,
   Loader2,
+  ChevronLeft,
+  ChevronRight,
+  RefreshCw,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -46,9 +49,20 @@ import { cn } from "@/lib/utils";
 interface DriverDetailProps {
   driver: Driver | null;
   driverId: string;
+  isRefreshing?: boolean;
+  onPrevious?: () => void;
+  onNext?: () => void;
+  onRefresh?: () => Promise<void>;
 }
 
-export default function DriverDetail({ driver, driverId }: DriverDetailProps) {
+export default function DriverDetail({
+  driver,
+  driverId,
+  isRefreshing = false,
+  onPrevious,
+  onNext,
+  onRefresh,
+}: DriverDetailProps) {
   const router = useRouter();
   const { toast } = useToast();
   const searchParams = useSearchParams();
@@ -72,20 +86,67 @@ export default function DriverDetail({ driver, driverId }: DriverDetailProps) {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => router.push("/Drivers")}
-          >
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-          <h1 className="text-2xl font-bold tracking-tight">{driver?.name}</h1>
-          {driver?.status && <StatusBadge status={driver.status} />}
+          <div className="flex items-center">
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => router.push("/Drivers")}
+              className="rounded-r-none border-r-0"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+
+            {onPrevious && (
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={onPrevious}
+                className="rounded-l-none rounded-r-none border-r-0 border-l-0"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+            )}
+
+            {onNext && (
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={onNext}
+                className="rounded-l-none"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+              {driver?.name}
+              {isRefreshing && (
+                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              )}
+            </h1>
+            {driver?.status && <StatusBadge status={driver.status} />}
+          </div>
         </div>
         <div className="flex gap-2">
           <Button onClick={() => router.push(`/Drivers/${driverId}/edit`)}>
             Edit Driver
           </Button>
+          {onRefresh && (
+            <Button
+              variant="outline"
+              onClick={onRefresh}
+              disabled={isRefreshing}
+            >
+              {isRefreshing ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <RefreshCw className="h-4 w-4 mr-2" />
+              )}
+              Refresh
+            </Button>
+          )}
         </div>
       </div>
 
@@ -120,7 +181,11 @@ export default function DriverDetail({ driver, driverId }: DriverDetailProps) {
         </TabsList>
 
         <TabsContent value="details" className="space-y-4 mt-4">
-          <DriverDetails driver={driver} />
+          <DriverDetails
+            key={`driver-details-${driver?.id}-${driver?.updated_at || Date.now()}`}
+            driver={driver}
+            isRefreshing={isRefreshing}
+          />
         </TabsContent>
 
         <TabsContent value="documents" className="mt-4 relative">
@@ -148,18 +213,37 @@ export default function DriverDetail({ driver, driverId }: DriverDetailProps) {
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* Keyboard navigation hint */}
+      <div className="text-xs text-muted-foreground text-center mt-2">
+        Tip: Use keyboard arrow keys to navigate between drivers
+      </div>
     </div>
   );
 }
 
-function DriverDetails({ driver }: { driver: Driver | null }) {
+function DriverDetails({
+  driver,
+  isRefreshing = false,
+}: {
+  driver: Driver | null;
+  isRefreshing?: boolean;
+}) {
   if (!driver) return null;
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
       <Card>
         <CardHeader>
-          <CardTitle>Personal Information</CardTitle>
+          <div className="flex justify-between items-center">
+            <CardTitle>Personal Information</CardTitle>
+            {isRefreshing && (
+              <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                <span>Updating...</span>
+              </div>
+            )}
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <div>
@@ -187,7 +271,15 @@ function DriverDetails({ driver }: { driver: Driver | null }) {
 
       <Card>
         <CardHeader>
-          <CardTitle>Driver Information</CardTitle>
+          <div className="flex justify-between items-center">
+            <CardTitle>Driver Information</CardTitle>
+            {isRefreshing && (
+              <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                <span>Updating...</span>
+              </div>
+            )}
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <div>
