@@ -230,10 +230,21 @@ export function DriversClientProvider({
 
   const refreshDrivers = async (skipCache?: boolean) => {
     try {
+      // Don't refresh if we've refreshed recently
+      const now = Date.now();
+      const timeSinceLastUpdate = now - lastUpdateTime;
+      if (timeSinceLastUpdate < 1000) {
+        // Prevent refreshes more frequent than 1 second
+        console.log("Skipping refresh, too soon since last update");
+        return Promise.resolve();
+      }
+
       setIsLoading(true);
 
-      // Trigger a refresh of the page data
-      router.refresh();
+      // Only refresh the page data if skipCache is true
+      if (skipCache) {
+        router.refresh();
+      }
 
       // Also update the selected driver if we have one
       if (selectedDriver) {
@@ -254,7 +265,7 @@ export function DriversClientProvider({
         }
       }
 
-      setLastUpdateTime(Date.now());
+      setLastUpdateTime(now);
       return Promise.resolve();
     } catch (error) {
       console.error("Error refreshing drivers:", error);
@@ -419,73 +430,47 @@ export function DriversClientProvider({
     ]
   );
 
-  // Set up real-time subscription directly in the provider
+  // Set up real-time subscription
   useEffect(() => {
-    console.log("Setting up drivers real-time subscription directly");
+    console.log("Setting up drivers real-time subscription");
     let channel: RealtimeChannel;
 
     const setupRealtimeSubscription = async () => {
-      // Unsubscribe from any existing subscription
-      if (channel) {
-        await supabase.removeChannel(channel);
-      }
-
-      // Clear any existing cache when setting up the subscription
-      try {
-        await clearDriverCaches();
-        console.log(
-          "Cleared driver caches when setting up real-time subscription"
-        );
-      } catch (error) {
-        console.error("Error clearing cache during subscription setup:", error);
-      }
-
-      const channelName = `drivers_changes_${Date.now()}`;
-      console.log("Creating new realtime channel:", channelName);
-
       channel = supabase
-        .channel(channelName)
+        .channel("drivers_changes")
         .on(
           "postgres_changes",
           {
-            event: "UPDATE",
+            event: "*",
             schema: "public",
             table: "drivers",
           },
-          async (payload: RealtimePostgresChangesPayload<any>) => {
-            await updateFromRealtimeChange(payload, "UPDATE");
+          async (payload: RealtimePostgresChangesPayload<Driver>) => {
+            const metadata = payload.new as { webhook_update?: boolean };
+            const newData = payload.new as Driver | null;
+
+            // Only refresh if:
+            // 1. It's not a webhook update
+            // 2. The change affects the currently selected driver
+            // 3. The change is related to documents
+            if (
+              !metadata?.webhook_update &&
+              newData &&
+              (selectedDriver?.id === newData.id ||
+                newData.documents ||
+                newData.driver_licenses ||
+                newData.medical_cards ||
+                newData.mvr_files)
+            ) {
+              console.log(
+                "Refreshing due to relevant real-time update:",
+                payload
+              );
+              await refreshDrivers(false);
+            }
           }
         )
-        .on(
-          "postgres_changes",
-          {
-            event: "INSERT",
-            schema: "public",
-            table: "drivers",
-          },
-          async (payload: RealtimePostgresChangesPayload<any>) => {
-            await updateFromRealtimeChange(payload, "INSERT");
-          }
-        )
-        .on(
-          "postgres_changes",
-          {
-            event: "DELETE",
-            schema: "public",
-            table: "drivers",
-          },
-          async (payload: RealtimePostgresChangesPayload<any>) => {
-            await updateFromRealtimeChange(payload, "DELETE");
-          }
-        )
-        .subscribe((status, err) => {
-          console.log("Realtime subscription status:", status);
-          if (err) {
-            console.error("Realtime subscription error:", err);
-          } else {
-            console.log("Successfully subscribed to drivers table changes");
-          }
-        });
+        .subscribe();
     };
 
     setupRealtimeSubscription();
@@ -496,7 +481,7 @@ export function DriversClientProvider({
         supabase.removeChannel(channel).catch(console.error);
       }
     };
-  }, [supabase, updateFromRealtimeChange]);
+  }, [supabase, updateFromRealtimeChange, selectedDriver, refreshDrivers]);
 
   // Add a visibility change handler to avoid unnecessary refreshes
   useEffect(() => {

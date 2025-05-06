@@ -333,6 +333,7 @@ interface DataTableProps<TData> {
   onRowSelectionChange?: OnChangeFn<RowSelectionState>;
   onRowDoubleClick?: (row: Row<TData>) => void;
   onViewDetails?: (driver: TData) => void;
+  isProcessing?: boolean;
 }
 
 export function DataTable<TData>({
@@ -345,6 +346,7 @@ export function DataTable<TData>({
   onRowSelectionChange,
   onRowDoubleClick,
   onViewDetails,
+  isProcessing: externalProcessing = false,
 }: DataTableProps<TData>) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -352,7 +354,7 @@ export function DataTable<TData>({
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [loadingRows, setLoadingRows] = useState<Record<string, boolean>>({});
   const [isLoading, setIsLoading] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [bulkProcessing, setBulkProcessing] = useState(false);
   const [processingDrivers, setProcessingDrivers] = useState<
     Record<string, boolean>
   >({});
@@ -421,6 +423,8 @@ export function DataTable<TData>({
     });
 
   const handleBulkAction = async (action: "activate" | "deactivate") => {
+    if (bulkProcessing || externalProcessing) return;
+
     const selectedIds = selectedRows
       .map((row) => {
         const driver = row.original as Driver;
@@ -428,10 +432,63 @@ export function DataTable<TData>({
       })
       .filter((id): id is number => id !== null);
 
-    if (action === "activate" && onActivateSelected) {
-      await onActivateSelected(selectedIds);
-    } else if (action === "deactivate" && onDeactivateSelected) {
-      await onDeactivateSelected(selectedIds);
+    if (selectedIds.length === 0) return;
+
+    try {
+      // Set processing state
+      setBulkProcessing(true);
+
+      // Set processing state for all selected drivers
+      selectedIds.forEach((id) => {
+        setProcessingDriver(String(id), true);
+      });
+
+      // Apply optimistic updates
+      const newStatus = action === "activate" ? "active" : "inactive";
+      selectedIds.forEach((id) => {
+        contextUpdateDriverOptimistically(String(id), { status: newStatus });
+      });
+
+      // Perform the actual update
+      if (action === "activate" && onActivateSelected) {
+        await onActivateSelected(selectedIds);
+      } else if (action === "deactivate" && onDeactivateSelected) {
+        await onDeactivateSelected(selectedIds);
+      }
+
+      // Show success message
+      toast({
+        title: "Success",
+        description: `Successfully ${action}d ${selectedIds.length} driver(s)`,
+      });
+
+      // Clear row selection
+      table.toggleAllRowsSelected(false);
+    } catch (error) {
+      console.error(`Error during bulk ${action}:`, error);
+
+      // Revert optimistic updates on error
+      const originalStatus = action === "activate" ? "inactive" : "active";
+      selectedIds.forEach((id) => {
+        contextUpdateDriverOptimistically(String(id), {
+          status: originalStatus,
+        });
+      });
+
+      toast({
+        title: "Error",
+        description: `Failed to ${action} drivers: ${error instanceof Error ? error.message : String(error)}`,
+        variant: "destructive",
+      });
+    } finally {
+      // Clear processing states
+      setBulkProcessing(false);
+      selectedIds.forEach((id) => {
+        setProcessingDriver(String(id), false);
+      });
+
+      // Force a refresh to ensure data consistency
+      await refetchDrivers();
     }
   };
 
@@ -514,7 +571,7 @@ export function DataTable<TData>({
         totalRows={data?.length || 0}
         allSelectedActive={allSelectedActive}
         allSelectedInactive={allSelectedInactive}
-        isProcessing={isProcessing}
+        isProcessing={bulkProcessing || externalProcessing}
         handleBulkAction={handleBulkAction}
         exportToCSV={exportToCSV}
         showAdvancedFilters={showAdvancedFilters}
