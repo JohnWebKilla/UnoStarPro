@@ -33,14 +33,31 @@ export function DriversDataTable({ data: initialData }: DriversDataTableProps) {
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
   const [isPrefetched, setIsPrefetched] = useState<Record<string, boolean>>({});
   const [isProcessing, setIsProcessing] = useState(false);
+
+  // Use the data from context if available, otherwise use initialData
   const [tableData, setTableData] = useState<Driver[]>(initialData);
 
-  // Use both the initial server data and any updates from context
+  // Update tableData when contextDrivers changes
   useEffect(() => {
-    if (contextDrivers) {
+    if (contextDrivers && contextDrivers.length > 0) {
+      console.log(
+        "Updating table data from context with",
+        contextDrivers.length,
+        "drivers"
+      );
       setTableData(contextDrivers);
     }
   }, [contextDrivers]);
+
+  // Log when data changes for debugging
+  useEffect(() => {
+    console.log(
+      "DriversDataTable rendering with data length:",
+      tableData.length,
+      "context length:",
+      contextDrivers.length
+    );
+  }, [tableData, contextDrivers]);
 
   // Get unique companies from drivers
   const companies = useMemo(() => {
@@ -63,13 +80,7 @@ export function DriversDataTable({ data: initialData }: DriversDataTableProps) {
     driverIds: number[],
     updates: Partial<Driver>
   ) => {
-    setTableData((prevData) =>
-      prevData.map((driver) =>
-        driverIds.includes(Number(driver.id))
-          ? { ...driver, ...updates }
-          : driver
-      )
-    );
+    setSelectedDriver(driverIds, updates);
   };
 
   // Helper function to refresh data after updates
@@ -109,12 +120,10 @@ export function DriversDataTable({ data: initialData }: DriversDataTableProps) {
           );
 
           // Update the table data
-          setTableData((prevData) =>
-            prevData.map((d) => {
-              const updatedDriver = updatedDriversMap.get(String(d.id));
-              return updatedDriver ? { ...d, ...updatedDriver } : d;
-            })
-          );
+          updateDriversOptimistically(ids, (prevDriver) => ({
+            ...prevDriver,
+            ...updatedDriversMap.get(String(d.id)),
+          }));
 
           // Refresh data to ensure consistency
           await refreshData();
@@ -170,12 +179,10 @@ export function DriversDataTable({ data: initialData }: DriversDataTableProps) {
           );
 
           // Update the table data
-          setTableData((prevData) =>
-            prevData.map((d) => {
-              const updatedDriver = updatedDriversMap.get(String(d.id));
-              return updatedDriver ? { ...d, ...updatedDriver } : d;
-            })
-          );
+          updateDriversOptimistically(ids, (prevDriver) => ({
+            ...prevDriver,
+            ...updatedDriversMap.get(String(d.id)),
+          }));
 
           // Refresh data to ensure consistency
           await refreshData();
@@ -277,14 +284,6 @@ export function DriversDataTable({ data: initialData }: DriversDataTableProps) {
     },
     [navigateToDriver]
   );
-
-  // Log when data changes for debugging
-  useEffect(() => {
-    console.log(
-      "DriversDataTable rendering with data length:",
-      tableData.length
-    );
-  }, [tableData]);
 
   return (
     <div className="space-y-4">

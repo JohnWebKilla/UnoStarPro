@@ -240,6 +240,30 @@ export function DriversClientProvider({
       }
 
       setIsLoading(true);
+      console.log("Refreshing drivers data from server");
+
+      // Clear cache if skipCache is true
+      if (skipCache) {
+        await clearDriverCaches();
+      }
+
+      // Fetch fresh drivers data from the server
+      try {
+        const { data: freshData, error: fetchError } = await supabase
+          .from("drivers")
+          .select("*")
+          .order("created_at", { ascending: false });
+
+        if (fetchError) {
+          console.error("Error fetching updated drivers data:", fetchError);
+        } else if (freshData) {
+          console.log(`Fetched ${freshData.length} drivers from server`);
+          // Update the drivers state with fresh data
+          setDrivers(freshData);
+        }
+      } catch (error) {
+        console.error("Error during driver refresh:", error);
+      }
 
       // Only refresh the page data if skipCache is true
       if (skipCache) {
@@ -436,6 +460,11 @@ export function DriversClientProvider({
     let channel: RealtimeChannel;
 
     const setupRealtimeSubscription = async () => {
+      // First, remove any existing channel
+      if (channel) {
+        await supabase.removeChannel(channel);
+      }
+
       channel = supabase
         .channel("drivers_changes")
         .on(
@@ -446,31 +475,21 @@ export function DriversClientProvider({
             table: "drivers",
           },
           async (payload: RealtimePostgresChangesPayload<Driver>) => {
-            const metadata = payload.new as { webhook_update?: boolean };
-            const newData = payload.new as Driver | null;
+            console.log("⚡ Realtime update received:", payload);
 
-            // Only refresh if:
-            // 1. It's not a webhook update
-            // 2. The change affects the currently selected driver
-            // 3. The change is related to documents
-            if (
-              !metadata?.webhook_update &&
-              newData &&
-              (selectedDriver?.id === newData.id ||
-                newData.documents ||
-                newData.driver_licenses ||
-                newData.medical_cards ||
-                newData.mvr_files)
-            ) {
-              console.log(
-                "Refreshing due to relevant real-time update:",
-                payload
-              );
-              await refreshDrivers(false);
-            }
+            // Always refresh drivers on any change
+            await refreshDrivers(false);
+
+            // Log to verify refresh was triggered
+            console.log("Refreshed drivers after realtime update");
+
+            // The previous condition was too strict - it only refreshed on specific conditions
+            // Now we'll refresh on any driver table change
           }
         )
-        .subscribe();
+        .subscribe((status) => {
+          console.log("Realtime subscription status:", status);
+        });
     };
 
     setupRealtimeSubscription();
@@ -481,7 +500,7 @@ export function DriversClientProvider({
         supabase.removeChannel(channel).catch(console.error);
       }
     };
-  }, [supabase, updateFromRealtimeChange, selectedDriver, refreshDrivers]);
+  }, [supabase, refreshDrivers]);
 
   // Add a visibility change handler to avoid unnecessary refreshes
   useEffect(() => {

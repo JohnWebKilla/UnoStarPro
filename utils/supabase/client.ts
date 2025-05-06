@@ -43,6 +43,11 @@ export const createClient = () => {
       autoRefreshToken: true,
       persistSession: true,
     },
+    realtime: {
+      params: {
+        eventsPerSecond: 10,
+      },
+    },
   });
 };
 
@@ -60,6 +65,12 @@ export const getRealTimeClient = () => {
     if (client.realtime) {
       // @ts-ignore
       client.realtime.setAuth(client.auth.getSession());
+
+      // Force connect to the realtime server
+      // @ts-ignore
+      client.realtime.connect();
+
+      console.log("Realtime connection established");
     }
   }
 
