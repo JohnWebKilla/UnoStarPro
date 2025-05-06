@@ -61,6 +61,8 @@ import {
   MoreHorizontal,
   Power,
   X,
+  Phone,
+  MessageSquare,
 } from "lucide-react";
 import { useState, ReactNode, useCallback, useEffect, useMemo } from "react";
 import { Driver, DRIVER_STATUS_OPTIONS, DRIVER_TEAM_OPTIONS } from "../types";
@@ -86,6 +88,7 @@ import { toast } from "@/components/ui/use-toast";
 import { useRouter } from "next/navigation";
 import { updateDriverAction } from "../server-actions";
 import { useToast } from "@/components/ui/use-toast";
+import { formatPhoneNumber } from "@/lib/utils/phone-format";
 
 interface TableToolbarProps {
   table: TableType<any>;
@@ -582,6 +585,14 @@ export function DataTable<TData>({
     [contextSetProcessingDriver]
   );
 
+  const handleCall = (phoneNumber: string) => {
+    window.location.href = `tel:${phoneNumber}`;
+  };
+
+  const handleText = (phoneNumber: string) => {
+    window.location.href = `sms:${phoneNumber}`;
+  };
+
   return (
     <div className="space-y-4">
       {error && (
@@ -829,6 +840,42 @@ export function DataTable<TData>({
                                   | undefined
                               }
                             />
+                          ) : columnId === "phone_number" ? (
+                            <div className="flex items-center gap-2">
+                              <span className="min-w-[120px]">
+                                {(cell.getValue() as string)
+                                  ? formatPhoneNumber(cell.getValue() as string)
+                                  : "N/A"}
+                              </span>
+                              {(cell.getValue() as string) && (
+                                <>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8 hover:bg-green-50"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleCall(cell.getValue() as string);
+                                    }}
+                                    title="Call driver"
+                                  >
+                                    <Phone className="h-4 w-4 text-green-600" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8 hover:bg-blue-50"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleText(cell.getValue() as string);
+                                    }}
+                                    title="Text driver"
+                                  >
+                                    <MessageSquare className="h-4 w-4 text-blue-600" />
+                                  </Button>
+                                </>
+                              )}
+                            </div>
                           ) : (
                             flexRender(
                               cell.column.columnDef.cell,

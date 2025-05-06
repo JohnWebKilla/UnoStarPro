@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useDrivers } from "./DriversClientProvider";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { ImportDrivers } from "./ImportDrivers";
+import { AddDriverDialog } from "./AddDriverDialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,17 +15,8 @@ import {
 import { DropdownMenuItemIndicator } from "@radix-ui/react-dropdown-menu";
 
 export function PageHeader() {
-  const {
-    syncWithServer,
-    clearCache,
-    isSyncing,
-    showImportDialog,
-    setShowImportDialog,
-  } = useDrivers();
-
-  const handleAddDriver = () => {
-    setShowImportDialog(true);
-  };
+  const { syncWithServer, clearCache, isSyncing, refreshDrivers } =
+    useDrivers();
 
   return (
     <>
@@ -40,14 +31,7 @@ export function PageHeader() {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <Button
-              size="sm"
-              onClick={handleAddDriver}
-              className="h-9 bg-blue-600 hover:bg-blue-700 text-white"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Add Driver
-            </Button>
+            <AddDriverDialog onDriverAdded={refreshDrivers} />
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -77,13 +61,6 @@ export function PageHeader() {
           </div>
         </div>
       </div>
-
-      <Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>
-        <DialogContent className="max-w-3xl">
-          <DialogTitle>Import Drivers</DialogTitle>
-          <ImportDrivers />
-        </DialogContent>
-      </Dialog>
     </>
   );
 }

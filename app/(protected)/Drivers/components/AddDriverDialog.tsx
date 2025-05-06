@@ -1,14 +1,14 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import {
   Dialog,
   DialogContent,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,23 +27,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { PlusCircle } from "lucide-react";
+import { PlusCircle, Loader2 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Calendar } from "@/components/ui/calendar";
-import { CalendarIcon } from "lucide-react";
-import { Label } from "@/components/ui/label";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { cn } from "@/lib/utils";
-import { format } from "date-fns";
 import { useDrivers } from "./DriversClientProvider";
 import { clearDriverCaches } from "../actions";
+import {
+  formatPhoneNumber,
+  normalizePhoneNumber,
+  isValidPhoneNumber,
+} from "@/lib/utils/phone-format";
+import { ImportDrivers } from "./ImportDrivers";
+import { useCompanies } from "@/app/(protected)/Companies/hooks/useCompanies";
 
-// Update schema to include company_id and hire_date
 const driverFormSchema = z.object({
   company_id: z.coerce.number({
     required_error: "Please select a company",
@@ -56,134 +52,91 @@ const driverFormSchema = z.object({
   phone_number: z
     .string()
     .min(10, "Phone number must be at least 10 characters")
-    .max(20, "Phone number cannot exceed 20 characters"),
+    .max(20, "Phone number cannot exceed 20 characters")
+    .refine((val) => isValidPhoneNumber(val), {
+      message: "Please enter a valid 10-digit phone number",
+    }),
   truck_number: z
     .string()
     .min(1, "Truck number is required")
     .max(20, "Truck number cannot exceed 20 characters"),
   solo_or_team: z.enum(["solo", "team"]),
-  status: z.enum(["active", "inactive"]),
   subscription_amount: z.preprocess(
     (val) =>
       val === "" || val === null || val === undefined ? 0 : Number(val),
     z.number().min(0, "Weekly price must be a positive number")
   ),
-  hire_date: z.date({
-    required_error: "Hire date is required",
-  }),
-  // Document related fields - not required by default
-  license_number: z.string().optional(),
-  license_state: z.string().optional(),
-  license_expiration: z.date().optional(),
-  mvr_expiration: z.date().optional(),
-  medical_card_expiration: z.date().optional(),
+  status: z.enum(["pending", "active", "inactive"]),
 });
 
 type DriverFormValues = z.infer<typeof driverFormSchema>;
 
 interface AddDriverDialogProps {
-  onDriverAdded: () => void;
+  onDriverAdded?: () => Promise<void>;
 }
 
 export function AddDriverDialog({ onDriverAdded }: AddDriverDialogProps) {
   const [open, setOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const { companies, refreshDrivers } = useDrivers();
+  const [activeTab, setActiveTab] = useState("manual");
   const { toast } = useToast();
+  const { refreshDrivers } = useDrivers();
+  const { companies } = useCompanies();
 
-  const form = useForm<DriverFormValues>({
+  const form = useForm<z.infer<typeof driverFormSchema>>({
     resolver: zodResolver(driverFormSchema),
     defaultValues: {
+      company_id: undefined,
       name: "",
       phone_number: "",
       truck_number: "",
       solo_or_team: "solo",
-      status: "active",
       subscription_amount: 0,
-      company_id: undefined,
-      hire_date: new Date(),
-      license_number: "",
-      license_state: "",
+      status: "pending",
     },
   });
 
-  // Handle form submission with minimal possible fields
-  const onSubmit = async (data: DriverFormValues) => {
-    if (isLoading) return;
-
-    setIsLoading(true);
+  const onSubmit = async (values: z.infer<typeof driverFormSchema>) => {
     try {
-      const driverData = {
-        name: data.name.trim(),
-        phone_number: data.phone_number.trim(),
-        truck_number: data.truck_number.trim(),
-        solo_or_team: data.solo_or_team,
-        status: data.status.toLowerCase(),
-        company_id: data.company_id,
-        subscription_amount: Number(data.subscription_amount) || 0,
-        subscription_frequency: "weekly",
-        hire_date: data.hire_date.toISOString(),
-      };
+      setIsLoading(true);
+      const normalizedPhone = normalizePhoneNumber(values.phone_number);
 
-      // Create new driver
       const response = await fetch("/api/drivers", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(driverData),
+        body: JSON.stringify({
+          ...values,
+          phone_number: normalizedPhone,
+        }),
       });
-
-      const result = await response.json();
 
       if (!response.ok) {
-        throw new Error(result.error || "Failed to create driver");
+        throw new Error("Failed to create driver");
       }
 
-      // Sync with Stripe if subscription amount is set
-      if (driverData.subscription_amount > 0) {
-        const syncResponse = await fetch(`/api/drivers/${result.id}/sync`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            name: driverData.name,
-            subscription_amount: driverData.subscription_amount,
-            subscription_frequency: driverData.subscription_frequency,
-          }),
-        });
-
-        if (!syncResponse.ok) {
-          throw new Error("Failed to sync with Stripe");
-        }
-      }
-
-      // Clear both client and server caches
       await clearDriverCaches();
+      await refreshDrivers();
+      if (onDriverAdded) {
+        await onDriverAdded();
+      }
 
-      // Refresh the drivers list
-      await refreshDrivers(true);
-
-      // Success case
       toast({
         title: "Success",
-        description:
-          driverData.subscription_amount > 0
-            ? "Driver added and synced with Stripe successfully"
-            : "Driver added successfully",
+        description: "Driver added successfully",
       });
 
-      form.reset();
       setOpen(false);
-      onDriverAdded();
-    } catch (err) {
-      console.error("Error:", err);
+    } catch (error) {
+      console.error("Error:", error);
       toast({
         variant: "destructive",
         title: "Error",
         description:
-          err instanceof Error ? err.message : "An unexpected error occurred",
+          error instanceof Error
+            ? error.message
+            : "An unexpected error occurred",
       });
     } finally {
       setIsLoading(false);
@@ -193,224 +146,202 @@ export function AddDriverDialog({ onDriverAdded }: AddDriverDialogProps) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button className="h-9 relative z-0">
-          <PlusCircle className="mr-2" />
+        <Button>
+          <PlusCircle className="mr-2 h-4 w-4" />
           Add Driver
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[600px]">
         <DialogHeader>
-          <DialogTitle>Add New Truck Driver</DialogTitle>
+          <DialogTitle>Add New Driver</DialogTitle>
         </DialogHeader>
-
-        <Form {...form}>
-          <form
-            onSubmit={form.handleSubmit(onSubmit)}
-            className="space-y-4 py-4"
-          >
-            <FormField
-              control={form.control}
-              name="company_id"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Company</FormLabel>
-                  <Select
-                    onValueChange={(value) =>
-                      field.onChange(parseInt(value, 10))
-                    }
-                    value={field.value?.toString()}
-                  >
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select company" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {companies.map((company) => (
-                        <SelectItem
-                          key={company.id}
-                          value={company.id.toString()}
-                        >
-                          {company.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name="name"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Full name</FormLabel>
-                  <FormControl>
-                    <Input placeholder="John Doe" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name="phone_number"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Phone</FormLabel>
-                  <FormControl>
-                    <Input placeholder="(xxx)-xxx-xxxx" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name="solo_or_team"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Solo / Team</FormLabel>
-                  <Select
-                    onValueChange={field.onChange}
-                    defaultValue={field.value}
-                  >
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select type" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      <SelectItem value="solo">Solo</SelectItem>
-                      <SelectItem value="team">Team</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name="truck_number"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Truck #</FormLabel>
-                  <FormControl>
-                    <Input placeholder="101" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name="subscription_amount"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Weekly Price</FormLabel>
-                  <FormControl>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      placeholder="250"
-                      onChange={(e) => {
-                        const value =
-                          e.target.value === ""
-                            ? 0
-                            : parseFloat(e.target.value);
-                        field.onChange(!isNaN(value) ? value : 0);
-                      }}
-                      value={field.value || ""}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                  <p className="text-sm text-gray-400">
-                    Weekly subscription amount per driver
-                  </p>
-                </FormItem>
-              )}
-            />
-
-            <div className="grid grid-cols-2 gap-4">
-              <FormField
-                control={form.control}
-                name="status"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Status</FormLabel>
-                    <Select
-                      onValueChange={field.onChange}
-                      defaultValue={field.value}
-                    >
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select status" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="active">Active</SelectItem>
-                        <SelectItem value="inactive">Inactive</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="hire_date"
-                render={({ field }) => (
-                  <FormItem className="flex flex-col">
-                    <FormLabel>Hire Date</FormLabel>
-                    <Popover>
-                      <PopoverTrigger asChild>
+        <Tabs
+          defaultValue="manual"
+          value={activeTab}
+          onValueChange={setActiveTab}
+          className="w-full"
+        >
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="manual">Manual Entry</TabsTrigger>
+            <TabsTrigger value="import">File Import</TabsTrigger>
+          </TabsList>
+          <TabsContent value="manual" className="mt-4">
+            <Form {...form}>
+              <form
+                onSubmit={form.handleSubmit(onSubmit)}
+                className="space-y-4"
+              >
+                <FormField
+                  control={form.control}
+                  name="company_id"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Company</FormLabel>
+                      <Select
+                        onValueChange={(value) => {
+                          const numValue = parseInt(value);
+                          field.onChange(numValue);
+                          // Set subscription amount when company changes
+                          const selectedCompany = companies.find(
+                            (c) => c.id === numValue
+                          );
+                          if (selectedCompany?.subscription_amount) {
+                            form.setValue(
+                              "subscription_amount",
+                              selectedCompany.subscription_amount
+                            );
+                          }
+                        }}
+                        value={field.value?.toString()}
+                      >
                         <FormControl>
-                          <Button
-                            variant={"outline"}
-                            className={cn(
-                              "w-full pl-3 text-left font-normal",
-                              !field.value && "text-muted-foreground"
-                            )}
-                          >
-                            {field.value ? (
-                              format(field.value, "MM/dd/yyyy")
-                            ) : (
-                              <span>Pick a date</span>
-                            )}
-                            <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                          </Button>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select a company" />
+                          </SelectTrigger>
                         </FormControl>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar
-                          mode="single"
-                          selected={field.value}
-                          onSelect={field.onChange}
-                          initialFocus
-                        />
-                      </PopoverContent>
-                    </Popover>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
+                        <SelectContent>
+                          {companies.map((company) => (
+                            <SelectItem
+                              key={company.id}
+                              value={company.id.toString()}
+                            >
+                              {company.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
 
-            <DialogFooter className="pt-6">
-              <Button type="submit" disabled={isLoading}>
-                {isLoading ? "Adding..." : "Add Driver"}
-              </Button>
-            </DialogFooter>
-          </form>
-        </Form>
+                <FormField
+                  control={form.control}
+                  name="name"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Name</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="Driver's full name"
+                          {...field}
+                          onChange={(e) => {
+                            // Capitalize first letter of each word
+                            const words = e.target.value.split(" ");
+                            const capitalizedWords = words.map(
+                              (word) =>
+                                word.charAt(0).toUpperCase() +
+                                word.slice(1).toLowerCase()
+                            );
+                            field.onChange(capitalizedWords.join(" "));
+                          }}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="phone_number"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Phone Number</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="(555) 555-5555"
+                          {...field}
+                          onChange={(e) => {
+                            const formatted = formatPhoneNumber(e.target.value);
+                            field.onChange(formatted);
+                          }}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="truck_number"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Truck Number</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Truck number" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="solo_or_team"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Driver Type</FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        defaultValue={field.value}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select driver type" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="solo">Solo</SelectItem>
+                          <SelectItem value="team">Team</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="subscription_amount"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Weekly Price</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          placeholder="0.00"
+                          {...field}
+                          onChange={(e) =>
+                            field.onChange(parseFloat(e.target.value))
+                          }
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <DialogFooter>
+                  <Button type="submit" disabled={isLoading}>
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Adding...
+                      </>
+                    ) : (
+                      "Add Driver"
+                    )}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </Form>
+          </TabsContent>
+          <TabsContent value="import">
+            <ImportDrivers />
+          </TabsContent>
+        </Tabs>
       </DialogContent>
     </Dialog>
   );

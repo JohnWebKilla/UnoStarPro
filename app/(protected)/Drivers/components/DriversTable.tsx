@@ -33,6 +33,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Check,
+  MessageSquare,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EditDriverDialog } from "./EditDriverDialog";
@@ -60,6 +61,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { formatPhoneNumber } from "@/lib/utils/phone-format";
 
 // Dynamically import Dialog components with no SSR
 const Dialog = dynamic(
@@ -544,6 +546,14 @@ export default function DriversTable() {
     return status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
   };
 
+  const handleCall = (phoneNumber: string) => {
+    window.location.href = `tel:${phoneNumber}`;
+  };
+
+  const handleText = (phoneNumber: string) => {
+    window.location.href = `sms:${phoneNumber}`;
+  };
+
   if (error) {
     return (
       <Card className="border-destructive">
@@ -655,21 +665,39 @@ export default function DriversTable() {
                         {driver?.name || "N/A"}
                       </TableCell>
                       <TableCell>
-                        {driver?.phone_number ? (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 flex items-center gap-2"
-                            onClick={() =>
-                              window.open(`tel:${driver.phone_number}`)
-                            }
-                          >
-                            <Phone className="h-4 w-4" />
-                            {driver.phone_number}
-                          </Button>
-                        ) : (
-                          "N/A"
-                        )}
+                        <div className="flex items-center gap-2">
+                          <span className="min-w-[120px]">
+                            {driver.phone_number
+                              ? formatPhoneNumber(driver.phone_number)
+                              : "N/A"}
+                          </span>
+                          {driver.phone_number && (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 hover:bg-green-50"
+                                onClick={() =>
+                                  handleCall(driver.phone_number as string)
+                                }
+                                title="Call driver"
+                              >
+                                <Phone className="h-4 w-4 text-green-600" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 hover:bg-blue-50"
+                                onClick={() =>
+                                  handleText(driver.phone_number as string)
+                                }
+                                title="Text driver"
+                              >
+                                <MessageSquare className="h-4 w-4 text-blue-600" />
+                              </Button>
+                            </>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell>{driver?.truck_number || "N/A"}</TableCell>
                       <TableCell>{driver?.solo_or_team || "N/A"}</TableCell>

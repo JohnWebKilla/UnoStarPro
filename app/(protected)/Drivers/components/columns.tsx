@@ -12,6 +12,8 @@ import {
   AlertTriangle,
   AlertCircle,
   CreditCard,
+  Phone,
+  MessageSquare,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -26,6 +28,7 @@ import {
 } from "date-fns";
 import { createPortal } from "react-dom";
 import { useState, useEffect, useRef } from "react";
+import { formatPhoneNumber } from "@/lib/utils/phone-format";
 
 // Import the SyncDriverButton component
 import { SyncDriverButton } from "./SyncDriverButton";
@@ -169,9 +172,48 @@ export const columns: ColumnDef<Driver>[] = [
     cell: ({ row }) => {
       const phone = (row.getValue("phone") ||
         row.original.phone_number) as string;
+
+      const handleCall = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (phone) {
+          window.location.href = `tel:${phone}`;
+        }
+      };
+
+      const handleText = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (phone) {
+          window.location.href = `sms:${phone}`;
+        }
+      };
+
       return (
-        <div className="flex items-center text-slate-900 dark:text-slate-100">
-          <span>{phone}</span>
+        <div className="flex items-center gap-2">
+          <span className="min-w-[120px]">
+            {phone ? formatPhoneNumber(phone) : "N/A"}
+          </span>
+          {phone && (
+            <>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 hover:bg-green-50"
+                onClick={handleCall}
+                title="Call driver"
+              >
+                <Phone className="h-4 w-4 text-green-600" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 hover:bg-blue-50"
+                onClick={handleText}
+                title="Text driver"
+              >
+                <MessageSquare className="h-4 w-4 text-blue-600" />
+              </Button>
+            </>
+          )}
         </div>
       );
     },
