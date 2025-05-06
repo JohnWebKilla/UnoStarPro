@@ -120,18 +120,47 @@ export function DriversClientProvider({
         const updatedDrivers = [...prevDrivers];
         const oldDriver = updatedDrivers[driverIndex];
 
-        // If updates is a complete driver object (from server), use it directly
-        // Otherwise, merge with existing driver data
-        const isFullUpdate = updates.id && updates.name && updates.created_at;
+        // Create a deep copy of the original driver to avoid reference issues
+        const driverCopy = JSON.parse(JSON.stringify(oldDriver));
 
-        updatedDrivers[driverIndex] = isFullUpdate
-          ? { ...(updates as Driver) }
-          : { ...oldDriver, ...updates, updated_at: new Date().toISOString() };
+        // Always preserve these critical fields unless explicitly updated
+        const criticalFields = [
+          "company_id",
+          "company_name",
+          "companies",
+          "documents",
+          "driver_licenses",
+          "medical_cards",
+          "mvr_files",
+          "subscription",
+        ];
+
+        // Create the updated driver object, preserving all original data
+        const updatedDriver = {
+          ...driverCopy, // Start with a complete copy of the original driver
+          ...updates, // Apply the specific updates
+        };
+
+        // Double-check critical fields are preserved
+        criticalFields.forEach((field) => {
+          if (driverCopy[field] && !updates[field as keyof Partial<Driver>]) {
+            updatedDriver[field as keyof Driver] =
+              driverCopy[field as keyof Driver];
+          }
+        });
+
+        // Set timestamp
+        updatedDriver.updated_at =
+          updates.updated_at || new Date().toISOString();
+
+        // Replace the driver in the array
+        updatedDrivers[driverIndex] = updatedDriver;
 
         console.log(
           `Driver ${id} updated in local state:`,
           updatedDrivers[driverIndex]
         );
+
         return updatedDrivers;
       });
     },

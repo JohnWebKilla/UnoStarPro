@@ -95,8 +95,8 @@ interface TableToolbarProps {
   hasSelectedRows: boolean;
   selectedRowCount: number;
   totalRows: number;
-  allSelectedActive: boolean;
-  allSelectedInactive: boolean;
+  allSelectedActive?: boolean;
+  allSelectedInactive?: boolean;
   isProcessing: boolean;
   handleBulkAction: (action: "activate" | "deactivate") => Promise<void>;
   exportToCSV: () => void;
@@ -109,8 +109,8 @@ const TableToolbar = React.memo(function TableToolbar({
   hasSelectedRows,
   selectedRowCount,
   totalRows,
-  allSelectedActive,
-  allSelectedInactive,
+  allSelectedActive = false,
+  allSelectedInactive = false,
   isProcessing,
   handleBulkAction,
   exportToCSV,
@@ -209,7 +209,7 @@ const TableToolbar = React.memo(function TableToolbar({
             <div className="text-sm text-slate-500 dark:text-slate-400">
               {selectedRowCount} of {totalRows} selected
             </div>
-            {!allSelectedActive && (
+            {!allSelectedActive && allSelectedInactive && (
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -228,7 +228,7 @@ const TableToolbar = React.memo(function TableToolbar({
                 </Tooltip>
               </TooltipProvider>
             )}
-            {!allSelectedInactive && (
+            {!allSelectedInactive && allSelectedActive && (
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -247,25 +247,55 @@ const TableToolbar = React.memo(function TableToolbar({
                 </Tooltip>
               </TooltipProvider>
             )}
+            {!allSelectedActive && !allSelectedInactive && (
+              <>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleBulkAction("activate")}
+                        disabled={isProcessing}
+                        className="text-green-600 border-green-600 hover:bg-green-50 dark:text-green-400 dark:border-green-400 dark:hover:bg-green-900/20"
+                      >
+                        <CheckCircle className="mr-2 h-4 w-4" />
+                        Activate
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Activate selected drivers</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleBulkAction("deactivate")}
+                        disabled={isProcessing}
+                        className="text-destructive border-destructive hover:bg-destructive/10"
+                      >
+                        <XCircle className="mr-2 h-4 w-4" />
+                        Deactivate
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Deactivate selected drivers</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </>
+            )}
           </>
         ) : (
-          <>
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={exportToCSV}
-                    className="h-10 w-10 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/40"
-                  >
-                    <FileDown className="h-4 w-4 text-slate-500 dark:text-slate-400" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Export to CSV</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          </>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={exportToCSV}
+            className="bg-white dark:bg-slate-800/40"
+          >
+            <FileDown className="mr-2 h-4 w-4" />
+            Export CSV
+          </Button>
         )}
       </div>
     </div>
@@ -346,8 +376,13 @@ interface DataTableProps<TData> {
   rowSelection?: RowSelectionState;
   onRowSelectionChange?: OnChangeFn<RowSelectionState>;
   onRowDoubleClick?: (row: Row<TData>) => void;
+  onRowClick?: (row: Row<TData>) => void;
   onViewDetails?: (driver: TData) => void;
   isProcessing?: boolean;
+  selectedRow?: TData | null;
+  hasSelectedRow?: boolean;
+  allSelectedActive?: boolean;
+  allSelectedInactive?: boolean;
 }
 
 export function DataTable<TData>({
@@ -359,8 +394,13 @@ export function DataTable<TData>({
   rowSelection = {},
   onRowSelectionChange,
   onRowDoubleClick,
+  onRowClick,
   onViewDetails,
   isProcessing: externalProcessing = false,
+  selectedRow = null,
+  hasSelectedRow = false,
+  allSelectedActive = false,
+  allSelectedInactive = false,
 }: DataTableProps<TData>) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -369,6 +409,7 @@ export function DataTable<TData>({
   const [companyFilter, setCompanyFilter] = useState("all");
   const [loadingRows, setLoadingRows] = useState<Record<string, boolean>>({});
   const [isLoading, setIsLoading] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [processingDrivers, setProcessingDrivers] = useState<
     Record<string, boolean>
   >({});
@@ -378,6 +419,10 @@ export function DataTable<TData>({
     refreshDrivers,
   } = useDrivers();
   const router = useRouter();
+  const { toast } = useToast();
+
+  // Combined processing state
+  const isBatchProcessing = isProcessing || externalProcessing;
 
   // Log processing state for debugging
   useEffect(() => {
@@ -438,144 +483,187 @@ export function DataTable<TData>({
       columnVisibility,
       rowSelection,
     },
+    enableRowSelection: true,
   });
 
-  const selectedRows = table.getFilteredSelectedRowModel().rows;
-  const hasSelectedRows = selectedRows.length > 0;
-  const allSelectedActive =
-    hasSelectedRows &&
-    selectedRows.every((row) => {
-      const driver = row.original as Driver;
-      return driver?.status === "active";
-    });
-  const allSelectedInactive =
-    hasSelectedRows &&
-    selectedRows.every((row) => {
-      const driver = row.original as Driver;
-      return driver?.status === "inactive";
-    });
+  // Define hasSelectedRows to include both checkbox selections and single row selections
+  const hasSelectedRows = useMemo(() => {
+    return Object.keys(rowSelection).length > 0 || hasSelectedRow;
+  }, [rowSelection, hasSelectedRow]);
+
+  const selectedRowCount = useMemo(() => {
+    return (
+      Object.keys(rowSelection).length +
+      (hasSelectedRow && !Object.keys(rowSelection).length ? 1 : 0)
+    );
+  }, [rowSelection, hasSelectedRow]);
+
+  // Helper function to check if a row is selected via the selectedRow prop
+  const isRowSelected = useCallback(
+    (row: Row<TData>): boolean => {
+      if (!selectedRow) return false;
+
+      // Compare IDs to determine if this row is selected
+      const rowId = (row.original as any)?.id;
+      const selectedId = (selectedRow as any)?.id;
+
+      return (
+        rowId !== undefined && selectedId !== undefined && rowId === selectedId
+      );
+    },
+    [selectedRow]
+  );
 
   const handleBulkAction = async (action: "activate" | "deactivate") => {
-    if (processingDrivers || externalProcessing) return;
-
-    const selectedIds = selectedRows
-      .map((row) => {
-        const driver = row.original as Driver;
-        return driver?.id ? Number(driver.id) : null;
-      })
-      .filter((id): id is number => id !== null);
-
-    if (selectedIds.length === 0) return;
+    if (isBatchProcessing) return;
+    setIsProcessing(true);
 
     try {
-      // Set processing state
-      setProcessingDrivers((prev) => ({
-        ...prev,
-        ...Object.fromEntries(selectedIds.map((id) => [String(id), true])),
-      }));
+      // Get IDs from selected rows
+      const selectedDriverIds = table
+        .getSelectedRowModel()
+        .rows.map((row) => {
+          const driver = row.original as any;
+          return driver?.id ? parseInt(String(driver.id)) : null;
+        })
+        .filter((id): id is number => id !== null);
 
-      // Apply optimistic updates
-      const newStatus = action === "activate" ? "active" : "inactive";
-      selectedIds.forEach((id) => {
-        contextSetProcessingDriver(String(id), true);
-      });
-
-      // Perform the actual update
-      if (action === "activate" && onActivateSelected) {
-        await onActivateSelected(selectedIds);
-      } else if (action === "deactivate" && onDeactivateSelected) {
-        await onDeactivateSelected(selectedIds);
+      if (selectedDriverIds.length === 0 && selectedRow) {
+        // If no rows are selected but we have a selectedRow, use that
+        const driver = selectedRow as any;
+        const selectedDriverId = driver?.id
+          ? parseInt(String(driver.id))
+          : null;
+        if (selectedDriverId !== null) {
+          selectedDriverIds.push(selectedDriverId);
+        }
       }
 
-      // Show success message
-      toast({
-        title: "Success",
-        description: `Successfully ${action}d ${selectedIds.length} driver(s)`,
-      });
+      if (selectedDriverIds.length === 0) {
+        toast({
+          title: "No drivers selected",
+          description:
+            "Please select one or more drivers to perform this action",
+        });
+        return;
+      }
 
-      // Clear row selection
-      table.toggleAllRowsSelected(false);
+      // Call the appropriate handler based on the action
+      if (action === "activate" && onActivateSelected) {
+        await onActivateSelected(selectedDriverIds);
+      } else if (action === "deactivate" && onDeactivateSelected) {
+        await onDeactivateSelected(selectedDriverIds);
+      }
+
+      // Clear selection
+      table.resetRowSelection();
     } catch (error) {
-      console.error(`Error during bulk ${action}:`, error);
-
-      // Revert optimistic updates on error
-      const originalStatus = action === "activate" ? "inactive" : "active";
-      selectedIds.forEach((id) => {
-        setProcessingDriver(String(id), false);
-      });
-
+      console.error(`Error performing bulk ${action} action:`, error);
       toast({
         title: "Error",
-        description: `Failed to ${action} drivers: ${error instanceof Error ? error.message : String(error)}`,
+        description: `Failed to ${action} drivers: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`,
         variant: "destructive",
       });
     } finally {
-      // Clear processing states
-      setProcessingDrivers((prev) => ({
-        ...prev,
-        ...Object.fromEntries(selectedIds.map((id) => [String(id), false])),
-      }));
-
-      // Force a refresh to ensure data consistency
-      await refreshDrivers(true);
+      setIsProcessing(false);
     }
   };
 
   const exportToCSV = () => {
-    const selectedData = hasSelectedRows
-      ? selectedRows.map((row) => row.original)
-      : data;
-
-    if (!selectedData || selectedData.length === 0) {
+    if (!data || data.length === 0) {
       toast({
         title: "No data to export",
-        description:
-          "Please select some rows or ensure there is data to export.",
+        description: "There is no data available to export.",
         variant: "destructive",
       });
       return;
     }
 
-    const headers = columns
-      .filter((col: any) => col.accessorKey && col.getCanHide?.())
-      .map((col: any) => col.accessorKey);
+    try {
+      const visibleColumns = table
+        .getAllColumns()
+        .filter((column) => column.getIsVisible());
+      const headers = visibleColumns.map((column) => {
+        // Use the column ID as header with some formatting
+        return column.id
+          .replace(/_/g, " ")
+          .replace(/\b\w/g, (l) => l.toUpperCase());
+      });
 
-    const csvContent = [
-      headers.join(","),
-      ...selectedData.map((row) =>
-        headers
-          .map((header) => JSON.stringify((row as any)[header] || ""))
-          .join(",")
-      ),
-    ].join("\n");
+      // Extract data from visible rows and columns
+      const csvRows = [headers];
 
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `drivers_export_${new Date().toISOString()}.csv`;
-    link.click();
+      // Get visible rows
+      const visibleRows = table.getRowModel().rows;
+
+      visibleRows.forEach((row) => {
+        const rowData: string[] = [];
+        visibleColumns.forEach((column) => {
+          // Get the cell value
+          const cell = row.getAllCells().find((c) => c.column.id === column.id);
+          if (cell) {
+            // Convert any complex value to a simple string
+            let value = String(cell.getValue() || "");
+
+            // Clean the value for CSV (handle commas, quotes)
+            if (
+              value.includes(",") ||
+              value.includes('"') ||
+              value.includes("\n")
+            ) {
+              value = `"${value.replace(/"/g, '""')}"`;
+            }
+
+            rowData.push(value);
+          } else {
+            rowData.push("");
+          }
+        });
+        csvRows.push(rowData);
+      });
+
+      // Convert to CSV string
+      const csvContent = csvRows.map((row) => row.join(",")).join("\n");
+
+      // Create a Blob and download
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", "drivers_export.csv");
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (error) {
+      console.error("Error exporting to CSV:", error);
+      toast({
+        title: "Export Failed",
+        description: "Failed to export data to CSV.",
+        variant: "destructive",
+      });
+    }
   };
 
-  const handleRowClick = (e: React.MouseEvent, row: Row<TData>) => {
-    // Don't handle row clicks from within the checkbox cell or action buttons
-    const target = e.target as HTMLElement;
-    const isCheckboxClick =
-      target.closest('[type="checkbox"]') ||
-      target.closest(".checkbox-cell") ||
-      target.classList.contains("checkbox-cell");
+  const handleRowClickEvent = (e: React.MouseEvent, row: Row<TData>) => {
+    e.preventDefault();
+    e.stopPropagation();
 
-    const isActionButtonClick =
-      target.closest("button") ||
-      target.closest(".table-actions-visible") ||
-      target.closest('[role="tooltip"]');
-
-    if (isCheckboxClick || isActionButtonClick) {
-      // Allow the checkbox or action button click to propagate naturally
+    // If we're clicking on a checkbox, button, or link, don't trigger row click
+    if (
+      e.target instanceof HTMLElement &&
+      (e.target.closest("button") ||
+        e.target.closest("a") ||
+        e.target.closest("input[type='checkbox']"))
+    ) {
       return;
     }
 
-    // For regular row clicks, toggle selection
-    row.toggleSelected(!row.getIsSelected());
+    // Call the onRowClick handler if provided
+    if (onRowClick) {
+      onRowClick(row);
+    }
   };
 
   const updateDriverOptimistically = useCallback(
@@ -604,13 +692,11 @@ export function DataTable<TData>({
       <TableToolbar
         table={table}
         hasSelectedRows={hasSelectedRows}
-        selectedRowCount={selectedRows.length}
+        selectedRowCount={selectedRowCount}
         totalRows={data?.length || 0}
         allSelectedActive={allSelectedActive}
         allSelectedInactive={allSelectedInactive}
-        isProcessing={
-          Object.values(processingDrivers).some(Boolean) || externalProcessing
-        }
+        isProcessing={isBatchProcessing}
         handleBulkAction={handleBulkAction}
         exportToCSV={exportToCSV}
         showAdvancedFilters={showAdvancedFilters}
@@ -762,21 +848,28 @@ export function DataTable<TData>({
                 table.getRowModel().rows.map((row) => (
                   <TableRow
                     key={row.id}
-                    data-state={row.getIsSelected() && "selected"}
+                    data-state={
+                      row.getIsSelected() || isRowSelected(row)
+                        ? "selected"
+                        : ""
+                    }
                     data-loading={loadingRows[row.id] ? "true" : undefined}
                     className={cn(
-                      "border-b border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50 data-[state=selected]:bg-slate-100 dark:data-[state=selected]:bg-slate-800/60",
+                      "border-b border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50",
+                      row.getIsSelected() || isRowSelected(row)
+                        ? "bg-slate-100 dark:bg-slate-800/60 data-[state=selected]:bg-slate-100 dark:data-[state=selected]:bg-slate-800/60"
+                        : "",
                       "cursor-pointer transition-colors duration-200 tr-hoverable",
                       loadingRows[row.id] && "opacity-70 pointer-events-none",
                       (processingDrivers as any)?.[(row.original as any)?.id] &&
                         "opacity-50"
                     )}
-                    onClick={(e) => handleRowClick(e, row)}
+                    onClick={(e) => handleRowClickEvent(e, row)}
                     onDoubleClick={() => onRowDoubleClick?.(row)}
                   >
                     <TableCell className="w-[30px] p-4 align-middle checkbox-cell">
                       <Checkbox
-                        checked={row.getIsSelected()}
+                        checked={row.getIsSelected() || isRowSelected(row)}
                         onCheckedChange={(value) => row.toggleSelected(!!value)}
                         aria-label="Select row"
                         className="translate-y-[2px] checkbox"
@@ -1059,35 +1152,30 @@ function QuickActions({
       setProcessingDriver(driverId, true);
       console.log(`Set processing states to true for driver ${driverId}`);
 
-      // Apply optimistic update immediately while preserving company data
-      updateDriverOptimistically(driverId, {
-        status: newStatus,
+      // Store a complete copy of the original driver
+      const originalDriver = JSON.parse(JSON.stringify(driver));
+
+      // Create a complete copy with just the status changed
+      const updatedDriver = {
+        ...originalDriver,
+        status: newStatus as "active" | "inactive" | "terminated" | "pending",
         updated_at: new Date().toISOString(),
-        company_id: driver.company_id,
-        company_name: driver.company_name,
-        companies: driver.companies,
-      });
+      };
+
+      // Apply the complete driver update directly
+      updateDriverOptimistically(driverId, updatedDriver);
       console.log(`Applied optimistic update for driver ${driverId}`);
 
-      // Actual API call
-      const updatedDriver = await updateDrivers(Number(driver.id), {
-        status: newStatus,
-        updated_at: new Date().toISOString(),
+      // Call the API with just the status change
+      const response = await updateDrivers(Number(driver.id), {
+        status: newStatus as "active" | "inactive" | "terminated" | "pending",
       });
-      console.log(`API call completed for driver ${driverId}`, updatedDriver);
 
-      if (!updatedDriver) {
+      console.log(`API call completed for driver ${driverId}`, response);
+
+      if (!response) {
         throw new Error("Failed to update driver status");
       }
-
-      // Apply the changes from the server response to ensure UI is in sync
-      // Preserve company data when applying server response
-      updateDriverOptimistically(driverId, {
-        ...updatedDriver,
-        company_id: updatedDriver.company_id || driver.company_id,
-        company_name: updatedDriver.company_name || driver.company_name,
-        companies: updatedDriver.companies || driver.companies,
-      });
 
       // Show success state
       setShowSuccess(true);
@@ -1115,14 +1203,9 @@ function QuickActions({
     } catch (err) {
       console.error(`Error updating driver ${driverId}:`, err);
 
-      // Revert optimistic update while preserving company data
-      updateDriverOptimistically(driverId, {
-        status: driver.status,
-        updated_at: driver.updated_at,
-        company_id: driver.company_id,
-        company_name: driver.company_name,
-        companies: driver.companies,
-      });
+      // Revert to original status on error by restoring the complete original driver
+      const originalDriver = JSON.parse(JSON.stringify(driver));
+      updateDriverOptimistically(driverId, originalDriver);
 
       toast({
         title: "Error",
@@ -1139,17 +1222,12 @@ function QuickActions({
       refreshDrivers(true);
     }
   }, [
-    driver.id,
+    driver,
     driverId,
-    driver.status,
-    driver.updated_at,
-    driver.company_id,
-    driver.company_name,
-    driver.companies,
     setProcessingDriver,
-    toast,
     updateDriverOptimistically,
     updateDrivers,
+    toast,
     router,
     refreshDrivers,
   ]);

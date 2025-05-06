@@ -808,6 +808,26 @@ export async function updateDriverStatusBatchAction(
       throw new Error("Not authenticated");
     }
 
+    // First, get the complete driver data before the update
+    const { data: existingDrivers, error: getError } = await supabase
+      .from("drivers")
+      .select("*")
+      .in("id", driverIds);
+
+    if (getError) {
+      console.error("Error fetching drivers before update:", getError);
+      throw getError;
+    }
+
+    if (!existingDrivers || existingDrivers.length === 0) {
+      throw new Error("No drivers found for the given IDs");
+    }
+
+    // Create a map of existing drivers for later reference
+    const driversMap = new Map(
+      existingDrivers.map((driver) => [String(driver.id), driver])
+    );
+
     // Update all drivers' status in a single query
     const { data: updatedDrivers, error: updateError } = await withRetry(
       async () => {
@@ -839,10 +859,24 @@ export async function updateDriverStatusBatchAction(
       clearDriverListCache(),
     ]);
 
+    // Ensure all driver data is preserved by merging the updated status with existing data
+    const completeUpdatedDrivers = updatedDrivers.map((updatedDriver) => {
+      const existingDriver = driversMap.get(String(updatedDriver.id));
+      if (existingDriver) {
+        // Return a merged driver that preserves all original fields but updates the status
+        return {
+          ...existingDriver,
+          status: newStatus,
+          updated_at: new Date().toISOString(),
+        };
+      }
+      return updatedDriver;
+    });
+
     console.log(
-      `Server: Successfully updated ${updatedDrivers.length} drivers status to ${newStatus}`
+      `Server: Successfully updated ${completeUpdatedDrivers.length} drivers status to ${newStatus}`
     );
-    return { success: true, updatedDrivers };
+    return { success: true, updatedDrivers: completeUpdatedDrivers };
   } catch (error) {
     console.error("Error in updateDriverStatusBatchAction:", error);
     return {
