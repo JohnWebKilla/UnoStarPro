@@ -319,10 +319,24 @@ export async function updateDriverAction(
       updated_at: new Date().toISOString(),
     })
     .eq("id", id)
-    .select()
+    .select(
+      `
+      *,
+      companies:company_id (
+        id,
+        name
+      )
+    `
+    )
     .single();
 
   if (error) throw error;
+
+  // Add company_name to the returned data
+  const driverWithCompany = {
+    ...data,
+    company_name: data.companies?.name || "N/A",
+  };
 
   // If driver has Stripe connection and relevant fields were updated, sync with Stripe
   if (data.stripe_connect_account_id) {
@@ -343,8 +357,25 @@ export async function updateDriverAction(
     }
   }
 
-  revalidatePath("/Drivers");
-  return data;
+  // Clear all relevant caches
+  try {
+    // Clear both list and individual driver cache
+    await Promise.all([
+      clearDriverCache(id),
+      clearDriverListCache(),
+      clearDriverCachesAction(),
+    ]);
+
+    // Force revalidation of all driver-related paths
+    revalidatePath("/Drivers");
+    revalidatePath(`/Drivers/${id}`);
+    revalidatePath("/api/drivers");
+    revalidatePath(`/api/drivers/${id}`);
+  } catch (cacheError) {
+    console.error("Error clearing caches:", cacheError);
+  }
+
+  return driverWithCompany;
 }
 
 // Delete a driver

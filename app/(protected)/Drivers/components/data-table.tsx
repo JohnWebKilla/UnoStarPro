@@ -60,8 +60,9 @@ import {
   Clock,
   MoreHorizontal,
   Power,
+  X,
 } from "lucide-react";
-import { useState, ReactNode, useCallback, useEffect } from "react";
+import { useState, ReactNode, useCallback, useEffect, useMemo } from "react";
 import { Driver, DRIVER_STATUS_OPTIONS, DRIVER_TEAM_OPTIONS } from "../types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -135,12 +136,22 @@ const TableToolbar = React.memo(function TableToolbar({
                 variant="outline"
                 size="icon"
                 onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
-                className="h-10 w-10 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/40"
+                className={cn(
+                  "h-10 w-10 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/40",
+                  showAdvancedFilters &&
+                    "bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-50"
+                )}
               >
-                <Filter className="h-4 w-4 text-slate-500 dark:text-slate-400" />
+                {showAdvancedFilters ? (
+                  <X className="h-4 w-4 text-slate-500 dark:text-slate-400" />
+                ) : (
+                  <Filter className="h-4 w-4 text-slate-500 dark:text-slate-400" />
+                )}
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Toggle advanced filters</TooltipContent>
+            <TooltipContent>
+              {showAdvancedFilters ? "Hide filters" : "Show filters"}
+            </TooltipContent>
           </Tooltip>
         </TooltipProvider>
 
@@ -352,20 +363,18 @@ export function DataTable<TData>({
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [companyFilter, setCompanyFilter] = useState("all");
   const [loadingRows, setLoadingRows] = useState<Record<string, boolean>>({});
   const [isLoading, setIsLoading] = useState(false);
-  const [bulkProcessing, setBulkProcessing] = useState(false);
   const [processingDrivers, setProcessingDrivers] = useState<
     Record<string, boolean>
   >({});
-
   const {
-    drivers,
     processingDrivers: contextProcessingDrivers,
-    refreshDrivers: refetchDrivers,
-    updateDriverOptimistically: contextUpdateDriverOptimistically,
     setProcessingDriver: contextSetProcessingDriver,
+    refreshDrivers,
   } = useDrivers();
+  const router = useRouter();
 
   // Log processing state for debugging
   useEffect(() => {
@@ -388,17 +397,38 @@ export function DataTable<TData>({
     [contextSetProcessingDriver]
   );
 
+  // Get unique companies from data
+  const companies = useMemo(() => {
+    if (!data) return [];
+    const uniqueCompanies = new Set<string>();
+    data.forEach((item: any) => {
+      if (item.company_name) {
+        uniqueCompanies.add(item.company_name);
+      }
+    });
+    return Array.from(uniqueCompanies).sort();
+  }, [data]);
+
+  // Filter data based on company
+  const filteredData = useMemo(() => {
+    if (!data) return [];
+    if (companyFilter === "all") return data;
+    return (data as any[]).filter(
+      (item) => item.company_name === companyFilter
+    );
+  }, [data, companyFilter]);
+
   const table = useReactTable({
-    data: data || [], // Ensure data is never undefined
+    data: filteredData || [],
     columns,
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
-    onRowSelectionChange,
     onSortingChange: setSorting,
     getSortedRowModel: getSortedRowModel(),
     onColumnFiltersChange: setColumnFilters,
     getFilteredRowModel: getFilteredRowModel(),
     onColumnVisibilityChange: setColumnVisibility,
+    onRowSelectionChange: onRowSelectionChange,
     state: {
       sorting,
       columnFilters,
@@ -423,7 +453,7 @@ export function DataTable<TData>({
     });
 
   const handleBulkAction = async (action: "activate" | "deactivate") => {
-    if (bulkProcessing || externalProcessing) return;
+    if (processingDrivers || externalProcessing) return;
 
     const selectedIds = selectedRows
       .map((row) => {
@@ -436,17 +466,15 @@ export function DataTable<TData>({
 
     try {
       // Set processing state
-      setBulkProcessing(true);
-
-      // Set processing state for all selected drivers
-      selectedIds.forEach((id) => {
-        setProcessingDriver(String(id), true);
-      });
+      setProcessingDrivers((prev) => ({
+        ...prev,
+        ...Object.fromEntries(selectedIds.map((id) => [String(id), true])),
+      }));
 
       // Apply optimistic updates
       const newStatus = action === "activate" ? "active" : "inactive";
       selectedIds.forEach((id) => {
-        contextUpdateDriverOptimistically(String(id), { status: newStatus });
+        contextSetProcessingDriver(String(id), true);
       });
 
       // Perform the actual update
@@ -470,9 +498,7 @@ export function DataTable<TData>({
       // Revert optimistic updates on error
       const originalStatus = action === "activate" ? "inactive" : "active";
       selectedIds.forEach((id) => {
-        contextUpdateDriverOptimistically(String(id), {
-          status: originalStatus,
-        });
+        setProcessingDriver(String(id), false);
       });
 
       toast({
@@ -482,13 +508,13 @@ export function DataTable<TData>({
       });
     } finally {
       // Clear processing states
-      setBulkProcessing(false);
-      selectedIds.forEach((id) => {
-        setProcessingDriver(String(id), false);
-      });
+      setProcessingDrivers((prev) => ({
+        ...prev,
+        ...Object.fromEntries(selectedIds.map((id) => [String(id), false])),
+      }));
 
       // Force a refresh to ensure data consistency
-      await refetchDrivers();
+      await refreshDrivers(true);
     }
   };
 
@@ -551,9 +577,9 @@ export function DataTable<TData>({
 
   const updateDriverOptimistically = useCallback(
     (id: string, updates: Partial<Driver>) => {
-      contextUpdateDriverOptimistically(id, updates);
+      contextSetProcessingDriver(id, true);
     },
-    [contextUpdateDriverOptimistically]
+    [contextSetProcessingDriver]
   );
 
   return (
@@ -571,7 +597,9 @@ export function DataTable<TData>({
         totalRows={data?.length || 0}
         allSelectedActive={allSelectedActive}
         allSelectedInactive={allSelectedInactive}
-        isProcessing={bulkProcessing || externalProcessing}
+        isProcessing={
+          Object.values(processingDrivers).some(Boolean) || externalProcessing
+        }
         handleBulkAction={handleBulkAction}
         exportToCSV={exportToCSV}
         showAdvancedFilters={showAdvancedFilters}
@@ -579,56 +607,104 @@ export function DataTable<TData>({
       />
 
       {showAdvancedFilters && (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-4 border rounded-md bg-slate-50 dark:bg-slate-800/50">
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Status</label>
-            <Select
-              value={
-                (table.getColumn("status")?.getFilterValue() as string) ?? "all"
-              }
-              onValueChange={(value) =>
-                table
-                  .getColumn("status")
-                  ?.setFilterValue(value === "all" ? undefined : value)
-              }
-            >
-              <SelectTrigger className="h-8">
-                <SelectValue placeholder="All statuses" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All statuses</SelectItem>
-                {DRIVER_STATUS_OPTIONS.map((status) => (
-                  <SelectItem key={status} value={status.toLowerCase()}>
-                    {status}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Type</label>
-            <Select
-              value={
-                (table.getColumn("type")?.getFilterValue() as string) ?? "all"
-              }
-              onValueChange={(value) =>
-                table
-                  .getColumn("type")
-                  ?.setFilterValue(value === "all" ? undefined : value)
-              }
-            >
-              <SelectTrigger className="h-8">
-                <SelectValue placeholder="All types" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All types</SelectItem>
-                {DRIVER_TEAM_OPTIONS.map((type) => (
-                  <SelectItem key={type} value={type.toLowerCase()}>
-                    {type}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+        <div className="p-4 space-y-4 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-200 dark:border-slate-700">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                Status
+              </label>
+              <Select
+                value={
+                  (table.getColumn("status")?.getFilterValue() as string) ??
+                  "all"
+                }
+                onValueChange={(value) =>
+                  table
+                    .getColumn("status")
+                    ?.setFilterValue(value === "all" ? "" : value)
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Filter by status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Statuses</SelectItem>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="inactive">Inactive</SelectItem>
+                  <SelectItem value="pending">Pending</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                Company
+              </label>
+              <Select value={companyFilter} onValueChange={setCompanyFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Filter by company" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Companies</SelectItem>
+                  {companies.map((company) => (
+                    <SelectItem key={company} value={company}>
+                      {company}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                Driver Type
+              </label>
+              <Select
+                value={
+                  (table.getColumn("type")?.getFilterValue() as string) ?? "all"
+                }
+                onValueChange={(value) =>
+                  table
+                    .getColumn("type")
+                    ?.setFilterValue(value === "all" ? "" : value)
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Filter by type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  <SelectItem value="Solo">Solo</SelectItem>
+                  <SelectItem value="Team">Team</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                Documents
+              </label>
+              <Select
+                value={
+                  (table.getColumn("documents")?.getFilterValue() as string) ??
+                  "all"
+                }
+                onValueChange={(value) =>
+                  table
+                    .getColumn("documents")
+                    ?.setFilterValue(value === "all" ? "" : value)
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Filter by documents" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Documents</SelectItem>
+                  <SelectItem value="issues">Has Issues</SelectItem>
+                  <SelectItem value="no_issues">No Issues</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </div>
       )}
@@ -790,7 +866,7 @@ export function DataTable<TData>({
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => refetchDrivers()}
+                        onClick={() => refreshDrivers(true)}
                       >
                         <RefreshCw className="mr-2 h-4 w-4" />
                         Retry
@@ -854,115 +930,49 @@ function StatusBadge({
   isProcessing = false,
   driverId,
 }: StatusBadgeProps) {
-  const [previousStatus, setPreviousStatus] = useState(status);
-  const [showSuccess, setShowSuccess] = useState(false);
+  const variants = {
+    active: {
+      variant: "success" as const,
+      icon: CheckCircle,
+      className:
+        "bg-green-500/10 text-green-600 dark:bg-green-500/20 dark:text-green-400 hover:bg-green-500/20 dark:hover:bg-green-500/30 border-green-500/20 dark:border-green-500/30",
+    },
+    inactive: {
+      variant: "secondary" as const,
+      icon: XCircle,
+      className:
+        "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600",
+    },
+    pending: {
+      variant: "outline" as const,
+      icon: Clock,
+      className:
+        "bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400 hover:bg-blue-500/20 dark:hover:bg-blue-500/30 border-blue-500/20 dark:border-blue-500/30",
+    },
+  };
 
-  // Debug logging to verify the processing state and status changes
-  useEffect(() => {
-    console.log(`StatusBadge for driver ${driverId} rendering with:`, {
-      status,
-      previousStatus,
-      isProcessing,
-      showSuccess,
-    });
+  const config = variants[status.toLowerCase() as keyof typeof variants] || {
+    variant: "outline" as const,
+    icon: AlertCircle,
+    className:
+      "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600",
+  };
 
-    // Always update previous status when status prop changes to ensure we track changes
-    if (status !== previousStatus) {
-      console.log(
-        `Status changed for driver ${driverId}: ${previousStatus} -> ${status}`
-      );
-      setPreviousStatus(status);
+  const Icon = config.icon;
 
-      // If not processing and there was a prior status, show success animation
-      if (!isProcessing && previousStatus) {
-        setShowSuccess(true);
-
-        // Reset after animation completes
-        const timer = setTimeout(() => {
-          setShowSuccess(false);
-        }, 800); // Longer animation to make it more visible
-
-        return () => clearTimeout(timer);
-      }
-    }
-  }, [status, previousStatus, isProcessing, driverId]);
-
-  if (isProcessing) {
-    return (
-      <Badge
-        variant="outline"
-        className="bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-600 transition-all duration-300 animate-pulse"
-      >
-        <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-        Updating...
-      </Badge>
-    );
-  }
-
-  if (showSuccess) {
-    return (
-      <Badge
-        variant="outline"
-        className="bg-green-500/30 text-green-600 dark:bg-green-500/40 dark:text-green-400 border-green-500/40 transition-all duration-300 animate-pulse"
-      >
-        <CheckCircle className="mr-1 h-3 w-3" />
-        Updated!
-      </Badge>
-    );
-  }
-
-  switch (status?.toLowerCase()) {
-    case "active":
-      return (
-        <Badge
-          variant="outline"
-          className="bg-green-500/10 text-green-600 dark:bg-green-500/20 dark:text-green-400 hover:bg-green-500/20 dark:hover:bg-green-500/30 border-green-500/20 dark:border-green-500/30"
-        >
-          <CheckCircle className="mr-1 h-3 w-3" />
-          Active
-        </Badge>
-      );
-    case "inactive":
-      return (
-        <Badge
-          variant="outline"
-          className="bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600"
-        >
-          <XCircle className="mr-1 h-3 w-3" />
-          Inactive
-        </Badge>
-      );
-    case "pending":
-      return (
-        <Badge
-          variant="outline"
-          className="bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400 hover:bg-blue-500/20 dark:hover:bg-blue-500/30 border-blue-500/20 dark:border-blue-500/30"
-        >
-          <Clock className="mr-1 h-3 w-3" />
-          Pending
-        </Badge>
-      );
-    case "terminated":
-      return (
-        <Badge
-          variant="outline"
-          className="bg-red-500/10 text-red-600 dark:bg-red-500/20 dark:text-red-400 hover:bg-red-500/20 dark:hover:bg-red-500/30 border-red-500/20 dark:border-red-500/30"
-        >
-          <XCircle className="mr-1 h-3 w-3" />
-          Terminated
-        </Badge>
-      );
-    default:
-      return (
-        <Badge
-          variant="outline"
-          className="bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600"
-        >
-          <AlertCircle className="mr-1 h-3 w-3" />
-          {status || "Unknown"}
-        </Badge>
-      );
-  }
+  return (
+    <Badge
+      variant={config.variant}
+      className={cn("h-6 badge", config.className)}
+    >
+      {isProcessing ? (
+        <Loader2 className="h-3 w-3 animate-spin" />
+      ) : (
+        <Icon className="h-3 w-3" />
+      )}
+      {status.charAt(0).toUpperCase() + status.slice(1).toLowerCase()}
+    </Badge>
+  );
 }
 
 interface QuickActionsProps {
@@ -982,22 +992,14 @@ function QuickActions({
   updateDrivers,
   onViewDetails,
 }: QuickActionsProps): JSX.Element {
-  const router = useRouter();
-  const driver = row.original;
-  const driverId = String(driver.id);
-  const isProcessing = processingDrivers[driverId];
   const { toast } = useToast();
+  const router = useRouter();
+  const { refreshDrivers } = useDrivers();
   const [localProcessing, setLocalProcessing] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
-
-  // For debugging
-  useEffect(() => {
-    console.log(`Driver ${driverId} processing state:`, {
-      isProcessing,
-      localProcessing,
-      showSuccess,
-    });
-  }, [driverId, isProcessing, localProcessing, showSuccess]);
+  const driver = row.original;
+  const driverId = String(driver.id);
+  const isProcessing = processingDrivers[driverId] || localProcessing;
 
   // Handle status toggle with optimistic updates
   const handleStatusToggle = useCallback(async () => {
@@ -1005,23 +1007,40 @@ function QuickActions({
       console.log(`Starting status toggle for driver ${driverId}`);
       const newStatus = driver.status === "active" ? "inactive" : "active";
 
-      // Set both states to true
+      // Set both states to true before any updates
       setLocalProcessing(true);
       setProcessingDriver(driverId, true);
       console.log(`Set processing states to true for driver ${driverId}`);
 
-      // Apply optimistic update immediately
-      updateDriverOptimistically(driverId, { status: newStatus });
+      // Apply optimistic update immediately while preserving company data
+      updateDriverOptimistically(driverId, {
+        status: newStatus,
+        updated_at: new Date().toISOString(),
+        company_id: driver.company_id,
+        company_name: driver.company_name,
+        companies: driver.companies,
+      });
       console.log(`Applied optimistic update for driver ${driverId}`);
 
       // Actual API call
       const updatedDriver = await updateDrivers(Number(driver.id), {
         status: newStatus,
+        updated_at: new Date().toISOString(),
       });
-      console.log(`API call completed for driver ${driverId}`);
+      console.log(`API call completed for driver ${driverId}`, updatedDriver);
 
-      // Apply the changes from the server response directly to ensure UI is in sync
-      updateDriverOptimistically(driverId, updatedDriver);
+      if (!updatedDriver) {
+        throw new Error("Failed to update driver status");
+      }
+
+      // Apply the changes from the server response to ensure UI is in sync
+      // Preserve company data when applying server response
+      updateDriverOptimistically(driverId, {
+        ...updatedDriver,
+        company_id: updatedDriver.company_id || driver.company_id,
+        company_name: updatedDriver.company_name || driver.company_name,
+        companies: updatedDriver.companies || driver.companies,
+      });
 
       // Show success state
       setShowSuccess(true);
@@ -1041,13 +1060,21 @@ function QuickActions({
         setLocalProcessing(false);
         setProcessingDriver(driverId, false);
         console.log(`Reset processing states for driver ${driverId}`);
+
+        // Force a complete data refresh after the UI updates are done
+        router.refresh();
+        refreshDrivers(true);
       }, 300); // Short delay so user can see the success animation
     } catch (err) {
       console.error(`Error updating driver ${driverId}:`, err);
 
-      // Revert optimistic update
+      // Revert optimistic update while preserving company data
       updateDriverOptimistically(driverId, {
         status: driver.status,
+        updated_at: driver.updated_at,
+        company_id: driver.company_id,
+        company_name: driver.company_name,
+        companies: driver.companies,
       });
 
       toast({
@@ -1059,15 +1086,25 @@ function QuickActions({
       // Reset processing states on error
       setLocalProcessing(false);
       setProcessingDriver(driverId, false);
+
+      // Force a complete data refresh to ensure UI is in sync
+      router.refresh();
+      refreshDrivers(true);
     }
   }, [
     driver.id,
     driverId,
     driver.status,
+    driver.updated_at,
+    driver.company_id,
+    driver.company_name,
+    driver.companies,
     setProcessingDriver,
     toast,
     updateDriverOptimistically,
     updateDrivers,
+    router,
+    refreshDrivers,
   ]);
 
   // Show loading if either state is true

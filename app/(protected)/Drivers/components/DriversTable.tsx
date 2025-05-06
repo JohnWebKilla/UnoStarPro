@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useMemo } from "react";
 import {
   Table,
   TableBody,
@@ -53,6 +53,13 @@ import { Driver } from "../types";
 import { createClient } from "@/utils/supabase/client";
 import { UploadDocumentDialog } from "./UploadDocumentDialog";
 import { SyncStripeButton } from "./SyncStripeButton";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 // Dynamically import Dialog components with no SSR
 const Dialog = dynamic(
@@ -109,6 +116,7 @@ export default function DriversTable() {
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [companyFilter, setCompanyFilter] = useState("all");
   const [currentPage, setCurrentPage] = useState(1);
   const driversPerPageNum = 5;
   const [editingDriver, setEditingDriver] = useState<Driver | null>(null);
@@ -154,6 +162,41 @@ export default function DriversTable() {
     };
   }, [refreshDrivers, supabase]);
 
+  // Helper function to safely check array length
+  const safeArrayLength = (arr: any[] | undefined): number => arr?.length ?? 0;
+
+  // Get unique companies from drivers
+  const companies = useMemo(() => {
+    const uniqueCompanies = new Set<string>();
+    drivers?.forEach((driver) => {
+      if (driver.company_name) {
+        uniqueCompanies.add(driver.company_name);
+      }
+    });
+    return Array.from(uniqueCompanies).sort();
+  }, [drivers]);
+
+  // Filter drivers based on search term, status, and company
+  const filteredDrivers = useMemo(() => {
+    if (!drivers) return [];
+
+    return drivers.filter((driver) => {
+      const matchesSearch =
+        driver.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        driver.phone?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        driver.truckNumber?.toLowerCase().includes(searchTerm.toLowerCase());
+
+      const matchesStatus =
+        statusFilter === "all" ||
+        driver.status?.toLowerCase() === statusFilter.toLowerCase();
+
+      const matchesCompany =
+        companyFilter === "all" || driver.company_name === companyFilter;
+
+      return matchesSearch && matchesStatus && matchesCompany;
+    });
+  }, [drivers, searchTerm, statusFilter, companyFilter]);
+
   const getExpiringDocuments = (driver: Driver): DocumentWithType[] => {
     const sevenDaysFromNow = new Date();
     sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
@@ -191,42 +234,6 @@ export default function DriversTable() {
 
     return expiringDocs;
   };
-
-  // Helper function to safely check array length
-  const safeArrayLength = (arr: any[] | undefined): number => arr?.length ?? 0;
-
-  // Helper function to safely map array
-  const safeArrayMap = <T extends any>(
-    arr: T[] | undefined,
-    callback: (item: T, index: number) => any
-  ): any[] => arr?.map(callback) ?? [];
-
-  const filteredDrivers = drivers.filter((driver) => {
-    const searchTermLower = searchTerm.toLowerCase();
-
-    // Handle both legacy and new fields for phone and truck number
-    const hasPhoneMatch =
-      (driver.phone_number?.includes(searchTerm) ?? false) ||
-      (driver.phone?.includes(searchTerm) ?? false);
-    const hasTruckMatch =
-      (driver.truck_number?.toLowerCase().includes(searchTermLower) ?? false) ||
-      (driver.truckNumber?.toLowerCase().includes(searchTermLower) ?? false);
-
-    const matchesSearch =
-      driver.name.toLowerCase().includes(searchTermLower) ||
-      hasPhoneMatch ||
-      hasTruckMatch;
-
-    // Handle status comparison - normalize status to lowercase
-    const normalizedDriverStatus = driver.status?.toLowerCase() ?? "";
-    const normalizedStatusFilter = statusFilter.toLowerCase();
-
-    const matchesStatus =
-      normalizedStatusFilter === "all" ||
-      normalizedDriverStatus === normalizedStatusFilter;
-
-    return matchesSearch && matchesStatus;
-  });
 
   // Pagination setup
   const totalPages = Math.ceil(filteredDrivers.length / driversPerPageNum);
@@ -558,6 +565,34 @@ export default function DriversTable() {
         <div className="flex items-center justify-between">
           <CardTitle className="text-lg font-semibold">Drivers List</CardTitle>
           <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-[140px]">
+                  <SelectValue placeholder="All statuses" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Statuses</SelectItem>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="inactive">Inactive</SelectItem>
+                  <SelectItem value="pending">Pending</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select value={companyFilter} onValueChange={setCompanyFilter}>
+                <SelectTrigger className="w-[140px]">
+                  <SelectValue placeholder="All companies" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Companies</SelectItem>
+                  {companies.map((company) => (
+                    <SelectItem key={company} value={company}>
+                      {company}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             <div className="relative">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
@@ -585,37 +620,6 @@ export default function DriversTable() {
                 </>
               )}
             </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="flex items-center gap-2"
-                >
-                  <Filter className="h-4 w-4" />
-                  {statusFilter === "all"
-                    ? "All Status"
-                    : getStatusDisplay(statusFilter)}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent>
-                <DropdownMenuItem onClick={() => setStatusFilter("all")}>
-                  All Status
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setStatusFilter("active")}>
-                  Active
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setStatusFilter("inactive")}>
-                  Inactive
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setStatusFilter("terminated")}>
-                  Terminated
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setStatusFilter("pending")}>
-                  Pending
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
           </div>
         </div>
       </CardHeader>

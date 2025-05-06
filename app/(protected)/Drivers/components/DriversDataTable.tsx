@@ -5,11 +5,18 @@ import { DataTable } from "./data-table";
 import { columns } from "./columns";
 import { Driver } from "../types";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useMemo } from "react";
 import { useDrivers } from "./DriversClientProvider";
 import { usePathname } from "next/navigation";
 import { updateDriverStatusBatchAction } from "../server-actions";
 import { toast } from "@/components/ui/use-toast";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface DriversDataTableProps {
   data: Driver[];
@@ -26,9 +33,30 @@ export function DriversDataTable({ data: initialData }: DriversDataTableProps) {
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
   const [isPrefetched, setIsPrefetched] = useState<Record<string, boolean>>({});
   const [isProcessing, setIsProcessing] = useState(false);
+  const [tableData, setTableData] = useState<Driver[]>(initialData);
 
   // Use both the initial server data and any updates from context
-  const [tableData, setTableData] = useState<Driver[]>(initialData);
+  useEffect(() => {
+    if (contextDrivers) {
+      setTableData(contextDrivers);
+    }
+  }, [contextDrivers]);
+
+  // Get unique companies from drivers
+  const companies = useMemo(() => {
+    const uniqueCompanies = new Set<string>();
+    tableData?.forEach((driver) => {
+      if (driver.company_name) {
+        uniqueCompanies.add(driver.company_name);
+      }
+    });
+    return Array.from(uniqueCompanies).sort();
+  }, [tableData]);
+
+  // Filter data based on status and company
+  const filteredData = useMemo(() => {
+    return tableData;
+  }, [tableData]);
 
   // Helper function to update multiple drivers optimistically
   const updateDriversOptimistically = (
@@ -178,17 +206,6 @@ export function DriversDataTable({ data: initialData }: DriversDataTableProps) {
     }
   };
 
-  // Update table data when context drivers change
-  useEffect(() => {
-    if (contextDrivers && contextDrivers.length > 0) {
-      console.log("Updating DriversDataTable with new data from context", {
-        contextDriversCount: contextDrivers.length,
-        initialDataCount: initialData.length,
-      });
-      setTableData([...contextDrivers]);
-    }
-  }, [contextDrivers, initialData]);
-
   // Set up navigation callbacks for better performance
   const navigateToDriver = useCallback(
     (driverId: string, driver: Driver) => {
@@ -270,16 +287,20 @@ export function DriversDataTable({ data: initialData }: DriversDataTableProps) {
   }, [tableData]);
 
   return (
-    <DataTable
-      columns={columns}
-      data={tableData}
-      onRowDoubleClick={handleRowDoubleClick}
-      onViewDetails={handleViewDetails}
-      rowSelection={rowSelection}
-      onRowSelectionChange={handleRowSelectionChange}
-      onActivateSelected={handleActivateSelected}
-      onDeactivateSelected={handleDeactivateSelected}
-      isProcessing={isProcessing}
-    />
+    <div className="space-y-4">
+      <DataTable
+        columns={columns}
+        data={filteredData}
+        onRowDoubleClick={(row) => {
+          const driverId = row.original.id;
+          navigateToDriver(driverId, row.original);
+        }}
+        onActivateSelected={handleActivateSelected}
+        onDeactivateSelected={handleDeactivateSelected}
+        rowSelection={rowSelection}
+        onRowSelectionChange={setRowSelection as OnChangeFn<RowSelectionState>}
+        isProcessing={isProcessing}
+      />
+    </div>
   );
 }
