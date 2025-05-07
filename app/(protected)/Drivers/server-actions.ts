@@ -299,83 +299,108 @@ export async function createDriverAction(
 export async function updateDriverAction(
   id: number,
   driverData: Partial<Driver>
-): Promise<Driver> {
-  const supabase = await createClient();
+): Promise<{ success: boolean; error?: string; driver?: Driver }> {
+  try {
+    const supabase = await createClient();
 
-  // First, get the current driver data
-  const { data: existingDriver, error: fetchError } = await supabase
-    .from("drivers")
-    .select()
-    .eq("id", id)
-    .single();
+    // First, get the current driver data
+    const { data: existingDriver, error: fetchError } = await supabase
+      .from("drivers")
+      .select()
+      .eq("id", id)
+      .single();
 
-  if (fetchError) throw fetchError;
+    if (fetchError) throw fetchError;
 
-  // Update in database
-  const { data, error } = await supabase
-    .from("drivers")
-    .update({
-      ...driverData,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", id)
-    .select(
+    // Update in database
+    const { data, error } = await supabase
+      .from("drivers")
+      .update({
+        ...driverData,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .select(
+        `
+        *,
+        companies:company_id (
+          id,
+          name
+        )
       `
-      *,
-      companies:company_id (
-        id,
-        name
       )
-    `
-    )
-    .single();
+      .single();
 
-  if (error) throw error;
+    if (error) throw error;
 
-  // Add company_name to the returned data
-  const driverWithCompany = {
-    ...data,
-    company_name: data.companies?.name || "N/A",
-  };
+    // Add company_name to the returned data
+    const driverWithCompany = {
+      ...data,
+      company_name: data.companies?.name || "N/A",
+    };
 
-  // If driver has Stripe connection and relevant fields were updated, sync with Stripe
-  if (data.stripe_connect_account_id) {
-    const relevantFields = ["name", "email", "phone_number", "status"];
+    // Fetch all documents in parallel
+    const [{ data: licenses }, { data: medicalCards }, { data: mvrRecords }] =
+      await Promise.all([
+        supabase.from("driver_licenses").select("*").eq("driver_id", id),
+        supabase.from("medical_cards").select("*").eq("driver_id", id),
+        supabase.from("mvr_records").select("*").eq("driver_id", id),
+      ]);
 
-    const hasRelevantChanges = Object.keys(driverData).some(
-      (key) =>
-        relevantFields.includes(key) &&
-        driverData[key as keyof Driver] !== existingDriver[key as keyof Driver]
-    );
+    // Construct the complete driver object with documents
+    const completeDriver = {
+      ...driverWithCompany,
+      driver_licenses: licenses || [],
+      medical_cards: medicalCards || [],
+      mvr_files: mvrRecords || [],
+    } as Driver;
 
-    if (hasRelevantChanges) {
-      try {
-        await updateDriverInStripe(data);
-      } catch (stripeError) {
-        console.error("Failed to sync driver with Stripe:", stripeError);
+    // If driver has Stripe connection and relevant fields were updated, sync with Stripe
+    if (data.stripe_connect_account_id) {
+      const relevantFields = ["name", "email", "phone_number", "status"];
+
+      const hasRelevantChanges = Object.keys(driverData).some(
+        (key) =>
+          relevantFields.includes(key) &&
+          driverData[key as keyof Driver] !==
+            existingDriver[key as keyof Driver]
+      );
+
+      if (hasRelevantChanges) {
+        try {
+          await updateDriverInStripe(data);
+        } catch (stripeError) {
+          console.error("Failed to sync driver with Stripe:", stripeError);
+        }
       }
     }
+
+    // Clear all relevant caches
+    try {
+      // Clear both list and individual driver cache
+      await Promise.all([
+        clearDriverCache(id),
+        clearDriverListCache(),
+        clearDriverCachesAction(),
+      ]);
+
+      // Force revalidation of all driver-related paths
+      revalidatePath("/Drivers");
+      revalidatePath(`/Drivers/${id}`);
+      revalidatePath("/api/drivers");
+      revalidatePath(`/api/drivers/${id}`);
+    } catch (cacheError) {
+      console.error("Error clearing caches:", cacheError);
+    }
+
+    return { success: true, driver: completeDriver };
+  } catch (error) {
+    console.error("Error updating driver:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to update driver",
+    };
   }
-
-  // Clear all relevant caches
-  try {
-    // Clear both list and individual driver cache
-    await Promise.all([
-      clearDriverCache(id),
-      clearDriverListCache(),
-      clearDriverCachesAction(),
-    ]);
-
-    // Force revalidation of all driver-related paths
-    revalidatePath("/Drivers");
-    revalidatePath(`/Drivers/${id}`);
-    revalidatePath("/api/drivers");
-    revalidatePath(`/api/drivers/${id}`);
-  } catch (cacheError) {
-    console.error("Error clearing caches:", cacheError);
-  }
-
-  return driverWithCompany;
 }
 
 // Delete a driver
@@ -731,7 +756,7 @@ export async function importDriversFromRawDataAction(
 export async function updateDriverStatusAction(
   driverId: number,
   newStatus: "active" | "inactive" | "terminated" | "pending"
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; driver?: Driver }> {
   console.log(`Server: Updating driver ${driverId} status to ${newStatus}`);
 
   try {
@@ -745,7 +770,7 @@ export async function updateDriverStatusAction(
     }
 
     // Update the driver status
-    const { data: updatedDriver, error: updateError } = await withRetry(
+    const { error: updateError } = await withRetry(
       async () => {
         return await supabase
           .from("drivers")
@@ -753,9 +778,7 @@ export async function updateDriverStatusAction(
             status: newStatus,
             updated_at: new Date().toISOString(),
           })
-          .eq("id", driverId)
-          .select()
-          .single();
+          .eq("id", driverId);
       },
       3,
       500
@@ -766,25 +789,68 @@ export async function updateDriverStatusAction(
       throw updateError;
     }
 
-    if (!updatedDriver) {
-      throw new Error("Failed to update driver status");
+    // Now fetch the complete driver data with all related information
+    const { data: driver, error: getError } = await supabase
+      .from("drivers")
+      .select(
+        `
+        *,
+        companies:company_id (
+          id,
+          name
+        )
+      `
+      )
+      .eq("id", driverId)
+      .single();
+
+    if (getError) {
+      console.error("Error fetching driver data after update:", getError);
+      throw getError;
     }
 
-    // Clear both list and individual driver cache
-    await Promise.all([clearDriverCache(driverId), clearDriverListCache()]);
+    // Fetch all documents in parallel
+    const [{ data: licenses }, { data: medicalCards }, { data: mvrRecords }] =
+      await Promise.all([
+        supabase.from("driver_licenses").select("*").eq("driver_id", driverId),
+        supabase.from("medical_cards").select("*").eq("driver_id", driverId),
+        supabase.from("mvr_records").select("*").eq("driver_id", driverId),
+      ]);
+
+    // Construct the complete driver object to return to the client
+    const completeDriver: Driver = {
+      ...driver,
+      company_name: driver.companies?.name || "",
+      driver_licenses: licenses || [],
+      medical_cards: medicalCards || [],
+      mvr_files: mvrRecords || [],
+      documents: driver.documents || [],
+    };
+
+    // Clear cache but don't wait for it to complete
+    clearDriverCache(driverId).catch((e) =>
+      console.error("Error clearing driver cache:", e)
+    );
+    clearDriverListCache().catch((e) =>
+      console.error("Error clearing driver list cache:", e)
+    );
 
     console.log(
-      `Server: Successfully updated driver ${driverId} status to ${newStatus}`
+      `Server: Successfully updated driver ${driverId} status to ${newStatus}`,
+      {
+        companyName: completeDriver.company_name,
+        licenseCount: completeDriver.driver_licenses?.length || 0,
+        medicalCardsCount: completeDriver.medical_cards?.length || 0,
+        mvrFilesCount: completeDriver.mvr_files?.length || 0,
+      }
     );
-    return { success: true };
+
+    return { success: true, driver: completeDriver };
   } catch (error) {
     console.error("Error in updateDriverStatusAction:", error);
     return {
       success: false,
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to update driver status",
+      error: error instanceof Error ? error.message : "Unknown error",
     };
   }
 }
@@ -808,27 +874,7 @@ export async function updateDriverStatusBatchAction(
       throw new Error("Not authenticated");
     }
 
-    // First, get the complete driver data before the update
-    const { data: existingDrivers, error: getError } = await supabase
-      .from("drivers")
-      .select("*")
-      .in("id", driverIds);
-
-    if (getError) {
-      console.error("Error fetching drivers before update:", getError);
-      throw getError;
-    }
-
-    if (!existingDrivers || existingDrivers.length === 0) {
-      throw new Error("No drivers found for the given IDs");
-    }
-
-    // Create a map of existing drivers for later reference
-    const driversMap = new Map(
-      existingDrivers.map((driver) => [String(driver.id), driver])
-    );
-
-    // Update all drivers' status in a single query
+    // First, update all the drivers
     const { data: updatedDrivers, error: updateError } = await withRetry(
       async () => {
         return await supabase
@@ -837,8 +883,13 @@ export async function updateDriverStatusBatchAction(
             status: newStatus,
             updated_at: new Date().toISOString(),
           })
-          .in("id", driverIds)
-          .select("*"); // Select all fields to get the complete updated records
+          .in("id", driverIds).select(`
+            *,
+            companies:company_id (
+              id,
+              name
+            )
+          `);
       },
       3,
       500
@@ -859,24 +910,36 @@ export async function updateDriverStatusBatchAction(
       clearDriverListCache(),
     ]);
 
-    // Ensure all driver data is preserved by merging the updated status with existing data
-    const completeUpdatedDrivers = updatedDrivers.map((updatedDriver) => {
-      const existingDriver = driversMap.get(String(updatedDriver.id));
-      if (existingDriver) {
-        // Return a merged driver that preserves all original fields but updates the status
-        return {
-          ...existingDriver,
-          status: newStatus,
-          updated_at: new Date().toISOString(),
-        };
-      }
-      return updatedDriver;
-    });
+    // Batch fetch all documents for all drivers at once
+    const [
+      { data: allLicenses },
+      { data: allMedicalCards },
+      { data: allMvrRecords },
+    ] = await Promise.all([
+      supabase.from("driver_licenses").select("*").in("driver_id", driverIds),
+      supabase.from("medical_cards").select("*").in("driver_id", driverIds),
+      supabase.from("mvr_records").select("*").in("driver_id", driverIds),
+    ]);
+
+    // Index the documents by driver_id for faster lookups
+    const licensesByDriverId = groupBy(allLicenses || [], "driver_id");
+    const medicalCardsByDriverId = groupBy(allMedicalCards || [], "driver_id");
+    const mvrRecordsByDriverId = groupBy(allMvrRecords || [], "driver_id");
+
+    // Map drivers with their documents
+    const driversWithDocs = updatedDrivers.map((driver) => ({
+      ...driver,
+      company_name: driver.companies?.name || "N/A",
+      driver_licenses: licensesByDriverId[driver.id] || [],
+      medical_cards: medicalCardsByDriverId[driver.id] || [],
+      mvr_files: mvrRecordsByDriverId[driver.id] || [],
+    })) as Driver[];
 
     console.log(
-      `Server: Successfully updated ${completeUpdatedDrivers.length} drivers status to ${newStatus}`
+      `Server: Successfully updated ${driversWithDocs.length} drivers status to ${newStatus}`
     );
-    return { success: true, updatedDrivers: completeUpdatedDrivers };
+
+    return { success: true, updatedDrivers: driversWithDocs };
   } catch (error) {
     console.error("Error in updateDriverStatusBatchAction:", error);
     return {

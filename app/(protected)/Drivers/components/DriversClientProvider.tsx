@@ -45,6 +45,17 @@ interface DriversClientProviderProps {
   initialDrivers: Driver[];
 }
 
+// Helper function to group array items by a key
+function groupBy<T extends Record<string, any>>(
+  array: T[],
+  key: string
+): Record<string, T[]> {
+  return array.reduce((result: Record<string, T[]>, item: T) => {
+    (result[item[key]] = result[item[key]] || []).push(item);
+    return result;
+  }, {});
+}
+
 function getChangedFields(oldRecord: any, newRecord: any): string[] {
   if (!oldRecord || !newRecord) return [];
 
@@ -103,7 +114,13 @@ export function DriversClientProvider({
 
   const updateDriverOptimistically = useCallback(
     (id: string, updates: Partial<Driver>) => {
-      console.log(`Optimistically updating driver ${id} with:`, updates);
+      console.log(`Optimistically updating driver ${id} with:`, {
+        originalUpdates: updates,
+        hasCompany: !!updates.company_name,
+        hasLicenses: !!(
+          updates.driver_licenses && updates.driver_licenses.length
+        ),
+      });
 
       setDrivers((prevDrivers) => {
         // Find the driver to update
@@ -116,50 +133,78 @@ export function DriversClientProvider({
           return prevDrivers;
         }
 
-        // Create a new array with the updated driver
-        const updatedDrivers = [...prevDrivers];
-        const oldDriver = updatedDrivers[driverIndex];
+        // Get the original driver
+        const oldDriver = prevDrivers[driverIndex];
 
-        // Create a deep copy of the original driver to avoid reference issues
+        // Create a deep copy of the original driver
         const driverCopy = JSON.parse(JSON.stringify(oldDriver));
 
-        // Always preserve these critical fields unless explicitly updated
-        const criticalFields = [
-          "company_id",
-          "company_name",
-          "companies",
-          "documents",
-          "driver_licenses",
-          "medical_cards",
-          "mvr_files",
-          "subscription",
-        ];
+        // Create a deep copy of the updates to avoid reference issues
+        const updatesCopy = JSON.parse(JSON.stringify(updates));
 
-        // Create the updated driver object, preserving all original data
+        // CRITICAL: Special handling for nested objects that must be preserved
         const updatedDriver = {
-          ...driverCopy, // Start with a complete copy of the original driver
-          ...updates, // Apply the specific updates
+          ...driverCopy, // Start with a deep copy of the original driver
+          ...updatesCopy, // Apply the updates
         };
 
-        // Double-check critical fields are preserved
-        criticalFields.forEach((field) => {
-          if (driverCopy[field] && !updates[field as keyof Partial<Driver>]) {
-            updatedDriver[field as keyof Driver] =
-              driverCopy[field as keyof Driver];
-          }
-        });
+        // Explicitly preserve these critical fields (only if they exist in the updates)
+        if (updatesCopy.company_name) {
+          updatedDriver.company_name = updatesCopy.company_name;
+        } else if (driverCopy.company_name) {
+          updatedDriver.company_name = driverCopy.company_name;
+        }
+
+        // Preserve company object
+        if (updatesCopy.companies) {
+          updatedDriver.companies = updatesCopy.companies;
+        } else if (driverCopy.companies) {
+          updatedDriver.companies = driverCopy.companies;
+        }
+
+        // Preserve document arrays
+        if (updatesCopy.driver_licenses) {
+          updatedDriver.driver_licenses = updatesCopy.driver_licenses;
+        } else if (driverCopy.driver_licenses) {
+          updatedDriver.driver_licenses = driverCopy.driver_licenses;
+        }
+
+        if (updatesCopy.medical_cards) {
+          updatedDriver.medical_cards = updatesCopy.medical_cards;
+        } else if (driverCopy.medical_cards) {
+          updatedDriver.medical_cards = driverCopy.medical_cards;
+        }
+
+        if (updatesCopy.mvr_files) {
+          updatedDriver.mvr_files = updatesCopy.mvr_files;
+        } else if (driverCopy.mvr_files) {
+          updatedDriver.mvr_files = driverCopy.mvr_files;
+        }
 
         // Set timestamp
         updatedDriver.updated_at =
-          updates.updated_at || new Date().toISOString();
+          updatesCopy.updated_at || new Date().toISOString();
 
-        // Replace the driver in the array
+        // Log detailed info about the update
+        console.log(`Driver ${id} update details:`, {
+          hadCompanyBefore: !!driverCopy.company_name,
+          hasCompanyAfter: !!updatedDriver.company_name,
+          companyNameBefore: driverCopy.company_name,
+          companyNameAfter: updatedDriver.company_name,
+          hadLicensesBefore: !!(
+            driverCopy.driver_licenses && driverCopy.driver_licenses.length
+          ),
+          hasLicensesAfter: !!(
+            updatedDriver.driver_licenses &&
+            updatedDriver.driver_licenses.length
+          ),
+          licenseCountBefore: driverCopy.driver_licenses?.length || 0,
+          licenseCountAfter: updatedDriver.driver_licenses?.length || 0,
+        });
+
+        // Create a new array with the updated driver
+        const updatedDrivers = [...prevDrivers];
         updatedDrivers[driverIndex] = updatedDriver;
-
-        console.log(
-          `Driver ${id} updated in local state:`,
-          updatedDrivers[driverIndex]
-        );
 
         return updatedDrivers;
       });
@@ -271,32 +316,115 @@ export function DriversClientProvider({
       setIsLoading(true);
       console.log("Refreshing drivers data from server");
 
+      // Keep a backup of current drivers to maintain company and doc data if needed
+      const currentDrivers = [...drivers];
+
+      // Map of driver IDs to their companies and doc data
+      const driverDataMap = currentDrivers.reduce(
+        (acc, driver) => {
+          acc[String(driver.id)] = {
+            company_name: driver.company_name,
+            companies: driver.companies,
+            driver_licenses: driver.driver_licenses || [],
+            medical_cards: driver.medical_cards || [],
+            mvr_files: driver.mvr_files || [],
+          };
+          return acc;
+        },
+        {} as Record<string, Partial<Driver>>
+      );
+
       // Clear cache if skipCache is true
       if (skipCache) {
+        console.log("Clearing server cache before refresh");
         await clearDriverCaches();
       }
 
-      // Fetch fresh drivers data from the server
+      // Fetch fresh drivers data from the server including companies
       try {
         const { data: freshData, error: fetchError } = await supabase
           .from("drivers")
-          .select("*")
+          .select(
+            `
+            *,
+            companies:company_id (
+              id,
+              name
+            )
+          `
+          )
           .order("created_at", { ascending: false });
 
         if (fetchError) {
           console.error("Error fetching updated drivers data:", fetchError);
-        } else if (freshData) {
+        } else if (freshData && freshData.length > 0) {
           console.log(`Fetched ${freshData.length} drivers from server`);
-          // Update the drivers state with fresh data
-          setDrivers(freshData);
+
+          // Extract driver IDs for batch document fetching
+          const driverIds = freshData.map((driver) => driver.id);
+
+          // Batch fetch all documents at once
+          const [
+            { data: allLicenses },
+            { data: allMedicalCards },
+            { data: allMvrRecords },
+          ] = await Promise.all([
+            supabase
+              .from("driver_licenses")
+              .select("*")
+              .in("driver_id", driverIds),
+            supabase
+              .from("medical_cards")
+              .select("*")
+              .in("driver_id", driverIds),
+            supabase.from("mvr_records").select("*").in("driver_id", driverIds),
+          ]);
+
+          // Group documents by driver_id for faster lookups
+          const licensesByDriverId = groupBy(allLicenses || [], "driver_id");
+          const medicalCardsByDriverId = groupBy(
+            allMedicalCards || [],
+            "driver_id"
+          );
+          const mvrRecordsByDriverId = groupBy(
+            allMvrRecords || [],
+            "driver_id"
+          );
+
+          // Complete driver objects with all data
+          const completeDrivers = freshData.map((driver) => {
+            const driverId = String(driver.id);
+
+            // Ensure we have company name
+            const companyName =
+              driver.companies?.name ||
+              driverDataMap[driverId]?.company_name ||
+              "N/A";
+
+            return {
+              ...driver,
+              company_name: companyName,
+              driver_licenses:
+                licensesByDriverId[driver.id] ||
+                driverDataMap[driverId]?.driver_licenses ||
+                [],
+              medical_cards:
+                medicalCardsByDriverId[driver.id] ||
+                driverDataMap[driverId]?.medical_cards ||
+                [],
+              mvr_files:
+                mvrRecordsByDriverId[driver.id] ||
+                driverDataMap[driverId]?.mvr_files ||
+                [],
+            };
+          });
+
+          // Update the drivers state with complete drivers
+          setDrivers(completeDrivers);
+          console.log("Updated drivers with complete data", completeDrivers);
         }
       } catch (error) {
         console.error("Error during driver refresh:", error);
-      }
-
-      // Only refresh the page data if skipCache is true
-      if (skipCache) {
-        router.refresh();
       }
 
       // Also update the selected driver if we have one

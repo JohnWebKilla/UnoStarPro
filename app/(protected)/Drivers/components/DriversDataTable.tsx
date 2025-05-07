@@ -37,6 +37,11 @@ export function DriversDataTable({ data: initialData }: DriversDataTableProps) {
   const [selectedDriverRow, setSelectedDriverRow] = useState<Driver | null>(
     null
   );
+  // Add missing state variables
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [selectedDrivers, setSelectedDrivers] = useState<
+    Record<string, Driver>
+  >({});
 
   // Use the data from context if available, otherwise use initialData
   const [tableData, setTableData] = useState<Driver[]>(initialData);
@@ -122,31 +127,16 @@ export function DriversDataTable({ data: initialData }: DriversDataTableProps) {
   };
 
   // Handle activating selected drivers
-  const handleActivateSelected = async (ids: number[]) => {
-    if (isProcessing) return;
-    setIsProcessing(true);
-
+  const handleActivateSelected = async () => {
     try {
-      // Get the original drivers for potential reversion and for creating complete updates
-      const originalDrivers = ids.map((id) => {
-        const driver = tableData.find((d) => Number(d.id) === id);
-        if (!driver) {
-          throw new Error(`Driver with ID ${id} not found`);
-        }
-        return JSON.parse(JSON.stringify(driver));
-      });
+      const ids = getSelectedDriverIds();
+      if (isProcessing || ids.length === 0) return;
 
-      // Create complete drivers with updated status for optimistic updates
-      const updatedDrivers = originalDrivers.map((driver) => ({
-        ...driver,
-        status: "active",
-        updated_at: new Date().toISOString(),
-      }));
+      setIsProcessing(true);
 
-      // Apply optimistic updates with complete driver objects
-      updatedDrivers.forEach((driver) => {
-        updateDriversOptimistically([Number(driver.id)], driver);
-      });
+      // Log the operation and driver data before action
+      console.log(`Activating ${ids.length} drivers`, ids);
+      console.log("Current table data before activation:", tableData);
 
       // Call the server action
       const result = await updateDriverStatusBatchAction(ids, "active");
@@ -159,28 +149,42 @@ export function DriversDataTable({ data: initialData }: DriversDataTableProps) {
 
         // If server returned complete updated drivers, use them
         if (result.updatedDrivers && result.updatedDrivers.length > 0) {
+          console.log(
+            "Server returned complete drivers:",
+            result.updatedDrivers
+          );
+
           // Update the local data with complete drivers from server
-          setTableData((prevData) =>
-            prevData.map((driver) => {
+          setTableData((prevData) => {
+            const newData = prevData.map((driver) => {
               const serverUpdated = result.updatedDrivers?.find(
                 (d) => String(d.id) === String(driver.id)
               );
+              // Log each driver update
+              if (serverUpdated) {
+                console.log(`Updating driver ${driver.id}:`, {
+                  previousCompany: driver.company_name,
+                  newCompany: serverUpdated.company_name,
+                  previousDocs: driver.driver_licenses?.length || 0,
+                  newDocs: serverUpdated.driver_licenses?.length || 0,
+                });
+              }
               return serverUpdated || driver;
-            })
-          );
+            });
+
+            console.log("Updated table data after activation:", newData);
+            return newData;
+          });
         }
 
-        // Refresh data to ensure consistency
-        await refreshData();
+        // Reset selection
+        setRowSelection({});
+        setSelectedDriverRow(null);
       } else {
-        // Revert optimistic update on error by restoring original drivers
-        originalDrivers.forEach((driver) => {
-          updateDriversOptimistically([Number(driver.id)], driver);
-        });
-
+        console.error("Failed to activate drivers:", result.error);
         toast({
           title: "Error",
-          description: result.error || "Failed to activate drivers",
+          description: `Failed to activate drivers: ${result.error}`,
           variant: "destructive",
         });
       }
@@ -188,43 +192,25 @@ export function DriversDataTable({ data: initialData }: DriversDataTableProps) {
       console.error("Error activating drivers:", error);
       toast({
         title: "Error",
-        description: "An unexpected error occurred while activating drivers",
+        description: "Failed to activate drivers. Please try again.",
         variant: "destructive",
       });
     } finally {
-      // Clear selection state
-      setRowSelection({});
-      setSelectedDriverRow(null);
       setIsProcessing(false);
     }
   };
 
   // Handle deactivating selected drivers
-  const handleDeactivateSelected = async (ids: number[]) => {
-    if (isProcessing) return;
-    setIsProcessing(true);
-
+  const handleDeactivateSelected = async () => {
     try {
-      // Get the original drivers for potential reversion and for creating complete updates
-      const originalDrivers = ids.map((id) => {
-        const driver = tableData.find((d) => Number(d.id) === id);
-        if (!driver) {
-          throw new Error(`Driver with ID ${id} not found`);
-        }
-        return JSON.parse(JSON.stringify(driver));
-      });
+      const ids = getSelectedDriverIds();
+      if (isProcessing || ids.length === 0) return;
 
-      // Create complete drivers with updated status for optimistic updates
-      const updatedDrivers = originalDrivers.map((driver) => ({
-        ...driver,
-        status: "inactive",
-        updated_at: new Date().toISOString(),
-      }));
+      setIsProcessing(true);
 
-      // Apply optimistic updates with complete driver objects
-      updatedDrivers.forEach((driver) => {
-        updateDriversOptimistically([Number(driver.id)], driver);
-      });
+      // Log the operation and driver data before action
+      console.log(`Deactivating ${ids.length} drivers`, ids);
+      console.log("Current table data before deactivation:", tableData);
 
       // Call the server action
       const result = await updateDriverStatusBatchAction(ids, "inactive");
@@ -237,28 +223,42 @@ export function DriversDataTable({ data: initialData }: DriversDataTableProps) {
 
         // If server returned complete updated drivers, use them
         if (result.updatedDrivers && result.updatedDrivers.length > 0) {
+          console.log(
+            "Server returned complete drivers:",
+            result.updatedDrivers
+          );
+
           // Update the local data with complete drivers from server
-          setTableData((prevData) =>
-            prevData.map((driver) => {
+          setTableData((prevData) => {
+            const newData = prevData.map((driver) => {
               const serverUpdated = result.updatedDrivers?.find(
                 (d) => String(d.id) === String(driver.id)
               );
+              // Log each driver update
+              if (serverUpdated) {
+                console.log(`Updating driver ${driver.id}:`, {
+                  previousCompany: driver.company_name,
+                  newCompany: serverUpdated.company_name,
+                  previousDocs: driver.driver_licenses?.length || 0,
+                  newDocs: serverUpdated.driver_licenses?.length || 0,
+                });
+              }
               return serverUpdated || driver;
-            })
-          );
+            });
+
+            console.log("Updated table data after deactivation:", newData);
+            return newData;
+          });
         }
 
-        // Refresh data to ensure consistency
-        await refreshData();
+        // Reset selection
+        setRowSelection({});
+        setSelectedDriverRow(null);
       } else {
-        // Revert optimistic update on error by restoring original drivers
-        originalDrivers.forEach((driver) => {
-          updateDriversOptimistically([Number(driver.id)], driver);
-        });
-
+        console.error("Failed to deactivate drivers:", result.error);
         toast({
           title: "Error",
-          description: result.error || "Failed to deactivate drivers",
+          description: `Failed to deactivate drivers: ${result.error}`,
           variant: "destructive",
         });
       }
@@ -266,13 +266,10 @@ export function DriversDataTable({ data: initialData }: DriversDataTableProps) {
       console.error("Error deactivating drivers:", error);
       toast({
         title: "Error",
-        description: "An unexpected error occurred while deactivating drivers",
+        description: "Failed to deactivate drivers. Please try again.",
         variant: "destructive",
       });
     } finally {
-      // Clear selection state
-      setRowSelection({});
-      setSelectedDriverRow(null);
       setIsProcessing(false);
     }
   };
@@ -356,15 +353,38 @@ export function DriversDataTable({ data: initialData }: DriversDataTableProps) {
       .filter(Boolean);
 
     // Add the selected row's ID if present and not already included
+    let driverIds = [...rowSelectedIds];
     if (
       selectedDriverRow?.id &&
       !rowSelectedIds.includes(Number(selectedDriverRow.id))
     ) {
-      return [...rowSelectedIds, Number(selectedDriverRow.id)];
+      driverIds = [...rowSelectedIds, Number(selectedDriverRow.id)];
     }
 
-    return rowSelectedIds;
-  }, [rowSelection, tableData, selectedDriverRow]);
+    // Update selected ids state
+    setSelectedIds(driverIds);
+
+    // Also update selectedDrivers state with actual driver objects
+    const driverObjects = driverIds.reduce(
+      (acc, id) => {
+        const driver = tableData.find((d) => Number(d.id) === id);
+        if (driver) {
+          acc[String(id)] = driver;
+        }
+        return acc;
+      },
+      {} as Record<string, Driver>
+    );
+    setSelectedDrivers(driverObjects);
+
+    return driverIds;
+  }, [
+    rowSelection,
+    tableData,
+    selectedDriverRow,
+    setSelectedIds,
+    setSelectedDrivers,
+  ]);
 
   // Determine if all selected drivers have the same status
   const { allSelectedActive, allSelectedInactive } = useMemo(() => {
@@ -409,9 +429,9 @@ export function DriversDataTable({ data: initialData }: DriversDataTableProps) {
       }
 
       if (action === "activate") {
-        await handleActivateSelected(selectedIds);
+        await handleActivateSelected();
       } else {
-        await handleDeactivateSelected(selectedIds);
+        await handleDeactivateSelected();
       }
 
       // Clear all selection states

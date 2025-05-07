@@ -668,7 +668,22 @@ export function DataTable<TData>({
 
   const updateDriverOptimistically = useCallback(
     (id: string, updates: Partial<Driver>) => {
-      contextSetProcessingDriver(id, true);
+      console.log(
+        "updateDriverOptimistically called in data-table for driver:",
+        id
+      );
+      console.log("Update payload:", {
+        id,
+        hasCompanyInUpdates: !!updates.company_name || !!updates.companies,
+        companyName: updates.company_name,
+        companies: updates.companies,
+        licenseCount: updates.driver_licenses?.length || 0,
+      });
+
+      // Force a micro-task delay to ensure React state updates properly
+      setTimeout(() => {
+        contextSetProcessingDriver(id, true);
+      }, 0);
     },
     [contextSetProcessingDriver]
   );
@@ -918,13 +933,23 @@ export function DataTable<TData>({
                                 data: Partial<Driver>
                               ) => {
                                 try {
-                                  return await updateDriverAction(id, data);
+                                  const response = await updateDriverAction(
+                                    id,
+                                    data
+                                  );
+                                  return response; // Just return the response directly since it already has the right shape
                                 } catch (error) {
                                   console.error(
                                     "Failed to update driver:",
                                     error
                                   );
-                                  throw error;
+                                  return {
+                                    success: false,
+                                    error:
+                                      error instanceof Error
+                                        ? error.message
+                                        : "Unknown error",
+                                  };
                                 }
                               }}
                               onViewDetails={
@@ -1120,7 +1145,14 @@ interface QuickActionsProps {
   processingDrivers: Record<string, boolean>;
   setProcessingDriver: (id: string, processing: boolean) => void;
   updateDriverOptimistically: (id: string, updates: Partial<Driver>) => void;
-  updateDrivers: (id: number, data: Partial<Driver>) => Promise<Driver>;
+  updateDrivers: (
+    id: number,
+    data: Partial<Driver>
+  ) => Promise<{
+    success: boolean;
+    driver?: Driver;
+    error?: string;
+  }>;
   onViewDetails?: (driver: Driver) => void;
 }
 
@@ -1141,29 +1173,50 @@ function QuickActions({
   const driverId = String(driver.id);
   const isProcessing = processingDrivers[driverId] || localProcessing;
 
+  // Log driver data initially to help debug the issue
+  useEffect(() => {
+    console.log(`QuickActions mounted for driver ${driverId}:`, {
+      hasCompanyName: !!driver.company_name,
+      companyName: driver.company_name,
+      licenseCount: driver.driver_licenses?.length || 0,
+      medicalCardsCount: driver.medical_cards?.length || 0,
+      mvrFilesCount: driver.mvr_files?.length || 0,
+      status: driver.status,
+    });
+  }, [driver, driverId]);
+
   // Handle status toggle with optimistic updates
   const handleStatusToggle = useCallback(async () => {
     try {
       console.log(`Starting status toggle for driver ${driverId}`);
       const newStatus = driver.status === "active" ? "inactive" : "active";
 
+      // Log the complete driver object before any changes
+      console.log(`Original driver before status update:`, {
+        id: driver.id,
+        name: driver.name,
+        companyName: driver.company_name,
+        companyId: driver.company_id,
+        licenseCount: driver.driver_licenses?.length || 0,
+        medicalCardsCount: driver.medical_cards?.length || 0,
+        mvrFilesCount: driver.mvr_files?.length || 0,
+        status: driver.status,
+        companies: driver.companies,
+      });
+
       // Set both states to true before any updates
       setLocalProcessing(true);
       setProcessingDriver(driverId, true);
       console.log(`Set processing states to true for driver ${driverId}`);
 
-      // Store a complete copy of the original driver
+      // Store a complete copy of the original driver for rollback if needed
       const originalDriver = JSON.parse(JSON.stringify(driver));
 
-      // Create a complete copy with just the status changed
-      const updatedDriver = {
+      // Apply an optimistic update first for better UX
+      updateDriverOptimistically(driverId, {
         ...originalDriver,
-        status: newStatus as "active" | "inactive" | "terminated" | "pending",
-        updated_at: new Date().toISOString(),
-      };
-
-      // Apply the complete driver update directly
-      updateDriverOptimistically(driverId, updatedDriver);
+        status: newStatus,
+      });
       console.log(`Applied optimistic update for driver ${driverId}`);
 
       // Call the API with just the status change
@@ -1173,8 +1226,44 @@ function QuickActions({
 
       console.log(`API call completed for driver ${driverId}`, response);
 
-      if (!response) {
-        throw new Error("Failed to update driver status");
+      // Check for success and handle potential errors
+      if (!response.success) {
+        throw new Error(response.error || "Failed to update driver status");
+      }
+
+      // If we have a complete driver object in the response, use it to update the UI
+      if (response.driver) {
+        console.log(`Received complete driver data from server:`, {
+          id: response.driver.id,
+          name: response.driver.name,
+          companyName: response.driver.company_name,
+          companyId: response.driver.company_id,
+          licenseCount: response.driver.driver_licenses?.length || 0,
+          medicalCardsCount: response.driver.medical_cards?.length || 0,
+          mvrFilesCount: response.driver.mvr_files?.length || 0,
+          status: response.driver.status,
+          companies: response.driver.companies,
+        });
+
+        // IMPORTANT: Use the complete driver data from the server (including company and documents)
+        updateDriverOptimistically(driverId, response.driver);
+
+        // Additional debug output post-update
+        setTimeout(() => {
+          // Access current driver data in the row again
+          const updatedDriver = row.original;
+          console.log(`Driver data after update:`, {
+            id: updatedDriver.id,
+            name: updatedDriver.name,
+            companyName: updatedDriver.company_name,
+            companyId: updatedDriver.company_id,
+            licenseCount: updatedDriver.driver_licenses?.length || 0,
+            medicalCardsCount: updatedDriver.medical_cards?.length || 0,
+            mvrFilesCount: updatedDriver.mvr_files?.length || 0,
+            status: updatedDriver.status,
+            hasCompanies: !!updatedDriver.companies,
+          });
+        }, 500);
       }
 
       // Show success state
@@ -1195,17 +1284,12 @@ function QuickActions({
         setLocalProcessing(false);
         setProcessingDriver(driverId, false);
         console.log(`Reset processing states for driver ${driverId}`);
-
-        // Force a complete data refresh after the UI updates are done
-        router.refresh();
-        refreshDrivers(true);
       }, 300); // Short delay so user can see the success animation
     } catch (err) {
       console.error(`Error updating driver ${driverId}:`, err);
 
       // Revert to original status on error by restoring the complete original driver
-      const originalDriver = JSON.parse(JSON.stringify(driver));
-      updateDriverOptimistically(driverId, originalDriver);
+      updateDriverOptimistically(driverId, driver);
 
       toast({
         title: "Error",
@@ -1216,10 +1300,6 @@ function QuickActions({
       // Reset processing states on error
       setLocalProcessing(false);
       setProcessingDriver(driverId, false);
-
-      // Force a complete data refresh to ensure UI is in sync
-      router.refresh();
-      refreshDrivers(true);
     }
   }, [
     driver,
@@ -1228,8 +1308,7 @@ function QuickActions({
     updateDriverOptimistically,
     updateDrivers,
     toast,
-    router,
-    refreshDrivers,
+    row,
   ]);
 
   // Show loading if either state is true

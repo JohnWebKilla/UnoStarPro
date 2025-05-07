@@ -122,8 +122,8 @@ export function DriversHeader({
           variant: "destructive",
         });
       }
-      // Refresh drivers to get the correct state
-      refreshDrivers();
+      // Comment out refresh to prevent loss of company names and document counts
+      // refreshDrivers();
       throw error; // Re-throw to be handled by batch update
     }
   };
