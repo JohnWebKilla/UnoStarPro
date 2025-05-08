@@ -18,6 +18,7 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
+  FormDescription,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import {
@@ -27,7 +28,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { PlusCircle, Loader2 } from "lucide-react";
+import { PlusCircle, Loader2, Upload } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useDrivers } from "./DriversClientProvider";
@@ -39,6 +40,13 @@ import {
 } from "@/lib/utils/phone-format";
 import { ImportDrivers } from "./ImportDrivers";
 import { useCompanies } from "@/app/(protected)/Companies/hooks/useCompanies";
+import { Checkbox } from "@/components/ui/checkbox";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import {
+  SubscriptionFrequency,
+  SUBSCRIPTION_FREQUENCY_OPTIONS,
+} from "../types";
+import { Label } from "@/components/ui/label";
 
 const driverFormSchema = z.object({
   company_id: z.coerce.number({
@@ -66,7 +74,13 @@ const driverFormSchema = z.object({
       val === "" || val === null || val === undefined ? 0 : Number(val),
     z.number().min(0, "Weekly price must be a positive number")
   ),
+  subscription_frequency: z.enum(["weekly", "monthly"]).default("weekly"),
   status: z.enum(["pending", "active", "inactive"]),
+  hire_date: z.string().optional(),
+  upload_documents: z.boolean().default(false),
+  license_file: z.instanceof(File).optional().nullable(),
+  medical_card_file: z.instanceof(File).optional().nullable(),
+  mvr_file: z.instanceof(File).optional().nullable(),
 });
 
 type DriverFormValues = z.infer<typeof driverFormSchema>;
@@ -92,9 +106,23 @@ export function AddDriverDialog({ onDriverAdded }: AddDriverDialogProps) {
       truck_number: "",
       solo_or_team: "solo",
       subscription_amount: 0,
+      subscription_frequency: "weekly",
       status: "pending",
+      hire_date: new Date().toISOString().split("T")[0],
+      upload_documents: false,
+      license_file: null,
+      medical_card_file: null,
+      mvr_file: null,
     },
   });
+
+  const uploadDocuments = form.watch("upload_documents");
+
+  // Format phone number as user types
+  const handlePhoneInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const formattedValue = formatPhoneNumber(e.target.value);
+    form.setValue("phone_number", formattedValue);
+  };
 
   const onSubmit = async (values: z.infer<typeof driverFormSchema>) => {
     try {
@@ -108,24 +136,80 @@ export function AddDriverDialog({ onDriverAdded }: AddDriverDialogProps) {
         values.name
       );
 
-      const response = await fetch("/api/drivers", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          ...values,
-          phone_number: normalizedPhone,
-        }),
-      });
+      // Remove form-only fields that don't exist in the database
+      const {
+        upload_documents,
+        license_file,
+        medical_card_file,
+        mvr_file,
+        ...driverData
+      } = values;
 
-      if (!response.ok) {
-        throw new Error("Failed to create driver");
+      // Create FormData if documents are being uploaded
+      if (values.upload_documents) {
+        const formData = new FormData();
+
+        // Add driver details to FormData
+        formData.append(
+          "driverData",
+          JSON.stringify({
+            ...driverData,
+            phone_number: normalizedPhone,
+          })
+        );
+
+        // Add files if they exist
+        if (values.license_file) {
+          formData.append("license_file", values.license_file);
+        }
+
+        if (values.medical_card_file) {
+          formData.append("medical_card_file", values.medical_card_file);
+        }
+
+        if (values.mvr_file) {
+          formData.append("mvr_file", values.mvr_file);
+        }
+
+        const response = await fetch("/api/drivers/with-documents", {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error("API error response:", errorText);
+          throw new Error(`Failed to create driver: ${errorText}`);
+        }
+
+        const newDriver = await response.json();
+        console.log(
+          "✅ New driver with documents created successfully:",
+          newDriver
+        );
+      } else {
+        // Regular driver creation without documents
+        const response = await fetch("/api/drivers", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            ...driverData,
+            phone_number: normalizedPhone,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error("API error response:", errorText);
+          throw new Error(`Failed to create driver: ${errorText}`);
+        }
+
+        // Get the newly created driver from the response
+        const newDriver = await response.json();
+        console.log("✅ New driver created successfully:", newDriver);
       }
-
-      // Get the newly created driver from the response
-      const newDriver = await response.json();
-      console.log("✅ New driver created successfully:", newDriver);
 
       // Clear all caches
       await clearDriverCaches();
@@ -171,7 +255,7 @@ export function AddDriverDialog({ onDriverAdded }: AddDriverDialogProps) {
           Add Driver
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[600px]">
+      <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Add New Driver</DialogTitle>
         </DialogHeader>
@@ -196,7 +280,9 @@ export function AddDriverDialog({ onDriverAdded }: AddDriverDialogProps) {
                   name="company_id"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Company</FormLabel>
+                      <FormLabel>
+                        Company <span className="text-red-500">*</span>
+                      </FormLabel>
                       <Select
                         onValueChange={(value) => {
                           const numValue = parseInt(value);
@@ -240,7 +326,9 @@ export function AddDriverDialog({ onDriverAdded }: AddDriverDialogProps) {
                   name="name"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Name</FormLabel>
+                      <FormLabel>
+                        Name <span className="text-red-500">*</span>
+                      </FormLabel>
                       <FormControl>
                         <Input
                           placeholder="Driver's full name"
@@ -250,8 +338,7 @@ export function AddDriverDialog({ onDriverAdded }: AddDriverDialogProps) {
                             const words = e.target.value.split(" ");
                             const capitalizedWords = words.map(
                               (word) =>
-                                word.charAt(0).toUpperCase() +
-                                word.slice(1).toLowerCase()
+                                word.charAt(0).toUpperCase() + word.slice(1)
                             );
                             field.onChange(capitalizedWords.join(" "));
                           }}
@@ -267,17 +354,20 @@ export function AddDriverDialog({ onDriverAdded }: AddDriverDialogProps) {
                   name="phone_number"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Phone Number</FormLabel>
+                      <FormLabel>
+                        Phone Number <span className="text-red-500">*</span>
+                      </FormLabel>
                       <FormControl>
                         <Input
-                          placeholder="(555) 555-5555"
+                          placeholder="(123) 456-7890"
                           {...field}
-                          onChange={(e) => {
-                            const formatted = formatPhoneNumber(e.target.value);
-                            field.onChange(formatted);
-                          }}
+                          onChange={(e) => handlePhoneInput(e)}
+                          maxLength={14} // (XXX) XXX-XXXX
                         />
                       </FormControl>
+                      <FormDescription>
+                        Enter a 10-digit phone number
+                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -288,9 +378,11 @@ export function AddDriverDialog({ onDriverAdded }: AddDriverDialogProps) {
                   name="truck_number"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Truck Number</FormLabel>
+                      <FormLabel>
+                        Truck Number <span className="text-red-500">*</span>
+                      </FormLabel>
                       <FormControl>
-                        <Input placeholder="Truck number" {...field} />
+                        <Input placeholder="Enter truck number" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -302,7 +394,9 @@ export function AddDriverDialog({ onDriverAdded }: AddDriverDialogProps) {
                   name="solo_or_team"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Driver Type</FormLabel>
+                      <FormLabel>
+                        Driver Type <span className="text-red-500">*</span>
+                      </FormLabel>
                       <Select
                         onValueChange={field.onChange}
                         defaultValue={field.value}
@@ -322,20 +416,97 @@ export function AddDriverDialog({ onDriverAdded }: AddDriverDialogProps) {
                   )}
                 />
 
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="subscription_amount"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Subscription Amount</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="number"
+                            placeholder="0.00"
+                            {...field}
+                            onChange={(e) => {
+                              field.onChange(
+                                e.target.value === ""
+                                  ? 0
+                                  : parseFloat(e.target.value)
+                              );
+                            }}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="subscription_frequency"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Billing Frequency</FormLabel>
+                        <Select
+                          onValueChange={field.onChange}
+                          defaultValue={field.value}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select frequency" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="weekly">Weekly</SelectItem>
+                            <SelectItem value="monthly">Monthly</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
                 <FormField
                   control={form.control}
-                  name="subscription_amount"
+                  name="status"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Weekly Price</FormLabel>
+                      <FormLabel>
+                        Status <span className="text-red-500">*</span>
+                      </FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        defaultValue={field.value}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select status" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="pending">Pending</SelectItem>
+                          <SelectItem value="active">Active</SelectItem>
+                          <SelectItem value="inactive">Inactive</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="hire_date"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Hire Date</FormLabel>
                       <FormControl>
                         <Input
-                          type="number"
-                          placeholder="0.00"
+                          type="date"
                           {...field}
-                          onChange={(e) =>
-                            field.onChange(parseFloat(e.target.value))
-                          }
+                          defaultValue={new Date().toISOString().split("T")[0]}
                         />
                       </FormControl>
                       <FormMessage />
@@ -343,8 +514,107 @@ export function AddDriverDialog({ onDriverAdded }: AddDriverDialogProps) {
                   )}
                 />
 
+                <FormField
+                  control={form.control}
+                  name="upload_documents"
+                  render={({ field }) => (
+                    <FormItem className="flex flex-row items-start space-x-3 space-y-0 py-2">
+                      <FormControl>
+                        <Checkbox
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                      <div className="space-y-1 leading-none">
+                        <FormLabel>Upload Documents</FormLabel>
+                        <FormDescription>
+                          Add driver license, medical card, and MVR
+                        </FormDescription>
+                      </div>
+                    </FormItem>
+                  )}
+                />
+
+                {uploadDocuments && (
+                  <div className="space-y-4 p-3 border rounded-md bg-slate-50 dark:bg-slate-900">
+                    <h3 className="font-medium">Driver Documents</h3>
+
+                    <FormField
+                      control={form.control}
+                      name="license_file"
+                      render={({
+                        field: { value, onChange, ...fieldProps },
+                      }) => (
+                        <FormItem>
+                          <FormLabel>Driver License</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="file"
+                              accept=".pdf,.jpg,.jpeg,.png"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0] || null;
+                                onChange(file);
+                              }}
+                              {...fieldProps}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="medical_card_file"
+                      render={({
+                        field: { value, onChange, ...fieldProps },
+                      }) => (
+                        <FormItem>
+                          <FormLabel>Medical Card</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="file"
+                              accept=".pdf,.jpg,.jpeg,.png"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0] || null;
+                                onChange(file);
+                              }}
+                              {...fieldProps}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="mvr_file"
+                      render={({
+                        field: { value, onChange, ...fieldProps },
+                      }) => (
+                        <FormItem>
+                          <FormLabel>MVR File</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="file"
+                              accept=".pdf,.jpg,.jpeg,.png"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0] || null;
+                                onChange(file);
+                              }}
+                              {...fieldProps}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                )}
+
                 <DialogFooter>
-                  <Button type="submit" disabled={isLoading}>
+                  <Button type="submit" disabled={isLoading} className="w-full">
                     {isLoading ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -358,8 +628,15 @@ export function AddDriverDialog({ onDriverAdded }: AddDriverDialogProps) {
               </form>
             </Form>
           </TabsContent>
-          <TabsContent value="import">
-            <ImportDrivers />
+          <TabsContent value="import" className="mt-4">
+            <ImportDrivers
+              onImportComplete={() => {
+                setOpen(false);
+                if (onDriverAdded) {
+                  onDriverAdded();
+                }
+              }}
+            />
           </TabsContent>
         </Tabs>
       </DialogContent>

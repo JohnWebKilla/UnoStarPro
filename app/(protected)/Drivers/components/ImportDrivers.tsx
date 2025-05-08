@@ -143,7 +143,12 @@ const extractHeaders = (data: Array<Record<string, any>>): string[] => {
   return headers;
 };
 
-export function ImportDrivers() {
+// Define props interface
+interface ImportDriversProps {
+  onImportComplete?: () => void;
+}
+
+export function ImportDrivers({ onImportComplete }: ImportDriversProps) {
   const [file, setFile] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [manualDrivers, setManualDrivers] = useState<ImportDriverData[]>([]);
@@ -298,6 +303,11 @@ export function ImportDrivers() {
         setColumnMapping({});
         setFileContent("");
         setFileType(null);
+
+        // Call onImportComplete if provided
+        if (onImportComplete) {
+          onImportComplete();
+        }
       } else {
         toast({
           title: "Error",
@@ -341,6 +351,11 @@ export function ImportDrivers() {
           description: `Successfully created ${result.imported} driver(s)`,
         });
         setManualDrivers([]);
+
+        // Call onImportComplete if provided
+        if (onImportComplete) {
+          onImportComplete();
+        }
       } else {
         toast({
           title: "Error",
