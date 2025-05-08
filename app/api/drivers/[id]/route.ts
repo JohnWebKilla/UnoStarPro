@@ -167,6 +167,15 @@ export async function DELETE(
     // Properly await the params object
     const { id } = await params;
 
+    // First, get the driver details before deletion to preserve name
+    const { data: driverToDelete } = await supabase
+      .from("drivers")
+      .select("name, id")
+      .eq("id", id)
+      .single();
+
+    const driverName = driverToDelete?.name || "Unknown driver";
+
     // Delete the driver
     const { error } = await supabase.from("drivers").delete().eq("id", id);
 
@@ -182,7 +191,11 @@ export async function DELETE(
     await clearDriverCache(parseInt(id));
     await clearDriverListCache();
 
-    return NextResponse.json({ success: true, id });
+    return NextResponse.json({
+      success: true,
+      id,
+      deletedDriverName: driverName,
+    });
   } catch (error) {
     console.error("Error in driver DELETE route:", error);
     return NextResponse.json(

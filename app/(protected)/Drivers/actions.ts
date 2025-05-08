@@ -14,9 +14,12 @@ import {
   clearDriverCachesAction,
   updateDriverStatusAction,
   updateDriverStatusBatchAction,
+  syncDriverWithStripeAction,
+  revalidateDriverPathsAction,
 } from "./server-actions";
 import { Driver, CacheResponse } from "./types";
 import { DRIVER_LIST_KEY } from "./redis-client";
+import { getRealTimeClient } from "@/utils/supabase/client";
 
 // Get drivers with client-side caching
 export async function getDrivers(
@@ -221,39 +224,83 @@ export async function getDriver(
 export async function createDriver(
   driverData: Partial<Driver>
 ): Promise<Driver | null> {
-  const driver = await createDriverAction(driverData);
-
-  // Invalidate client caches
   try {
-    await deleteClientCache("drivers:client-list");
-  } catch (error) {
-    console.error("Error invalidating client cache:", error);
-  }
+    // Check for recent duplicates in localStorage
+    if (driverData.name && driverData.phone_number && driverData.truck_number) {
+      const key =
+        `recent-driver:${driverData.name}:${driverData.phone_number}`.toLowerCase();
+      const existingTimestamp = localStorage.getItem(key);
 
-  return driver as Driver | null;
+      if (existingTimestamp) {
+        const timestamp = parseInt(existingTimestamp, 10);
+        const isRecent = Date.now() - timestamp < 5000; // Within last 5 seconds
+
+        if (isRecent) {
+          console.warn(
+            "Preventing duplicate driver creation - similar driver was just created"
+          );
+          return null;
+        }
+      }
+
+      // Mark this driver as recently created to prevent duplicates
+      localStorage.setItem(key, Date.now().toString());
+
+      // Clean up after 30 seconds
+      setTimeout(() => {
+        localStorage.removeItem(key);
+      }, 30000);
+    }
+
+    // Call server action
+    console.log("Creating driver:", driverData.name);
+    const driver = await createDriverAction(driverData);
+
+    // Set a special flag to help real-time handler identify this driver
+    if (driver && driver.id) {
+      try {
+        localStorage.setItem(
+          `driver:created-by-form:${driver.id}`,
+          Date.now().toString()
+        );
+        console.log(`✓ Marked driver ${driver.id} as created by form`);
+
+        // Clean up after 10 seconds
+        setTimeout(() => {
+          localStorage.removeItem(`driver:created-by-form:${driver.id}`);
+        }, 10000);
+      } catch (e) {
+        console.error("Error setting localStorage flag:", e);
+      }
+    }
+
+    // Invalidate client caches
+    try {
+      await deleteClientCache("drivers:client-list");
+
+      // Add a small delay to let server-side cache invalidate
+      await new Promise((resolve) => setTimeout(resolve, 300));
+
+      // Force a revalidation of all paths related to drivers
+      const result = await revalidateDriverPathsAction();
+      console.log(`✓ Path revalidation result:`, result);
+    } catch (e) {
+      console.error("Cache invalidation error:", e);
+    }
+
+    return driver;
+  } catch (error) {
+    console.error("Error in createDriver client action:", error);
+    throw error;
+  }
 }
 
 // Update a driver
 export async function updateDriver(
   driverId: number,
   driverData: Partial<Driver>
-): Promise<Driver | null> {
-  const driver = await updateDriverAction(driverId, driverData);
-
-  // Invalidate client caches
-  try {
-    await deleteClientCache("drivers:client-list");
-    await deleteClientCache(`driver:client-${driverId}`);
-  } catch (error) {
-    console.error("Error invalidating client cache:", error);
-  }
-
-  return driver as Driver | null;
-}
-
-// Delete a driver
-export async function deleteDriver(driverId: number): Promise<boolean> {
-  const result = await deleteDriverAction(driverId);
+): Promise<{ success: boolean; driver?: Driver; error?: string }> {
+  const result = await updateDriverAction(driverId, driverData);
 
   // Invalidate client caches
   try {
@@ -264,6 +311,73 @@ export async function deleteDriver(driverId: number): Promise<boolean> {
   }
 
   return result;
+}
+
+// Delete a driver
+export async function deleteDriver(
+  driverId: number
+): Promise<{ success: boolean; deletedDriverName?: string }> {
+  try {
+    // First mark as deleted in localStorage to handle refresh issues
+    const driverIdStr = String(driverId);
+
+    // Store in localStorage to persist through refreshes
+    try {
+      // Add to deleted drivers list
+      const storedIds = JSON.parse(
+        localStorage.getItem("deleted-driver-ids") || "[]"
+      );
+      if (!storedIds.includes(driverIdStr)) {
+        localStorage.setItem(
+          "deleted-driver-ids",
+          JSON.stringify([...storedIds, driverIdStr])
+        );
+        console.log(`Added driver ${driverId} to known deleted drivers list`);
+      }
+    } catch (localStorageError) {
+      console.error(
+        "Error updating deleted drivers in localStorage:",
+        localStorageError
+      );
+    }
+
+    // Call server action to actually delete the driver
+    const result = await deleteDriverAction(driverId);
+
+    // Invalidate client caches
+    try {
+      await deleteClientCache("drivers:client-list");
+      await deleteClientCache(`driver:client-${driverId}`);
+
+      // Also try to clear local storage cache
+      try {
+        localStorage.removeItem(`driver:client-${driverId}`);
+        localStorage.removeItem(`driver:client-${driverId}:timestamp`);
+        localStorage.removeItem("drivers:client-list");
+        localStorage.removeItem("drivers:client-list:timestamp");
+      } catch (localStorageError) {
+        console.error("Error clearing localStorage cache:", localStorageError);
+      }
+    } catch (error) {
+      console.error("Error invalidating client cache:", error);
+    }
+
+    // Wait for revalidation to complete
+    try {
+      await revalidateDriverPathsAction();
+      console.log("✅ All driver paths revalidated after deletion");
+    } catch (error) {
+      console.error("Error revalidating paths after driver deletion:", error);
+    }
+
+    return result;
+  } catch (error) {
+    console.error(
+      `Error in deleteDriver client action for driver ${driverId}:`,
+      error
+    );
+    return { success: false };
+  }
 }
 
 // Server-side cache clearing wrapper
@@ -286,4 +400,6 @@ export {
   clearDriverCachesAction,
   updateDriverStatusAction,
   updateDriverStatusBatchAction,
+  syncDriverWithStripeAction,
+  revalidateDriverPathsAction,
 } from "./server-actions";

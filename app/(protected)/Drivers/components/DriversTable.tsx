@@ -406,7 +406,33 @@ export default function DriversTable() {
   };
 
   const handleDriverDeleted = async () => {
-    await refreshDrivers();
+    // Store the name of the driver that was just deleted to help debug the "Unknown driver" issue
+    const justDeletedDriverName = deletingDriver?.name || "No name available";
+    console.log(`Driver deleted via dialog: ${justDeletedDriverName}`);
+
+    try {
+      // Store the name in localStorage temporarily to help identify this driver in real-time events
+      if (deletingDriver?.id) {
+        localStorage.setItem(
+          `recently-deleted-driver-${deletingDriver.id}`,
+          justDeletedDriverName
+        );
+        // Clean up after 10 seconds
+        setTimeout(() => {
+          localStorage.removeItem(
+            `recently-deleted-driver-${deletingDriver.id}`
+          );
+        }, 10000);
+      }
+
+      // Clear the currently selected driver if we're deleting it
+      setDeletingDriver(null);
+
+      // Refresh the drivers list
+      await refreshDrivers(true);
+    } catch (error) {
+      console.error("Error in handleDriverDeleted:", error);
+    }
   };
 
   const handleSyncAllStripe = async () => {

@@ -21,6 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useDrivers } from "../hooks/useDrivers";
 
 // Define the required fields and their descriptions
 const REQUIRED_FIELDS = {
@@ -153,6 +154,7 @@ export function ImportDrivers() {
   const { toast } = useToast();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [isLoadingCompanies, setIsLoadingCompanies] = useState(false);
+  const { temporarilyDisableRealtimeInserts } = useDrivers();
 
   // Fetch companies on component mount
   useEffect(() => {
@@ -269,6 +271,10 @@ export function ImportDrivers() {
 
     setIsLoading(true);
     try {
+      // Disable real-time inserts for 5 seconds to prevent duplicates
+      temporarilyDisableRealtimeInserts();
+      console.log("🔒 Disabled real-time inserts for file import");
+
       const rawData =
         fileType === "json"
           ? parseJSONData(fileContent)
@@ -323,6 +329,10 @@ export function ImportDrivers() {
 
     setIsLoading(true);
     try {
+      // Disable real-time inserts for 5 seconds to prevent duplicates
+      temporarilyDisableRealtimeInserts();
+      console.log("🔒 Disabled real-time inserts for manual batch import");
+
       const result = await batchCreateDriversAction(cleanedDrivers);
 
       if (result.success) {

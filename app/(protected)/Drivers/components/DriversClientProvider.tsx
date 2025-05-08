@@ -36,6 +36,8 @@ interface DriversContextType {
   selectedDriver: Driver | null;
   setSelectedDriver: (driver: Driver | null) => void;
   getDriverById: (id: string | number) => Driver | null;
+  temporarilyDisableRealtimeInserts: () => void;
+  markDriverAsDeleted: (driverId: string | number) => void;
 }
 
 const DriversContext = createContext<DriversContextType | undefined>(undefined);
@@ -107,6 +109,11 @@ export function DriversClientProvider({
   const supabase = getRealTimeClient();
   const [lastUpdateTime, setLastUpdateTime] = useState<number>(Date.now());
   const REFRESH_THRESHOLD = 5 * 60 * 1000; // Only refresh after 5 minutes of inactivity
+  const [disableRealtimeInserts, setDisableRealtimeInserts] =
+    useState<boolean>(false);
+  const [deletedDriverIds, setDeletedDriverIds] = useState<Set<string>>(
+    new Set()
+  );
 
   const setProcessingDriver = useCallback((id: string, processing: boolean) => {
     setProcessingDrivers((prev) => ({ ...prev, [id]: processing }));
@@ -302,6 +309,54 @@ export function DriversClientProvider({
     }
   }, []);
 
+  // Add this function to mark a driver as deleted
+  const markDriverAsDeleted = useCallback((driverId: string | number) => {
+    const driverIdStr = String(driverId);
+    setDeletedDriverIds((prevIds) => {
+      const newIds = new Set(prevIds);
+      newIds.add(driverIdStr);
+
+      // Store in localStorage for persistence across page refreshes
+      try {
+        const storedIds = JSON.parse(
+          localStorage.getItem("deleted-driver-ids") || "[]"
+        );
+        if (!storedIds.includes(driverIdStr)) {
+          localStorage.setItem(
+            "deleted-driver-ids",
+            JSON.stringify([...storedIds, driverIdStr])
+          );
+        }
+      } catch (err) {
+        console.error("Error updating deleted drivers in localStorage:", err);
+      }
+
+      return newIds;
+    });
+
+    // Also remove the driver from our local state immediately
+    setDrivers((current) =>
+      current.filter((d) => String(d.id) !== driverIdStr)
+    );
+
+    console.log(`Marked driver ${driverId} as permanently deleted`);
+  }, []);
+
+  // Load deleted driver IDs from localStorage on mount
+  useEffect(() => {
+    try {
+      const storedIds = JSON.parse(
+        localStorage.getItem("deleted-driver-ids") || "[]"
+      );
+      if (storedIds.length > 0) {
+        setDeletedDriverIds(new Set(storedIds));
+        console.log(`Loaded ${storedIds.length} known deleted driver IDs`);
+      }
+    } catch (err) {
+      console.error("Error loading deleted driver IDs from localStorage:", err);
+    }
+  }, []);
+
   const refreshDrivers = async (skipCache?: boolean) => {
     try {
       // Don't refresh if we've refreshed recently
@@ -315,6 +370,22 @@ export function DriversClientProvider({
 
       setIsLoading(true);
       console.log("Refreshing drivers data from server");
+
+      // First, make sure we have the latest deleted drivers list from localStorage
+      try {
+        const storedIds = JSON.parse(
+          localStorage.getItem("deleted-driver-ids") || "[]"
+        );
+        if (storedIds.length > 0) {
+          // Update our state with any newly stored IDs
+          setDeletedDriverIds(new Set(storedIds));
+          console.log(
+            `Refreshed deleted drivers list with ${storedIds.length} IDs`
+          );
+        }
+      } catch (err) {
+        console.error("Error refreshing deleted drivers list:", err);
+      }
 
       // Keep a backup of current drivers to maintain company and doc data if needed
       const currentDrivers = [...drivers];
@@ -340,6 +411,11 @@ export function DriversClientProvider({
         await clearDriverCaches();
       }
 
+      // Reload stored deleted IDs to ensure we have the most current list
+      const storedDeletedIds = new Set(
+        JSON.parse(localStorage.getItem("deleted-driver-ids") || "[]")
+      );
+
       // Fetch fresh drivers data from the server including companies
       try {
         const { data: freshData, error: fetchError } = await supabase
@@ -360,8 +436,26 @@ export function DriversClientProvider({
         } else if (freshData && freshData.length > 0) {
           console.log(`Fetched ${freshData.length} drivers from server`);
 
+          // First filter out any drivers that are in our deleted list
+          // (do this early to avoid unnecessary processing)
+          const filteredDrivers = freshData.filter((driver) => {
+            const driverId = String(driver.id);
+            const isDeleted =
+              storedDeletedIds.has(driverId) || deletedDriverIds.has(driverId);
+            if (isDeleted) {
+              console.log(
+                `Filtering out known deleted driver ${driverId} from fetched data`
+              );
+            }
+            return !isDeleted;
+          });
+
+          console.log(
+            `After filtering deleted drivers: ${filteredDrivers.length} of ${freshData.length} remaining`
+          );
+
           // Extract driver IDs for batch document fetching
-          const driverIds = freshData.map((driver) => driver.id);
+          const driverIds = filteredDrivers.map((driver) => driver.id);
 
           // Batch fetch all documents at once
           const [
@@ -392,7 +486,7 @@ export function DriversClientProvider({
           );
 
           // Complete driver objects with all data
-          const completeDrivers = freshData.map((driver) => {
+          const completeDrivers = filteredDrivers.map((driver) => {
             const driverId = String(driver.id);
 
             // Ensure we have company name
@@ -430,16 +524,29 @@ export function DriversClientProvider({
       // Also update the selected driver if we have one
       if (selectedDriver) {
         try {
-          const freshDriver = await getDriverAction(Number(selectedDriver.id));
-          if (freshDriver) {
-            // Update selected driver with fresh data
-            setSelectedDriver(freshDriver);
-
-            // Also update session storage
-            sessionStorage.setItem(
-              "selectedDriver",
-              JSON.stringify(freshDriver)
+          const driverId = Number(selectedDriver.id);
+          // Check if this driver was deleted
+          if (
+            storedDeletedIds.has(String(driverId)) ||
+            deletedDriverIds.has(String(driverId))
+          ) {
+            console.log(
+              `Selected driver ${driverId} was deleted, clearing selection`
             );
+            setSelectedDriver(null);
+            sessionStorage.removeItem("selectedDriver");
+          } else {
+            const freshDriver = await getDriverAction(driverId);
+            if (freshDriver) {
+              // Update selected driver with fresh data
+              setSelectedDriver(freshDriver);
+
+              // Also update session storage
+              sessionStorage.setItem(
+                "selectedDriver",
+                JSON.stringify(freshDriver)
+              );
+            }
           }
         } catch (error) {
           console.error("Failed to refresh selected driver:", error);
@@ -456,147 +563,84 @@ export function DriversClientProvider({
     }
   };
 
-  // Shared update function for realtime updates
+  // Update the shared update function for realtime updates
   const updateFromRealtimeChange = useCallback(
     async (payload: any, event: "UPDATE" | "INSERT" | "DELETE") => {
       try {
         console.log(`Received ${event} event:`, payload);
 
-        // Clear server-side cache
-        await clearDriverCaches();
+        // Always clear caches for all real-time events
+        try {
+          // Clear server-side cache via server action
+          await clearDriverCaches();
 
-        // Fetch fresh data from server
-        const { data: freshData, error: fetchError } = await supabase
-          .from("drivers")
-          .select("*")
-          .order("created_at", { ascending: false });
-
-        if (fetchError) {
-          console.error(
-            `Error fetching updated drivers after ${event}:`,
-            fetchError
-          );
-          return;
-        }
-
-        if (freshData) {
-          console.log(
-            `Updating drivers state with fresh data (${freshData.length} items)`
-          );
-
-          // Create a completely new array to ensure React detects the state change
-          const updatedDrivers = [...freshData];
-          setDrivers(updatedDrivers);
-          console.log(
-            `Updated drivers data after ${event} event`,
-            updatedDrivers
-          );
-
-          // For updates, also update the selectedDriver if it's the same one
-          if (event === "UPDATE") {
-            const updatedRecord = payload.new as Driver;
-
-            // Check if this is the currently selected driver
+          // Clear client-side localStorage cache
+          try {
             if (
-              selectedDriver &&
-              String(selectedDriver.id) === String(updatedRecord.id)
+              payload.eventType === "UPDATE" ||
+              payload.eventType === "DELETE"
             ) {
-              // Deep clone the record to force React to recognize it as a new value
-              const freshDriverCopy = JSON.parse(JSON.stringify(updatedRecord));
-              console.log(
-                "Updating selected driver with real-time data",
-                freshDriverCopy
-              );
+              const driverId =
+                payload.eventType === "DELETE"
+                  ? payload.old.id
+                  : payload.new.id;
 
-              // Update the selected driver with a new object reference
-              setSelectedDriver(freshDriverCopy);
-
-              // Update session storage too (no need to stringify twice)
-              sessionStorage.setItem(
-                "selectedDriver",
-                JSON.stringify(freshDriverCopy)
-              );
+              // Clear individual driver cache
+              localStorage.removeItem(`driver:client-${driverId}`);
+              localStorage.removeItem(`driver:client-${driverId}:timestamp`);
             }
 
-            // Show notification
-            const oldRecord = payload.old as Driver;
-            const changedFields = getChangedFields(oldRecord, updatedRecord);
+            // Always clear list cache for any driver change
+            localStorage.removeItem("drivers:client-list");
+            localStorage.removeItem("drivers:client-list:timestamp");
 
-            if (changedFields.length > 0) {
-              toast({
-                title: "Driver Updated",
-                description: `${updatedRecord.name}: Updated ${changedFields.join(", ")}.`,
-              });
-            } else {
-              toast({
-                title: "Driver Updated",
-                description: `${updatedRecord.name} has been updated.`,
-              });
-            }
+            console.log("✅ Client-side caches cleared for real-time update");
+          } catch (localStorageError) {
+            console.error(
+              "Error clearing localStorage cache:",
+              localStorageError
+            );
           }
-          // For inserts, show appropriate notification
-          else if (event === "INSERT") {
-            const newRecord = payload.new as Driver;
-
-            let details = [];
-            if (newRecord.status) details.push(`Status: ${newRecord.status}`);
-            if (newRecord.type) details.push(`Type: ${newRecord.type}`);
-            if (newRecord.truckNumber)
-              details.push(`Truck: ${newRecord.truckNumber}`);
-
-            const detailsText =
-              details.length > 0 ? ` (${details.join(", ")})` : "";
-
-            toast({
-              title: "New Driver Added",
-              description: `${newRecord.name}${detailsText} has been added.`,
-            });
-          }
-          // For deletes, check if we need to navigate away
-          else if (event === "DELETE") {
-            const oldRecord = payload.old as Driver;
-            const deletedId = String(oldRecord.id);
-
-            // If the deleted driver is the currently selected one, navigate back to list
-            if (selectedDriver && String(selectedDriver.id) === deletedId) {
-              toast({
-                title: "Current Driver Deleted",
-                description:
-                  "The driver you're viewing has been deleted. Redirecting to drivers list.",
-                variant: "destructive",
-              });
-
-              // Clear selected driver
-              setSelectedDriver(null);
-              sessionStorage.removeItem("selectedDriver");
-
-              // Navigate back to drivers list after a brief delay
-              setTimeout(() => {
-                router.push("/Drivers");
-              }, 1500);
-            } else {
-              // Just show notification
-              let statusInfo = oldRecord.status ? ` (${oldRecord.status})` : "";
-
-              toast({
-                title: "Driver Removed",
-                description: `${oldRecord.name}${statusInfo} has been removed from the system.`,
-                variant: "destructive",
-              });
-            }
-          }
-
-          // Force router refresh to update server components
-          router.refresh();
-
-          // Force a re-render by updating last update time with a new Date object
-          setLastUpdateTime(Date.now());
-
-          // Explicitly update all drivers who need processing flags reset
-          setProcessingDrivers({});
-
-          console.log("Realtime update complete - UI should refresh now");
+        } catch (cacheError) {
+          console.error(
+            "Failed to clear caches after real-time update:",
+            cacheError
+          );
         }
+
+        // Special handling for DELETE events - directly remove from state
+        if (event === "DELETE" && payload.old?.id) {
+          const driverId = payload.old.id;
+          console.log(`🗑️ Removing deleted driver ${driverId} from UI state`);
+
+          // Mark as permanently deleted
+          markDriverAsDeleted(driverId);
+
+          // Force clear any caches specifically for this driver both in localStorage and in Redis
+          try {
+            // Local storage
+            localStorage.removeItem(`driver:client-${driverId}`);
+            localStorage.removeItem(`driver:client-${driverId}:timestamp`);
+            localStorage.removeItem(`driver:created-by-form:${driverId}`);
+
+            // Server-side Redis via our action
+            await clearDriverCaches();
+          } catch (err) {
+            console.error(
+              `Error clearing deleted driver ${driverId} caches:`,
+              err
+            );
+          }
+        }
+
+        // Refresh drivers data
+        await refreshDrivers(true);
+
+        // Log to verify refresh was triggered
+        console.log("Refreshed drivers after realtime update");
+
+        // The previous condition was too strict - it only refreshed on specific conditions
+        // Now we'll refresh on any driver table change
       } catch (error) {
         console.error(`Error processing ${event} event:`, error);
       }
@@ -608,6 +652,8 @@ export function DriversClientProvider({
       toast,
       router,
       setProcessingDrivers,
+      refreshDrivers,
+      markDriverAsDeleted,
     ]
   );
 
@@ -634,14 +680,131 @@ export function DriversClientProvider({
           async (payload: RealtimePostgresChangesPayload<Driver>) => {
             console.log("⚡ Realtime update received:", payload);
 
-            // Always refresh drivers on any change
-            await refreshDrivers(false);
+            // Handle the event based on its type
+            if (payload.eventType === "DELETE") {
+              // Special handling for DELETE events
+              console.log("🗑️ DELETE event detected, processing...", payload);
 
-            // Log to verify refresh was triggered
-            console.log("Refreshed drivers after realtime update");
+              // Get the driver ID
+              const driverId = payload.old?.id;
+              if (!driverId) {
+                console.error("DELETE event missing driver ID in payload");
+                return;
+              }
 
-            // The previous condition was too strict - it only refreshed on specific conditions
-            // Now we'll refresh on any driver table change
+              // Mark as permanently deleted in both state and localStorage
+              markDriverAsDeleted(driverId);
+
+              // Force clear any caches specifically for this driver
+              try {
+                // Clear localStorage caches
+                localStorage.removeItem(`driver:client-${driverId}`);
+                localStorage.removeItem(`driver:client-${driverId}:timestamp`);
+                localStorage.removeItem(`driver:created-by-form:${driverId}`);
+
+                // Clear list caches
+                localStorage.removeItem("drivers:client-list");
+                localStorage.removeItem("drivers:client-list:timestamp");
+
+                // Server-side cache clearing
+                await clearDriverCaches();
+
+                // Force update UI by removing this driver from state
+                setDrivers((currentDrivers) =>
+                  currentDrivers.filter(
+                    (driver) => String(driver.id) !== String(driverId)
+                  )
+                );
+
+                // If this was the selected driver, clear selection
+                if (
+                  selectedDriver &&
+                  String(selectedDriver.id) === String(driverId)
+                ) {
+                  setSelectedDriver(null);
+                  sessionStorage.removeItem("selectedDriver");
+                }
+
+                console.log(
+                  `✅ Successfully processed DELETE event for driver ${driverId}`
+                );
+              } catch (err) {
+                console.error(
+                  `Error processing DELETE event for driver ${driverId}:`,
+                  err
+                );
+              }
+
+              return; // Skip the rest of the processing
+            }
+
+            // Handle INSERT and UPDATE events with the standard flow
+            if (
+              payload.eventType === "INSERT" ||
+              payload.eventType === "UPDATE"
+            ) {
+              // Skip processing if this is an INSERT and our list of deleted drivers includes this ID
+              // (this can happen if the DB still has the driver but we've locally marked it as deleted)
+              if (payload.eventType === "INSERT" && payload.new?.id) {
+                const driverId = String(payload.new.id);
+                const storedDeletedIds = new Set(
+                  JSON.parse(localStorage.getItem("deleted-driver-ids") || "[]")
+                );
+
+                if (
+                  storedDeletedIds.has(driverId) ||
+                  deletedDriverIds.has(driverId)
+                ) {
+                  console.log(
+                    `🛑 Ignoring INSERT event for previously deleted driver ${driverId}`
+                  );
+                  return;
+                }
+              }
+
+              // Always clear caches for all real-time events
+              try {
+                // Clear server-side cache via server action
+                await clearDriverCaches();
+
+                // Clear client-side localStorage cache
+                try {
+                  if (payload.eventType === "UPDATE") {
+                    const driverId = payload.new.id;
+
+                    // Clear individual driver cache
+                    localStorage.removeItem(`driver:client-${driverId}`);
+                    localStorage.removeItem(
+                      `driver:client-${driverId}:timestamp`
+                    );
+                  }
+
+                  // Always clear list cache for any driver change
+                  localStorage.removeItem("drivers:client-list");
+                  localStorage.removeItem("drivers:client-list:timestamp");
+
+                  console.log(
+                    "✅ Client-side caches cleared for real-time update"
+                  );
+                } catch (localStorageError) {
+                  console.error(
+                    "Error clearing localStorage cache:",
+                    localStorageError
+                  );
+                }
+              } catch (cacheError) {
+                console.error(
+                  "Failed to clear caches after real-time update:",
+                  cacheError
+                );
+              }
+
+              // Refresh drivers data
+              await refreshDrivers(true);
+
+              // Log to verify refresh was triggered
+              console.log("Refreshed drivers after realtime update");
+            }
           }
         )
         .subscribe((status) => {
@@ -657,7 +820,13 @@ export function DriversClientProvider({
         supabase.removeChannel(channel).catch(console.error);
       }
     };
-  }, [supabase, refreshDrivers]);
+  }, [
+    supabase,
+    refreshDrivers,
+    markDriverAsDeleted,
+    clearDriverCaches,
+    selectedDriver,
+  ]);
 
   // Add a visibility change handler to avoid unnecessary refreshes
   useEffect(() => {
@@ -704,6 +873,17 @@ export function DriversClientProvider({
     };
   }, [refreshDrivers, lastUpdateTime]);
 
+  const temporarilyDisableRealtimeInserts = useCallback(() => {
+    console.log("🛑 Temporarily disabling real-time INSERT handling");
+    setDisableRealtimeInserts(true);
+
+    // Re-enable after 5 seconds
+    setTimeout(() => {
+      console.log("✅ Re-enabling real-time INSERT handling");
+      setDisableRealtimeInserts(false);
+    }, 5000);
+  }, []);
+
   const value: DriversContextType = {
     drivers,
     error,
@@ -722,6 +902,8 @@ export function DriversClientProvider({
     selectedDriver,
     setSelectedDriver,
     getDriverById,
+    temporarilyDisableRealtimeInserts,
+    markDriverAsDeleted,
   };
 
   return (

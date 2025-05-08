@@ -49,9 +49,16 @@ export function DeleteDriverDialog({
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
+      // Get the response data
+      const data = await response.json();
+
+      // Use the returned name or fall back to the original name
+      const displayName =
+        data.deletedDriverName || driverName || "Unknown driver";
+
       toast({
         title: "Driver deleted",
-        description: `${driverName} has been deleted successfully.`,
+        description: `${displayName} has been deleted successfully.`,
       });
 
       // Close dialog and refresh drivers list

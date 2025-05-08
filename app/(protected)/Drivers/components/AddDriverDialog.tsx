@@ -80,7 +80,7 @@ export function AddDriverDialog({ onDriverAdded }: AddDriverDialogProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("manual");
   const { toast } = useToast();
-  const { refreshDrivers } = useDrivers();
+  const { refreshDrivers, temporarilyDisableRealtimeInserts } = useDrivers();
   const { companies } = useCompanies();
 
   const form = useForm<z.infer<typeof driverFormSchema>>({
@@ -101,6 +101,13 @@ export function AddDriverDialog({ onDriverAdded }: AddDriverDialogProps) {
       setIsLoading(true);
       const normalizedPhone = normalizePhoneNumber(values.phone_number);
 
+      // Disable real-time inserts to prevent duplicate drivers
+      temporarilyDisableRealtimeInserts();
+      console.log(
+        "🔒 Disabled real-time inserts before adding driver:",
+        values.name
+      );
+
       const response = await fetch("/api/drivers", {
         method: "POST",
         headers: {
@@ -116,11 +123,24 @@ export function AddDriverDialog({ onDriverAdded }: AddDriverDialogProps) {
         throw new Error("Failed to create driver");
       }
 
+      // Get the newly created driver from the response
+      const newDriver = await response.json();
+      console.log("✅ New driver created successfully:", newDriver);
+
+      // Clear all caches
       await clearDriverCaches();
-      await refreshDrivers();
-      if (onDriverAdded) {
-        await onDriverAdded();
-      }
+
+      // Add a small delay to refresh after real-time event handling is disabled
+      // This ensures we only see one copy of the driver in the UI
+      setTimeout(async () => {
+        await refreshDrivers(true); // Force fresh data
+
+        if (onDriverAdded) {
+          await onDriverAdded();
+        }
+
+        console.log("📋 Driver list refreshed after creation");
+      }, 300);
 
       toast({
         title: "Success",

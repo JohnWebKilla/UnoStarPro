@@ -285,8 +285,49 @@ export async function createDriverAction(
       throw error;
     }
 
-    // Clear cache after creating a new driver
-    await clearDriverListCache();
+    // Auto-connect with Stripe
+    try {
+      await syncDriverWithStripe(driver);
+
+      // Fetch the updated driver with Stripe connection details
+      const { data: updatedDriver } = await supabase
+        .from("drivers")
+        .select("*")
+        .eq("id", driver.id)
+        .single();
+
+      if (updatedDriver) {
+        driver.stripe_product_id = updatedDriver.stripe_product_id;
+        driver.stripe_price_id = updatedDriver.stripe_price_id;
+        driver.stripe_connect_account_id =
+          updatedDriver.stripe_connect_account_id;
+        driver.last_synced_at = updatedDriver.last_synced_at;
+      }
+    } catch (stripeError) {
+      console.error("Error connecting driver with Stripe:", stripeError);
+      // Continue with driver creation even if Stripe connection fails
+    }
+
+    // Clear ALL relevant caches
+    try {
+      await Promise.all([
+        clearDriverCache(driver.id),
+        clearDriverListCache(),
+        clearDriverCachesAction(),
+      ]);
+
+      // Force revalidation of all driver-related paths
+      revalidatePath("/Drivers", "page");
+      revalidatePath(`/Drivers/${driver.id}`, "page");
+      revalidatePath("/api/drivers", "page");
+      revalidatePath(`/api/drivers/${driver.id}`, "page");
+
+      console.log(
+        `Cache cleared and paths revalidated for new driver ${driver.id}`
+      );
+    } catch (cacheError) {
+      console.error("Error clearing caches after driver creation:", cacheError);
+    }
 
     return driver;
   } catch (error) {
@@ -404,8 +445,11 @@ export async function updateDriverAction(
 }
 
 // Delete a driver
-export async function deleteDriverAction(driverId: number): Promise<boolean> {
+export async function deleteDriverAction(
+  driverId: number
+): Promise<{ success: boolean; deletedDriverName?: string }> {
   try {
+    console.log(`🗑️ Deleting driver ${driverId} from database`);
     const supabase = await createClient();
 
     const {
@@ -415,6 +459,15 @@ export async function deleteDriverAction(driverId: number): Promise<boolean> {
     if (!user) {
       throw new Error("Not authenticated");
     }
+
+    // First, get the driver details before deletion to preserve name
+    const { data: driverToDelete } = await supabase
+      .from("drivers")
+      .select("name")
+      .eq("id", driverId)
+      .single();
+
+    const driverName = driverToDelete?.name || "Unknown driver";
 
     // Delete from all related tables first
     await Promise.all([
@@ -433,17 +486,37 @@ export async function deleteDriverAction(driverId: number): Promise<boolean> {
       throw error;
     }
 
-    // Clear caches
-    await clearDriverCache(driverId);
-    await clearDriverListCache();
+    // Ensure ALL caches are cleared
+    try {
+      // Clear driver-specific caches
+      await clearDriverCache(driverId, true); // Force clear with true parameter
+      // Clear list cache
+      await clearDriverListCache(true); // Force clear with true parameter
 
-    // Revalidate the drivers page
-    revalidatePath("/Drivers");
+      // Additionally, clear any other related caches
+      await setCache(DRIVER_DETAIL_KEY(driverId), null, 0);
+      await setCache(DRIVER_DOCUMENTS_KEY(driverId), null, 0);
 
-    return true;
+      // Call the full cache clearing action as a final step
+      await clearDriverCachesAction();
+
+      // Force thorough revalidation of all driver-related paths
+      revalidatePath("/Drivers", "layout");
+      revalidatePath(`/Drivers/${driverId}`, "layout");
+      revalidatePath("/api/drivers", "layout");
+      revalidatePath(`/api/drivers/${driverId}`, "layout");
+
+      console.log(
+        `✅ All caches cleared and paths revalidated for deleted driver ${driverId} (${driverName})`
+      );
+    } catch (cacheError) {
+      console.error("Error clearing caches after driver deletion:", cacheError);
+    }
+
+    return { success: true, deletedDriverName: driverName };
   } catch (error) {
     console.error(`Error deleting driver ${driverId}:`, error);
-    return false;
+    return { success: false };
   }
 }
 
@@ -452,13 +525,47 @@ export async function clearDriverCachesAction(): Promise<boolean> {
   try {
     console.log("Clearing all driver caches");
 
-    // Clear Redis cache
-    await clearDriverListCache();
+    // Clear Redis caches
+    await clearDriverListCache(true); // Force clear with true parameter
 
-    // Trigger revalidation of the Drivers path
-    revalidatePath("/Drivers");
+    // Additionally, attempt to clear any possible driver detail keys
+    const supabase = await createClient();
 
-    console.log("All driver caches cleared");
+    // Get all driver IDs to clear their individual caches
+    try {
+      const { data: driverIds } = await supabase
+        .from("drivers")
+        .select("id")
+        .limit(1000); // Set a reasonable limit
+
+      if (driverIds && driverIds.length > 0) {
+        console.log(
+          `Clearing individual caches for ${driverIds.length} drivers`
+        );
+
+        // Clear all individual driver caches concurrently
+        await Promise.all(
+          driverIds.map(({ id }) => clearDriverCache(id, true))
+        );
+      }
+    } catch (idError) {
+      console.error("Error fetching driver IDs for cache clearing:", idError);
+      // Continue with generic cache clearing even if this fails
+    }
+
+    // Also try to forcefully clear general cache keys by setting to null
+    try {
+      await setCache(DRIVER_LIST_KEY, null, 0);
+    } catch (err) {
+      console.error("Error forcefully clearing driver list cache:", err);
+    }
+
+    // Trigger revalidation of all driver-related paths
+    revalidatePath("/Drivers", "layout");
+    revalidatePath("/api/drivers", "layout");
+    revalidatePath("/dashboard", "layout");
+
+    console.log("✅ All driver caches cleared and paths revalidated");
     return true;
   } catch (error) {
     console.error("Error clearing driver caches:", error);
@@ -1110,5 +1217,26 @@ export async function syncDriverWithStripeAction(driverId: number): Promise<{
       message:
         error instanceof Error ? error.message : "An unknown error occurred",
     };
+  }
+}
+
+// Revalidate driver paths
+export async function revalidateDriverPathsAction(): Promise<{
+  revalidated: boolean;
+}> {
+  try {
+    // Revalidate all paths that display driver data
+    revalidatePath("/drivers");
+    revalidatePath("/Drivers");
+    revalidatePath("/dashboard");
+    revalidatePath("/Dashboard");
+
+    // Also revalidate the API routes
+    revalidatePath("/api/drivers");
+
+    return { revalidated: true };
+  } catch (error) {
+    console.error("Error revalidating paths:", error);
+    return { revalidated: false };
   }
 }

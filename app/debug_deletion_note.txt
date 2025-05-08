@@ -1,0 +1,5 @@
+// The issue is likely in one of these files:
+// 1. Drivers/components/DriversClientProvider.tsx - real-time handling
+// 2. api/drivers/[id]/route.ts - API route handler
+// 3. Drivers/actions.ts - client-side action wrapper
+// 4. Drivers/server-actions.ts - server action implementation
