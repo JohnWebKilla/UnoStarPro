@@ -7,7 +7,7 @@ import React, {
   useCallback,
   useEffect,
 } from "react";
-import { useToast } from "@/components/ui/use-toast";
+import { toast } from "sonner";
 import { Driver, RealtimePayload } from "../types";
 import { useRouter } from "next/navigation";
 import { clearDriverCaches } from "../actions";
@@ -103,7 +103,6 @@ export function DriversClientProvider({
   >({});
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [selectedDriver, setSelectedDriver] = useState<Driver | null>(null);
-  const { toast } = useToast();
   const router = useRouter();
   const [companies] = useState<Array<{ id: number; name: string }>>([]);
   const supabase = getRealTimeClient();
@@ -227,17 +226,10 @@ export function DriversClientProvider({
       // Force revalidation to get fresh data from the server
       router.refresh();
 
-      toast({
-        title: "Sync complete",
-        description: "Successfully synchronized with server.",
-      });
+      toast.success("Sync complete");
     } catch (error) {
       setError(error instanceof Error ? error : new Error(String(error)));
-      toast({
-        title: "Sync failed",
-        description: "Failed to synchronize with server.",
-        variant: "destructive",
-      });
+      toast.error("Sync failed");
     } finally {
       setIsSyncing(false);
       setIsLoading(false);
@@ -252,18 +244,10 @@ export function DriversClientProvider({
       // Force revalidation to get fresh data
       router.refresh();
 
-      toast({
-        title: "Cache cleared",
-        description:
-          "Cache has been cleared and data refreshed from the server.",
-      });
+      toast.success("Cache cleared");
     } catch (error) {
       console.error("Error clearing cache:", error);
-      toast({
-        title: "Error",
-        description: "Failed to clear the cache. Please try again.",
-        variant: "destructive",
-      });
+      toast.error("Failed to clear the cache. Please try again.");
     }
   };
 
@@ -631,6 +615,9 @@ export function DriversClientProvider({
               err
             );
           }
+
+          // Show toast notification
+          toast.error(`${payload.old?.name || "Driver"} has been deleted.`);
         }
 
         // Refresh drivers data
@@ -734,6 +721,9 @@ export function DriversClientProvider({
                   err
                 );
               }
+
+              // Show toast notification
+              toast.error(`${payload.old?.name || "Driver"} has been deleted.`);
 
               return; // Skip the rest of the processing
             }

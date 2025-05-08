@@ -8,7 +8,7 @@ import React, {
   useCallback,
   ReactNode,
 } from "react";
-import { toast } from "@/components/ui/use-toast";
+import { toast } from "sonner";
 import { getDrivers, clearDriverCaches } from "../actions";
 import { Driver, CacheResponse } from "../types";
 import { deleteClientCache } from "@/utils/client-cache";
@@ -150,11 +150,7 @@ export function DriversProvider({ children }: { children: ReactNode }) {
         await fetchCompanies();
       } else {
         console.error("Error fetching companies:", error);
-        toast({
-          title: "Error",
-          description: "Failed to load companies",
-          variant: "destructive",
-        });
+        toast.error("Failed to load companies");
       }
     }
   };
@@ -275,6 +271,10 @@ export function DriversProvider({ children }: { children: ReactNode }) {
               );
               // Remove from IndexedDB
               await driversDB.deleteDriver(deletedDriver.id);
+              // Show toast notification
+              toast.error(
+                `${deletedDriver.name || "Driver"} has been deleted.`
+              );
               break;
             }
           }
@@ -349,17 +349,10 @@ export function DriversProvider({ children }: { children: ReactNode }) {
       // Fetch fresh data
       await fetchAndUpdateCache();
 
-      toast({
-        title: "Cache cleared",
-        description: "Successfully cleared cache and refreshed data.",
-      });
+      toast.success("Successfully cleared cache and refreshed data.");
     } catch (error) {
       console.error("Error clearing cache:", error);
-      toast({
-        title: "Error",
-        description: "Failed to clear cache. Please try again.",
-        variant: "destructive",
-      });
+      toast.error("Failed to clear cache. Please try again.");
     }
   };
 

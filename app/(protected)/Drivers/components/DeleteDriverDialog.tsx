@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Trash, Loader2 } from "lucide-react";
-import { useToast } from "@/components/ui/use-toast";
+import { toast } from "sonner";
 
 interface DeleteDriverDialogProps {
   driverId: string;
@@ -31,7 +31,6 @@ export function DeleteDriverDialog({
   const open = controlledOpen ?? internalOpen;
   const onOpenChange = controlledOnOpenChange ?? setInternalOpen;
   const [isLoading, setIsLoading] = useState(false);
-  const { toast } = useToast();
 
   const handleDelete = async () => {
     try {
@@ -56,21 +55,14 @@ export function DeleteDriverDialog({
       const displayName =
         data.deletedDriverName || driverName || "Unknown driver";
 
-      toast({
-        title: "Driver deleted",
-        description: `${displayName} has been deleted successfully.`,
-      });
+      toast.error(`${displayName} has been deleted.`);
 
       // Close dialog and refresh drivers list
       setInternalOpen(false);
       await onDriverDeleted();
     } catch (err) {
       console.error("Error:", err);
-      toast({
-        title: "Error",
-        description: "Failed to delete driver. Please try again.",
-        variant: "destructive",
-      });
+      toast.error("Failed to delete driver. Please try again.");
     } finally {
       setIsLoading(false);
     }

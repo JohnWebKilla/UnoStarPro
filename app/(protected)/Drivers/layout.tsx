@@ -31,10 +31,18 @@ export const metadata: Metadata = {
   },
 };
 
+// Import client component that includes the Toaster
+import { DriversToaster } from "./components/DriversToaster";
+
 export default function DriversLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  return <>{children}</>;
+  return (
+    <>
+      <DriversToaster />
+      {children}
+    </>
+  );
 }
