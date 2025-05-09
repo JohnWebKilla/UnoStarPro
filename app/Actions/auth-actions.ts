@@ -9,6 +9,7 @@ import { getDashboardForRole } from "@/utils/protected";
 import type { Role } from "@/types/role";
 import { revalidatePath } from "next/cache";
 import { getDashboardUrl } from "@/lib/get-dashboard-url";
+import { clearDriverListCache } from "@/app/(protected)/Drivers/cache";
 
 export async function signUpAction(formData: FormData) {
   const supabase = await createClient();
@@ -236,6 +237,15 @@ export async function signOutAction() {
     const { error } = await supabase.auth.signOut();
     if (error) {
       return { success: false, error: error.message };
+    }
+
+    // Clear the driver cache on logout
+    try {
+      await clearDriverListCache(true); // Force clear the cache
+      console.log("Driver cache cleared on logout");
+    } catch (cacheError) {
+      console.error("Error clearing driver cache on logout:", cacheError);
+      // Continue with logout even if cache clearing fails
     }
 
     // Return success response

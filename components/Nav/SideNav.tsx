@@ -19,6 +19,7 @@ import {
   Bell,
   HelpCircle,
   LogOut,
+  Home,
 } from "lucide-react";
 import { signOutAction } from "@/app/Actions/auth-actions";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -70,7 +71,7 @@ interface SideNavProps {
 const NAV_ITEMS: NavItem[] = [
   {
     path: "/Dashboard",
-    icon: User,
+    icon: Home,
     label: "Dashboard",
     roles: ["admin", "driver", "customer"],
   },
