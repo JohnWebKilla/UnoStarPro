@@ -26,7 +26,15 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CompanyUsers } from "../company-users";
-import { CompanyDrivers } from "../company-drivers";
+import dynamic from "next/dynamic";
+// Import CompanyDrivers with dynamic to prevent SSR issues
+const CompanyDrivers = dynamic(
+  () =>
+    import("../company-drivers").then((mod) => ({
+      default: mod.CompanyDrivers,
+    })),
+  { ssr: false }
+);
 import { CompanySettings } from "../company-settings";
 import { CompanyEditForm } from "../company-edit-form";
 import { StripeTabs } from "../stripe-tabs";
@@ -410,6 +418,92 @@ export function CompanySideDialog({
                             {company?.contact_phone || "—"}
                           </p>
                         </div>
+                        {(company?.street ||
+                          company?.city ||
+                          company?.state ||
+                          company?.zip) && (
+                          <>
+                            <div className="space-y-1">
+                              <h3 className="text-sm font-medium text-muted-foreground">
+                                Street Address
+                              </h3>
+                              <p className="text-base">
+                                {company?.street || "—"}
+                              </p>
+                            </div>
+                            <div className="space-y-1">
+                              <h3 className="text-sm font-medium text-muted-foreground">
+                                City, State, ZIP
+                              </h3>
+                              <p className="text-base">
+                                {[company?.city, company?.state, company?.zip]
+                                  .filter(Boolean)
+                                  .join(", ") || "—"}
+                              </p>
+                            </div>
+                          </>
+                        )}
+                        <div className="space-y-1">
+                          <h3 className="text-sm font-medium text-muted-foreground">
+                            Timezone
+                          </h3>
+                          <p className="text-base">
+                            {company?.timezone || "—"}
+                          </p>
+                        </div>
+                        <div className="space-y-1">
+                          <h3 className="text-sm font-medium text-muted-foreground">
+                            Notifications
+                          </h3>
+                          <p className="text-base">
+                            {company?.notifications_enabled
+                              ? "Enabled"
+                              : "Disabled"}
+                          </p>
+                        </div>
+                        <div className="space-y-1">
+                          <h3 className="text-sm font-medium text-muted-foreground">
+                            Auto Invoice
+                          </h3>
+                          <p className="text-base">
+                            {company?.auto_invoice ? "Enabled" : "Disabled"}
+                          </p>
+                        </div>
+                        {company?.subscription_status && (
+                          <div className="space-y-1">
+                            <h3 className="text-sm font-medium text-muted-foreground">
+                              Subscription Status
+                            </h3>
+                            <p className="text-base capitalize">
+                              {company?.subscription_status || "—"}
+                            </p>
+                          </div>
+                        )}
+                        {company?.last_invoice_date && (
+                          <div className="space-y-1">
+                            <h3 className="text-sm font-medium text-muted-foreground">
+                              Last Invoice
+                            </h3>
+                            <div className="flex items-center">
+                              <span className="text-base">
+                                {formatDate(company.last_invoice_date)}
+                              </span>
+                              {company?.last_invoice_status && (
+                                <Badge
+                                  variant="outline"
+                                  className={cn(
+                                    "ml-2 capitalize",
+                                    company?.last_invoice_status === "paid"
+                                      ? "border-green-200 bg-green-50 text-green-700"
+                                      : "border-amber-200 bg-amber-50 text-amber-700"
+                                  )}
+                                >
+                                  {company.last_invoice_status}
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}

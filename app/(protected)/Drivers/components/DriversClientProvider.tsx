@@ -241,6 +241,9 @@ export function DriversClientProvider({
       // Clear server-side cache only
       await clearDriverCaches();
 
+      // Refresh the drivers data to update the UI
+      await refreshDrivers(true);
+
       // Force revalidation to get fresh data
       router.refresh();
 

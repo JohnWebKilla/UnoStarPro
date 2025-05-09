@@ -1,4 +1,6 @@
-import { useState } from "react";
+"use client";
+
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -58,6 +60,8 @@ import {
   AlertCircle,
   Clock,
   FileWarning,
+  RefreshCw,
+  AlertTriangle,
 } from "lucide-react";
 import {
   Table,
@@ -80,6 +84,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { createClient } from "@/utils/supabase/client";
 
 const driverFormSchema = z.object({
   name: z.string().min(1, "Full name is required"),
@@ -105,22 +110,29 @@ const driverFormSchema = z.object({
 
 type DriverFormValues = z.infer<typeof driverFormSchema>;
 
-type DriverStatus = "active" | "inactive";
+type DriverStatus = "active" | "inactive" | "terminated" | "pending";
 
 interface CompanyDriver {
   id: string;
   name: string;
-  phone_number: string;
-  solo_or_team: "SOLO" | "TEAM";
-  truck_number: string;
-  subscription_amount: number;
+  phone_number?: string;
+  phone?: string; // For compatibility with API
+  solo_or_team?: string;
+  type?: string; // For compatibility with API
+  truck_number?: string;
+  truckNumber?: string; // For compatibility with API
+  subscription_amount?: number;
+  price_amount?: number; // For compatibility with API
   status: DriverStatus;
   company_id: number;
+  company_name?: string;
   stripe_product_id?: string;
   hire_date?: string;
   terminated_date?: string;
-  created_at: string;
-  updated_at: string;
+  created_at?: string;
+  updated_at?: string;
+  createdAt?: string; // For compatibility with API
+  updatedAt?: string; // For compatibility with API
 }
 
 interface CompanyDriversProps {
@@ -128,58 +140,78 @@ interface CompanyDriversProps {
 }
 
 export function CompanyDrivers({ company }: CompanyDriversProps) {
-  const [drivers, setDrivers] = useState<CompanyDriver[]>([
-    {
-      id: "1",
-      name: "John Doe",
-      phone_number: "555-123-4567",
-      solo_or_team: "SOLO",
-      truck_number: "101",
-      subscription_amount: 250,
-      status: "active",
-      company_id: company.id,
-      stripe_product_id: "prod_123456",
-      hire_date: new Date().toISOString(),
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-    {
-      id: "2",
-      name: "Jane Smith",
-      phone_number: "555-987-6543",
-      solo_or_team: "TEAM",
-      truck_number: "202",
-      subscription_amount: 350,
-      status: "active",
-      company_id: company.id,
-      stripe_product_id: "prod_234567",
-      hire_date: new Date().toISOString(),
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-    {
-      id: "3",
-      name: "Bob Johnson",
-      phone_number: "555-456-7890",
-      solo_or_team: "SOLO",
-      truck_number: "303",
-      subscription_amount: 250,
-      status: "inactive",
-      company_id: company.id,
-      stripe_product_id: "prod_345678",
-      hire_date: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
-      terminated_date: new Date().toISOString(),
-      created_at: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-  ]);
-  const [loading, setLoading] = useState(false);
+  const [drivers, setDrivers] = useState<CompanyDriver[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingDriver, setEditingDriver] = useState<CompanyDriver | null>(
     null
   );
-  const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState("details");
+
+  useEffect(() => {
+    fetchDrivers();
+  }, [company.id]);
+
+  async function fetchDrivers() {
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Fetch drivers using Supabase client
+      const supabase = createClient();
+
+      const { data, error } = await supabase
+        .from("drivers")
+        .select(
+          `
+          *,
+          companies:company_id (
+            id,
+            name
+          )
+        `
+        )
+        .eq("company_id", company.id);
+
+      if (error) {
+        throw error;
+      }
+
+      // Transform data to match our component's expected format
+      const transformedDrivers = data.map((driver) => ({
+        id: driver.id,
+        name: driver.name,
+        phone_number: driver.phone_number || driver.phone,
+        solo_or_team: driver.solo_or_team || driver.type,
+        truck_number: driver.truck_number || driver.truckNumber,
+        subscription_amount: driver.subscription_amount || driver.price_amount,
+        status: driver.status as DriverStatus,
+        company_id: driver.company_id,
+        company_name: driver.companies?.name || "Unknown Company",
+        stripe_product_id: driver.stripe_product_id,
+        hire_date: driver.hire_date,
+        terminated_date: driver.terminated_date,
+        created_at: driver.created_at || driver.createdAt,
+        updated_at: driver.updated_at || driver.updatedAt,
+      }));
+
+      setDrivers(transformedDrivers);
+    } catch (err) {
+      console.error("Error fetching drivers:", err);
+      setError("Failed to load drivers. Please try again.");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await fetchDrivers();
+  };
 
   const form = useForm<DriverFormValues>({
     resolver: zodResolver(driverFormSchema),
@@ -263,15 +295,34 @@ export function CompanyDrivers({ company }: CompanyDriversProps) {
     }
   };
 
+  const validateSoloOrTeam = (
+    value: string | undefined
+  ): "SOLO" | "TEAM" | undefined => {
+    if (value === "SOLO" || value === "TEAM") {
+      return value;
+    }
+    return "SOLO"; // Default to SOLO if the value is not valid
+  };
+
+  const validateStatus = (
+    status: string | undefined
+  ): "active" | "inactive" | undefined => {
+    if (status === "active" || status === "inactive") {
+      return status;
+    }
+    return "active"; // Default to active if the value is not valid
+  };
+
   const handleEditDriver = (driver: CompanyDriver) => {
     setEditingDriver(driver);
     form.reset({
       name: driver.name,
-      phone_number: driver.phone_number,
-      solo_or_team: driver.solo_or_team,
-      truck_number: driver.truck_number,
-      subscription_amount: driver.subscription_amount,
-      status: driver.status,
+      phone_number: driver.phone_number || driver.phone || "",
+      solo_or_team: validateSoloOrTeam(driver.solo_or_team || driver.type),
+      truck_number: driver.truck_number || driver.truckNumber || "",
+      subscription_amount:
+        driver.subscription_amount || driver.price_amount || 250,
+      status: validateStatus(driver.status),
       hire_date: driver.hire_date ? driver.hire_date.split("T")[0] : undefined,
     });
     setDialogOpen(true);
@@ -286,37 +337,79 @@ export function CompanyDrivers({ company }: CompanyDriversProps) {
     }, 1000);
   };
 
-  const handleToggleStatus = (driver: CompanyDriver) => {
-    setLoading(true);
-    // Simulate API call
-    setTimeout(() => {
+  const handleToggleStatus = async (driver: CompanyDriver) => {
+    try {
+      setLoading(true);
+
       const newStatus: DriverStatus =
         driver.status === "active" ? "inactive" : "active";
-      const updatedDriver: CompanyDriver = {
-        ...driver,
-        status: newStatus,
-        updated_at: new Date().toISOString(),
-        terminated_date:
-          newStatus === "inactive" ? new Date().toISOString() : undefined,
-      };
 
-      setDrivers(drivers.map((d) => (d.id === driver.id ? updatedDriver : d)));
+      // Update driver status in Supabase
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from("drivers")
+        .update({
+          status: newStatus,
+          updated_at: new Date().toISOString(),
+          terminated_date:
+            newStatus === "inactive" ? new Date().toISOString() : null,
+        })
+        .eq("id", driver.id)
+        .select();
+
+      if (error) {
+        throw error;
+      }
+
+      // Update local state
+      setDrivers(
+        drivers.map((d) =>
+          d.id === driver.id
+            ? {
+                ...d,
+                status: newStatus,
+                updated_at: new Date().toISOString(),
+                terminated_date:
+                  newStatus === "inactive"
+                    ? new Date().toISOString()
+                    : undefined,
+              }
+            : d
+        )
+      );
+
+      // Clear Drivers cache to ensure status change is reflected across the application
+      try {
+        // Import the server action to clear driver caches
+        const { clearDriverCachesAction } = await import(
+          "../../Drivers/server-actions"
+        );
+        await clearDriverCachesAction();
+        console.log(
+          `Cleared drivers cache after status update for driver ${driver.id}`
+        );
+      } catch (cacheError) {
+        console.error("Error clearing drivers cache:", cacheError);
+        // Continue even if cache clearing fails
+      }
 
       toast.success(
-        `Driver ${driver.name} ${
-          newStatus === "active" ? "activated" : "deactivated"
-        }`
+        `Driver ${driver.name} ${newStatus === "active" ? "activated" : "deactivated"}`
       );
+    } catch (err) {
+      console.error("Error updating driver status:", err);
+      toast.error("Failed to update driver status");
+    } finally {
       setLoading(false);
-    }, 1000);
+    }
   };
 
   const filteredDrivers = searchQuery
     ? drivers.filter(
         (driver) =>
-          driver.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          driver.phone_number.includes(searchQuery) ||
-          driver.truck_number.toLowerCase().includes(searchQuery.toLowerCase())
+          driver.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          driver.phone_number?.includes(searchQuery) ||
+          driver.truck_number?.toLowerCase().includes(searchQuery.toLowerCase())
       )
     : drivers;
 
@@ -329,7 +422,8 @@ export function CompanyDrivers({ company }: CompanyDriversProps) {
     }
   };
 
-  const formatCurrency = (amount: number) => {
+  const formatCurrency = (amount?: number) => {
+    if (!amount) return "$0.00";
     return new Intl.NumberFormat("en-US", {
       style: "currency",
       currency: "USD",
@@ -346,339 +440,37 @@ export function CompanyDrivers({ company }: CompanyDriversProps) {
           <div>
             <h3 className="text-xl font-semibold">Company Drivers</h3>
             <p className="text-sm text-muted-foreground">
-              Manage truck drivers associated with this company
+              Manage drivers associated with {company.name}
             </p>
           </div>
         </div>
-        <Dialog
-          open={dialogOpen}
-          onOpenChange={(open) => {
-            setDialogOpen(open);
-            if (!open) setEditingDriver(null);
-          }}
-        >
-          <DialogTrigger asChild>
-            <Button>
-              <UserPlus className="h-4 w-4 mr-2" />
-              Add Driver
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-7xl w-[95vw]">
-            <DialogHeader>
-              <DialogTitle>
-                {editingDriver ? "Edit Truck Driver" : "Add New Truck Driver"}
-              </DialogTitle>
-            </DialogHeader>
-            <Form {...form}>
-              <form
-                onSubmit={form.handleSubmit(onSubmit)}
-                className="space-y-4"
-              >
-                <Tabs value={activeTab} onValueChange={setActiveTab}>
-                  <TabsList className="grid w-full grid-cols-2">
-                    <TabsTrigger value="details">Driver Details</TabsTrigger>
-                    <TabsTrigger value="documents">Documents</TabsTrigger>
-                  </TabsList>
-
-                  <TabsContent value="details">
-                    <div className="space-y-4">
-                      <FormField
-                        control={form.control}
-                        name="name"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Full name</FormLabel>
-                            <FormControl>
-                              <Input placeholder="John Doe" {...field} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-
-                      <FormField
-                        control={form.control}
-                        name="phone_number"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Phone</FormLabel>
-                            <FormControl>
-                              <Input
-                                type="tel"
-                                placeholder="(xxx)-xxx-xxxx"
-                                {...field}
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-
-                      <FormField
-                        control={form.control}
-                        name="solo_or_team"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Solo / Team</FormLabel>
-                            <Select
-                              onValueChange={field.onChange}
-                              defaultValue={field.value}
-                            >
-                              <FormControl>
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Select type" />
-                                </SelectTrigger>
-                              </FormControl>
-                              <SelectContent>
-                                <SelectItem value="SOLO">SOLO</SelectItem>
-                                <SelectItem value="TEAM">TEAM</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-
-                      <FormField
-                        control={form.control}
-                        name="truck_number"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Truck #</FormLabel>
-                            <FormControl>
-                              <Input placeholder="101" {...field} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-
-                      <FormField
-                        control={form.control}
-                        name="subscription_amount"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>PPD (weekly)</FormLabel>
-                            <FormControl>
-                              <Input
-                                type="number"
-                                placeholder="Enter the weekly price per truck"
-                                {...field}
-                              />
-                            </FormControl>
-                            <FormDescription>
-                              Weekly subscription amount per driver
-                            </FormDescription>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-
-                      <div className="grid grid-cols-2 gap-4">
-                        <FormField
-                          control={form.control}
-                          name="status"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Status</FormLabel>
-                              <Select
-                                onValueChange={field.onChange}
-                                defaultValue={field.value}
-                              >
-                                <FormControl>
-                                  <SelectTrigger>
-                                    <SelectValue placeholder="Select status" />
-                                  </SelectTrigger>
-                                </FormControl>
-                                <SelectContent>
-                                  <SelectItem value="active">Active</SelectItem>
-                                  <SelectItem value="inactive">
-                                    Inactive
-                                  </SelectItem>
-                                </SelectContent>
-                              </Select>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-
-                        <FormField
-                          control={form.control}
-                          name="hire_date"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Hire Date</FormLabel>
-                              <FormControl>
-                                <Input type="date" {...field} />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                      </div>
-                    </div>
-                  </TabsContent>
-
-                  <TabsContent value="documents" className="space-y-6">
-                    <div className="space-y-6">
-                      {/* MVR File Upload */}
-                      <div className="grid sm:grid-cols-2 gap-4">
-                        <FormField
-                          control={form.control}
-                          name="mvr_file"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>MVR File</FormLabel>
-                              <FormControl>
-                                <Input
-                                  type="file"
-                                  {...field}
-                                  value={field.value?.filename}
-                                  onChange={(e) =>
-                                    field.onChange(e.target.files?.[0])
-                                  }
-                                />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        <FormField
-                          control={form.control}
-                          name="mvr_expiration"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>MVR Expiration Date</FormLabel>
-                              <FormControl>
-                                <Input type="date" {...field} />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                      </div>
-
-                      {/* Medical Card Upload */}
-                      <div className="grid sm:grid-cols-2 gap-4">
-                        <FormField
-                          control={form.control}
-                          name="medical_card"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Medical Card</FormLabel>
-                              <FormControl>
-                                <Input
-                                  type="file"
-                                  {...field}
-                                  value={field.value?.filename}
-                                  onChange={(e) =>
-                                    field.onChange(e.target.files?.[0])
-                                  }
-                                />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        <FormField
-                          control={form.control}
-                          name="medical_card_expiration"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>
-                                Medical Card Expiration Date
-                              </FormLabel>
-                              <FormControl>
-                                <Input type="date" {...field} />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                      </div>
-
-                      {/* Driver License Upload */}
-                      <div className="space-y-4 sm:space-y-0">
-                        <div className="grid sm:grid-cols-4 gap-4">
-                          <div className="sm:col-span-4">
-                            <FormField
-                              control={form.control}
-                              name="license_file"
-                              render={({ field }) => (
-                                <FormItem>
-                                  <FormLabel>Driver License</FormLabel>
-                                  <FormControl>
-                                    <Input
-                                      type="file"
-                                      {...field}
-                                      value={field.value?.filename}
-                                      onChange={(e) =>
-                                        field.onChange(e.target.files?.[0])
-                                      }
-                                    />
-                                  </FormControl>
-                                  <FormMessage />
-                                </FormItem>
-                              )}
-                            />
-                          </div>
-                          <FormField
-                            control={form.control}
-                            name="license_number"
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>License Number</FormLabel>
-                                <FormControl>
-                                  <Input {...field} />
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-                          <FormField
-                            control={form.control}
-                            name="license_state"
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>State</FormLabel>
-                                <FormControl>
-                                  <Input {...field} />
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-                          <FormField
-                            control={form.control}
-                            name="license_expiration"
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>Expiration Date</FormLabel>
-                                <FormControl>
-                                  <Input type="date" {...field} />
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </TabsContent>
-                </Tabs>
-
-                <DialogFooter>
-                  <Button type="submit" disabled={loading}>
-                    {loading && (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    )}
-                    {editingDriver ? "Update Driver" : "Add Driver"}
-                  </Button>
-                </DialogFooter>
-              </form>
-            </Form>
-          </DialogContent>
-        </Dialog>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={handleRefresh}
+            disabled={loading || refreshing}
+            title="Refresh drivers list"
+          >
+            <RefreshCw
+              className={refreshing ? "h-4 w-4 animate-spin" : "h-4 w-4"}
+            />
+          </Button>
+          <Dialog
+            open={dialogOpen}
+            onOpenChange={(open) => {
+              setDialogOpen(open);
+              if (!open) setEditingDriver(null);
+            }}
+          >
+            <DialogTrigger asChild>
+              <Button>
+                <UserPlus className="h-4 w-4 mr-2" />
+                Add Driver
+              </Button>
+            </DialogTrigger>
+          </Dialog>
+        </div>
       </div>
 
       <Card className="border shadow-sm">
@@ -704,7 +496,31 @@ export function CompanyDrivers({ company }: CompanyDriversProps) {
         </CardHeader>
         <CardContent>
           <ScrollArea className="h-[400px] pr-4">
-            {filteredDrivers.length > 0 ? (
+            {loading ? (
+              <div className="flex flex-col items-center justify-center py-10 text-center">
+                <div className="rounded-full bg-muted/50 p-3 mb-4">
+                  <Loader2 className="h-6 w-6 text-muted-foreground animate-spin" />
+                </div>
+                <h3 className="text-lg font-medium mb-1">Loading drivers...</h3>
+                <p className="text-sm text-muted-foreground">
+                  This may take a moment
+                </p>
+              </div>
+            ) : error ? (
+              <div className="flex flex-col items-center justify-center py-10 text-center">
+                <div className="rounded-full bg-destructive/10 p-3 mb-4">
+                  <AlertTriangle className="h-6 w-6 text-destructive" />
+                </div>
+                <h3 className="text-lg font-medium mb-1">
+                  Error loading drivers
+                </h3>
+                <p className="text-sm text-muted-foreground mb-4">{error}</p>
+                <Button onClick={handleRefresh} variant="outline">
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Retry
+                </Button>
+              </div>
+            ) : filteredDrivers.length > 0 ? (
               <Table>
                 <TableHeader className="bg-muted/50 sticky top-0">
                   <TableRow>
@@ -727,7 +543,7 @@ export function CompanyDrivers({ company }: CompanyDriversProps) {
                       <TableCell>
                         <div className="flex items-center text-sm">
                           <Phone className="h-3.5 w-3.5 mr-1.5 text-muted-foreground" />
-                          {driver.phone_number}
+                          {driver.phone_number || "—"}
                         </div>
                       </TableCell>
                       <TableCell>
@@ -736,14 +552,14 @@ export function CompanyDrivers({ company }: CompanyDriversProps) {
                           className="bg-blue-50 text-blue-700 border-blue-100"
                         >
                           <Users className="h-3.5 w-3.5 mr-1" />
-                          {driver.solo_or_team}
+                          {driver.solo_or_team || "—"}
                         </Badge>
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center">
                           <Truck className="h-4 w-4 mr-2 text-blue-600" />
                           <span className="font-medium">
-                            {driver.truck_number}
+                            {driver.truck_number || "—"}
                           </span>
                         </div>
                       </TableCell>
@@ -834,14 +650,8 @@ export function CompanyDrivers({ company }: CompanyDriversProps) {
                 <p className="text-sm text-muted-foreground mb-4">
                   {searchQuery
                     ? `No drivers match "${searchQuery}"`
-                    : "This company doesn't have any truck drivers yet."}
+                    : "This company doesn't have any drivers yet."}
                 </p>
-                {!searchQuery && (
-                  <Button variant="outline" onClick={() => setDialogOpen(true)}>
-                    <UserPlus className="h-4 w-4 mr-2" />
-                    Add First Driver
-                  </Button>
-                )}
               </div>
             )}
           </ScrollArea>
@@ -850,3 +660,6 @@ export function CompanyDrivers({ company }: CompanyDriversProps) {
     </div>
   );
 }
+
+// Add default export to make it compatible with dynamic import
+export default CompanyDrivers;
