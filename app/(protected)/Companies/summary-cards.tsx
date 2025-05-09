@@ -1,6 +1,5 @@
 "use client";
 
-import { Company } from "./types";
 import {
   Building,
   CreditCard,
@@ -10,12 +9,11 @@ import {
   TrendingDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useCompanies } from "./components/CompaniesClientProvider";
 
-interface SummaryCardsProps {
-  companies: Company[];
-}
+export function SummaryCards() {
+  const { companies } = useCompanies();
 
-export function SummaryCards({ companies }: SummaryCardsProps) {
   // Calculate metrics
   const totalCompanies = companies.length;
   const activeCompanies = companies.filter((c) => c.status === "active").length;

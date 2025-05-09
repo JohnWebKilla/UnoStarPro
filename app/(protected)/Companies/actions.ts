@@ -7,6 +7,7 @@ import {
   updateCompanyAction,
   deleteCompanyAction,
   invalidateCompaniesCache,
+  clearCompanyCachesAction,
 } from "./server-actions";
 import { setCache } from "@/lib/redis-manager";
 import {
@@ -14,6 +15,8 @@ import {
   setClientCache,
   deleteClientCache,
 } from "@/utils/client-cache";
+import { toast } from "sonner";
+import { clearSubscriptionCache, clearAllSubscriptionCache } from "./cache";
 
 // Enhanced response type for cached data
 export interface CompaniesApiResponse {
@@ -159,6 +162,7 @@ export async function getCompanies(
     };
   } catch (error) {
     console.error("Error fetching companies:", error);
+    toast.error("Failed to fetch companies");
     throw error;
   }
 }
@@ -166,32 +170,46 @@ export async function getCompanies(
 export async function createCompany(
   companyData: Partial<Company>
 ): Promise<Company> {
-  const data = await createCompanyAction(companyData);
-  // Invalidate cache after creating a company
-  await invalidateCompaniesCache();
-  return data;
+  try {
+    const result = await createCompanyAction(companyData);
+    toast.success("Company created successfully");
+    // Invalidate cache after creating a company
+    await invalidateCompaniesCache();
+    return result;
+  } catch (error) {
+    console.error("Error creating company:", error);
+    toast.error("Failed to create company");
+    throw error;
+  }
 }
 
 export async function updateCompany(
   id: number,
   companyData: Partial<Company>
 ): Promise<Company> {
-  const data = await updateCompanyAction(id, companyData);
-  // Invalidate cache after updating a company
-  await invalidateCompaniesCache();
-  return data;
+  try {
+    const result = await updateCompanyAction(id, companyData);
+    toast.success("Company updated successfully");
+    // Invalidate cache after updating a company
+    await invalidateCompaniesCache();
+    return result;
+  } catch (error) {
+    console.error("Error updating company:", error);
+    toast.error("Failed to update company");
+    throw error;
+  }
 }
 
 export async function deleteCompany(id: number): Promise<void> {
   try {
     await deleteCompanyAction(id);
+    toast.success("Company deleted successfully");
     // Invalidate cache after deleting a company
     await invalidateCompaniesCache();
   } catch (error) {
-    if (error instanceof Error) {
-      throw error;
-    }
-    throw new Error("Failed to delete company");
+    console.error("Error deleting company:", error);
+    toast.error("Failed to delete company");
+    throw error;
   }
 }
 
@@ -243,9 +261,11 @@ export async function clearCompanyCache(companyId?: number): Promise<{
       }
     }
 
+    toast.success("Cache cleared successfully");
     return { success: true, message: "Cache cleared successfully" };
   } catch (error) {
     console.error("Error clearing company cache:", error);
+    toast.error("Failed to clear cache");
     return {
       success: false,
       message: "Failed to clear cache",
