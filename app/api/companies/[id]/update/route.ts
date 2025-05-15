@@ -4,12 +4,15 @@ import { revalidatePath } from "next/cache";
 
 export async function POST(request: Request) {
   try {
-    // Extract ID from URL path
-    const pathParts = new URL(request.url).pathname.split("/");
-    const id = pathParts[pathParts.indexOf("companies") + 2];
+    // Extract ID using a more reliable approach
+    const url = new URL(request.url);
+    const segments = url.pathname.split("/").filter(Boolean);
+    // Company ID is at index 2 (api/companies/[id]/update)
+    const id = segments[2];
     const companyId = parseInt(id, 10);
 
     if (isNaN(companyId)) {
+      console.error(`Invalid company ID: ${id}`);
       return NextResponse.json(
         { error: "Invalid company ID" },
         { status: 400 }
@@ -78,8 +81,11 @@ export async function POST(request: Request) {
       );
     }
 
-    // Revalidate the Companies page
-    revalidatePath("/Companies");
+    // Revalidate both the company detail and list pages
+    revalidatePath(`/Companies/${companyId}`); // Revalidate the company detail page
+    revalidatePath("/Companies"); // Revalidate the companies list page
+
+    console.log(`Revalidated paths for company ${companyId}`);
 
     return NextResponse.json({
       success: true,

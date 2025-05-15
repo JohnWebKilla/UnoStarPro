@@ -3,6 +3,7 @@ import { createClient } from "@/utils/supabase/server";
 import { stripe } from "@/lib/stripe";
 import { cookies } from "next/headers";
 import type Stripe from "stripe";
+import { revalidatePath } from "next/cache";
 
 interface SubscriptionItem {
   priceId: string;
@@ -11,9 +12,14 @@ interface SubscriptionItem {
 
 export async function POST(request: Request) {
   try {
-    // Extract ID from URL path
-    const pathParts = new URL(request.url).pathname.split("/");
-    const id = pathParts[pathParts.indexOf("subscriptions") + 2];
+    // Extract ID directly from the URL path segments
+    const url = new URL(request.url);
+    const segments = url.pathname.split("/").filter(Boolean);
+    // The subscription ID is in the position before "update"
+    const updateIndex = segments.indexOf("update");
+    const id = segments[updateIndex - 1];
+
+    console.log(`Processing subscription update for ID: ${id}`);
 
     const { items } = (await request.json()) as { items: SubscriptionItem[] };
 
@@ -24,26 +30,62 @@ export async function POST(request: Request) {
     // Get existing subscription to check current items
     const existingSubscription = await stripe.subscriptions.retrieve(id);
 
-    // Get the customer ID from the subscription
-    const customerId = existingSubscription.customer as string;
+    console.log(
+      `Retrieved existing subscription with ${existingSubscription.items.data.length} items`
+    );
+    console.log(`Client requested update to ${items.length} items`);
 
-    // Prepare items update by matching existing items
-    const updatedItems = items.map((item: SubscriptionItem) => {
-      // Find if this price is already in use
-      const existingItem = existingSubscription.items.data.find(
-        (subItem: Stripe.SubscriptionItem) => subItem.price.id === item.priceId
+    // First, collect all the current subscription items
+    const currentItems = existingSubscription.items.data;
+
+    // Create an array to hold our update operations
+    const itemsToUpdate: any[] = [];
+
+    // Handle items to add or update
+    items.forEach((item) => {
+      // Find if this price is already in the subscription
+      const existingItem = currentItems.find(
+        (subItem) => subItem.price.id === item.priceId
       );
 
-      return {
-        id: existingItem?.id, // Include existing item ID if found
-        price: item.priceId,
-        quantity: item.quantity,
-      };
+      if (existingItem) {
+        // Update quantity of existing item
+        itemsToUpdate.push({
+          id: existingItem.id,
+          quantity: item.quantity,
+        });
+      } else {
+        // Add new item
+        itemsToUpdate.push({
+          price: item.priceId,
+          quantity: item.quantity,
+        });
+      }
     });
 
-    // Update subscription in Stripe
+    // Handle items to delete (present in current subscription but not in updated items list)
+    currentItems.forEach((existingItem) => {
+      const stillExists = items.some(
+        (item) => item.priceId === existingItem.price.id
+      );
+
+      if (!stillExists) {
+        // Mark item for deletion
+        itemsToUpdate.push({
+          id: existingItem.id,
+          deleted: true,
+        });
+      }
+    });
+
+    console.log(
+      `Updating subscription with ${itemsToUpdate.length} operations`,
+      itemsToUpdate
+    );
+
+    // Update subscription in Stripe with the complete set of operations
     const subscription = await stripe.subscriptions.update(id, {
-      items: updatedItems,
+      items: itemsToUpdate,
     });
 
     // Get the company associated with this subscription's customer
@@ -51,11 +93,13 @@ export async function POST(request: Request) {
     const { data: company, error: companyError } = await supabase
       .from("companies")
       .select()
-      .eq("stripe_customer_id", customerId)
+      .eq("stripe_customer_id", existingSubscription.customer as string)
       .single();
 
     if (companyError || !company) {
-      throw new Error(`Company not found for customer ${customerId}`);
+      throw new Error(
+        `Company not found for customer ${existingSubscription.customer}`
+      );
     }
 
     // Calculate total subscription amount from all items
@@ -79,6 +123,12 @@ export async function POST(request: Request) {
     if (updateError) {
       throw updateError;
     }
+
+    // Revalidate company paths to update UI
+    revalidatePath(`/Companies/${company.id}`);
+    revalidatePath("/Companies");
+
+    console.log(`Updated subscription successfully: ${subscription.id}`);
 
     return NextResponse.json({
       success: true,

@@ -35,7 +35,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { format } from "date-fns";
-import { CompanyUsers } from "./components/company-users";
+import { CompanyUsers, prefetchCompanyUsers } from "./components/company-users";
 import { CompanyDrivers } from "./components/company-drivers";
 import { CompanySettings } from "./components/company-settings";
 import { useState, useEffect, useMemo } from "react";
@@ -164,6 +164,9 @@ export function CompanySideDialog({
       // Always use the latest company data from props
       if (initialCompany) {
         setCompany(initialCompany);
+
+        // Prefetch users data when dialog opens to avoid delay when switching to users tab
+        prefetchCompanyUsers(initialCompany.id);
       }
 
       // Start fetching Stripe data in the background immediately when dialog opens

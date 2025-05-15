@@ -623,6 +623,12 @@ function UpdateSubscriptionDialog({
     const validItems = subscriptionItems.filter(
       (item) => item.priceId && item.quantity > 0
     );
+
+    console.log("Validating subscription update items:", {
+      original: subscriptionItems,
+      filtered: validItems,
+    });
+
     if (validItems.length === 0) {
       toast({
         title: "Error",
@@ -631,6 +637,24 @@ function UpdateSubscriptionDialog({
       });
       return;
     }
+
+    // Warn if items have been removed
+    // First check if subscription.items and subscription.items.data exist
+    const subscriptionItemsData = subscription?.items?.data || [];
+    const originalItemCount = subscriptionItemsData.length;
+
+    if (validItems.length < originalItemCount) {
+      const removedCount = originalItemCount - validItems.length;
+      console.log(`User is removing ${removedCount} items from subscription`);
+
+      const confirmed = window.confirm(
+        `You are about to remove ${removedCount} product(s) from this subscription. Continue?`
+      );
+      if (!confirmed) {
+        return;
+      }
+    }
+
     await onUpdate(validItems);
     onOpenChange(false);
   };
@@ -1364,8 +1388,10 @@ export function StripeTabs({
           timestamp: Date.now(),
         });
 
+        console.log("Updating subscription with items:", items);
+
         // Call your API to update the subscription
-        await fetch(
+        const response = await fetch(
           `/api/stripe/subscriptions/${subscriptionDetails.subscription.id}/update`,
           {
             method: "POST",
@@ -1375,6 +1401,15 @@ export function StripeTabs({
             body: JSON.stringify({ items }),
           }
         );
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          console.error("Subscription update failed:", errorData);
+          throw new Error(errorData.details || "Failed to update subscription");
+        }
+
+        const result = await response.json();
+        console.log("Subscription update successful:", result);
 
         // Update the company's subscription amount in the database
         try {

@@ -40,6 +40,11 @@ async function withRetry<T>(
   throw lastError;
 }
 
+// Define cache keys for company users
+const COMPANY_USERS_KEY = (companyId: number) => `company_users:${companyId}`;
+const COMPANY_USERS_PROGRESS_KEY = (companyId: number) =>
+  `company_users_inprogress:${companyId}`;
+
 export async function getCompaniesAction(): Promise<{
   data: Company[];
   source: "cache" | "database";
@@ -310,10 +315,8 @@ export async function getCompanyUsersAction(companyId: number) {
 
   try {
     // Try to get from cache first
-    const cacheKey = `company_users_${companyId}`;
-    const cachedUsers = (await getCachedCompany(parseInt(cacheKey))) as
-      | any[]
-      | null;
+    const cacheKey = COMPANY_USERS_KEY(companyId);
+    const cachedUsers = (await getCachedCompany(companyId)) as any[] | null;
 
     if (cachedUsers) {
       console.log(`Using cached users for company ${companyId}`);
@@ -322,46 +325,69 @@ export async function getCompanyUsersAction(companyId: number) {
 
     const supabase = await createClient();
 
-    // Get users with profiles
+    // Get users from user_companies junction table
+    console.log(`Querying user_companies table for company ${companyId}`);
+    const { data: userCompanies, error: junctionError } = await supabase
+      .from("user_companies")
+      .select("user_id")
+      .eq("company_id", companyId);
+
+    if (junctionError) {
+      console.error(
+        `Error fetching from user_companies: ${junctionError.message}`
+      );
+      throw junctionError;
+    }
+
+    console.log(
+      `Found ${userCompanies?.length || 0} user associations for company ${companyId}`
+    );
+
+    if (!userCompanies || userCompanies.length === 0) {
+      console.log(`No users found for company ${companyId}`);
+      return [];
+    }
+
+    // Get user details
+    const userIds = userCompanies.map((uc) => uc.user_id);
+    console.log(
+      `Fetching details for ${userIds.length} users: ${userIds.join(", ")}`
+    );
+
     const { data: users, error } = await supabase
-      .from("auth_users")
+      .from("users")
       .select(
         `
         id,
         email,
-        profiles (
-          first_name,
-          last_name,
-          company_id,
-          role,
-          status
-        )
+        first_name,
+        last_name,
+        role,
+        status,
+        created_at
       `
       )
-      .eq("profiles.company_id", companyId);
+      .in("id", userIds);
 
-    if (error) throw error;
+    if (error) {
+      console.error(`Error fetching user details: ${error.message}`);
+      throw error;
+    }
 
-    // Transform the data for easier use
-    const transformedUsers = users
-      .filter((user) => user.profiles?.length > 0)
-      .map((user) => ({
-        id: user.id,
-        email: user.email,
-        ...user.profiles[0],
-      }));
+    console.log(
+      `Retrieved ${users.length} user details out of ${userIds.length} associations`
+    );
 
     // Cache the result
-    if (transformedUsers.length > 0) {
-      await setCompanyDetailCache(parseInt(cacheKey), transformedUsers);
+    if (users.length > 0) {
+      await setCompanyDetailCache(companyId, users);
+      console.log(`Cached ${users.length} users for company ${companyId}`);
     }
 
     const endTime = Date.now();
-    console.log(
-      `Fetched ${transformedUsers.length} users in ${endTime - startTime}ms`
-    );
+    console.log(`Fetched ${users.length} users in ${endTime - startTime}ms`);
 
-    return transformedUsers;
+    return users;
   } catch (error) {
     console.error(`Error fetching users for company ${companyId}:`, error);
     throw error;
@@ -370,12 +396,8 @@ export async function getCompanyUsersAction(companyId: number) {
 
 export async function clearCompanyUsersCache(companyId: number) {
   try {
-    const cacheKey = `company_users_${companyId}`;
-    const inProgressKey = `company_users_inprogress_${companyId}`;
-
-    // Clear both cache keys
-    await clearCompanyCache(parseInt(cacheKey), true);
-    await clearCompanyCache(parseInt(inProgressKey), true);
+    // Clear cache for company users
+    await clearCompanyCache(companyId, true);
 
     console.log(`Cleared cache for company ${companyId} users`);
     return true;
@@ -390,63 +412,141 @@ export async function clearCompanyUsersCache(companyId: number) {
 
 export async function getCompanyUsersOptimized(companyId: number) {
   const startTime = Date.now();
-  const cacheKey = `company_users_${companyId}`;
-  const inProgressKey = `company_users_inprogress_${companyId}`;
+  console.log(`[Optimized] Starting user fetch for company ${companyId}`);
 
   try {
     // Try to get from cache with a longer TTL (24 hours)
-    const cachedUsers = (await getCachedCompany(parseInt(cacheKey))) as
-      | any[]
-      | null;
+    const cachedUsers = (await getCachedCompany(companyId)) as any[] | null;
 
     if (cachedUsers) {
       console.log(`[Optimized] Using cached users for company ${companyId}`);
       return cachedUsers;
     }
 
-    // Check if there's an in-progress fetch
-    const inProgress = (await getCachedCompany(parseInt(inProgressKey))) as
-      | boolean
-      | null;
-    if (inProgress) {
+    // Execute the original function with retry logic
+    try {
       console.log(
-        `[Optimized] Another request is already fetching users for company ${companyId}`
+        `[Optimized] No cache found, fetching users from database for company ${companyId}`
       );
-      // Wait a short time and try the cache again
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      const retryCachedUsers = (await getCachedCompany(parseInt(cacheKey))) as
-        | any[]
-        | null;
-      if (retryCachedUsers) {
-        return retryCachedUsers;
-      }
-      // If still no cached data, continue with the fetch
+      const users = await withRetry(async () => {
+        return await getCompanyUsersAction(companyId);
+      });
+
+      const endTime = Date.now();
+      console.log(
+        `[Optimized] Fetched and cached ${users.length} users in ${
+          endTime - startTime
+        }ms`
+      );
+
+      return users;
+    } catch (fetchError) {
+      console.error(`[Optimized] Error in data fetch:`, fetchError);
+      throw fetchError;
+    }
+  } catch (error) {
+    console.error(`[Optimized] Error fetching users:`, error);
+    // Return empty array instead of throwing error to prevent UI issues
+    return [];
+  }
+}
+
+export async function addTestUserToCompany(companyId: number) {
+  try {
+    console.log(`Adding test user for company ${companyId}`);
+    const supabase = await createClient();
+
+    // First check if test user already exists
+    const { data: existingUsers, error: checkError } = await supabase
+      .from("users")
+      .select("id")
+      .eq("email", `test-user-${companyId}@example.com`);
+
+    if (checkError) {
+      console.error("Error checking for existing test user:", checkError);
+      throw new Error(
+        `Failed to check for existing test user: ${checkError.message}`
+      );
     }
 
-    // Mark this fetch as in progress
-    await setCompanyDetailCache(parseInt(inProgressKey), true);
+    let userId;
 
-    // Execute the original function
-    const users = await getCompanyUsersAction(companyId);
+    // If test user doesn't exist, create one
+    if (!existingUsers || existingUsers.length === 0) {
+      const { data: newUser, error: createError } = await supabase
+        .from("users")
+        .insert({
+          email: `test-user-${companyId}@example.com`,
+          role: "user",
+          status: "active",
+          first_name: "Test",
+          last_name: "User",
+        })
+        .select()
+        .single();
 
-    // Cache with a longer TTL (24 hours)
-    await setCompanyDetailCache(parseInt(cacheKey), users);
+      if (createError) {
+        console.error("Error creating test user:", createError);
+        throw new Error(`Failed to create test user: ${createError.message}`);
+      }
 
-    // Clear the in-progress flag
-    await clearCompanyCache(parseInt(inProgressKey), true);
+      userId = newUser.id;
+      console.log(`Created test user with ID ${userId}`);
+    } else {
+      userId = existingUsers[0].id;
+      console.log(`Using existing test user with ID ${userId}`);
+    }
 
-    const endTime = Date.now();
-    console.log(
-      `[Optimized] Fetched and cached ${users.length} users in ${
-        endTime - startTime
-      }ms`
-    );
+    // Check if user is already associated with company
+    const { data: existingAssoc, error: assocCheckError } = await supabase
+      .from("user_companies")
+      .select()
+      .eq("user_id", userId)
+      .eq("company_id", companyId);
 
-    return users;
+    if (assocCheckError) {
+      console.error("Error checking user association:", assocCheckError);
+      throw new Error(
+        `Failed to check user association: ${assocCheckError.message}`
+      );
+    }
+
+    // If no association exists, create one
+    if (!existingAssoc || existingAssoc.length === 0) {
+      const { error: assocError } = await supabase
+        .from("user_companies")
+        .insert({
+          user_id: userId,
+          company_id: companyId,
+        });
+
+      if (assocError) {
+        console.error("Error associating user with company:", assocError);
+        throw new Error(
+          `Failed to associate user with company: ${assocError.message}`
+        );
+      }
+
+      console.log(`Associated user ${userId} with company ${companyId}`);
+    } else {
+      console.log(
+        `User ${userId} is already associated with company ${companyId}`
+      );
+    }
+
+    // Clear any existing cache for this company's users
+    await clearCompanyUsersCache(companyId);
+
+    return {
+      success: true,
+      message: `Test user added/linked to company ${companyId}`,
+    };
   } catch (error) {
-    // Clear in-progress flag on error
-    await clearCompanyCache(parseInt(inProgressKey), true);
-    console.error(`[Optimized] Error fetching users: ${error}`);
-    return [];
+    console.error("Error adding test user:", error);
+    return {
+      success: false,
+      error:
+        error instanceof Error ? error.message : "An unknown error occurred",
+    };
   }
 }

@@ -22,6 +22,7 @@ import {
   RealtimeChannel,
   RealtimePostgresChangesPayload,
 } from "@supabase/supabase-js";
+import { prefetchCompanyUsers } from "./company-users";
 
 interface CompaniesContextType {
   companies: Company[];
@@ -372,6 +373,18 @@ export function CompaniesClientProvider({
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [refreshCompanies, supabase, lastUpdateTime]);
+
+  // When page loads, prefetch data for the first few companies
+  useEffect(() => {
+    if (companies.length > 0) {
+      // Prefetch users for the first 3 companies (most likely to be viewed)
+      companies.slice(0, 3).forEach((company) => {
+        setTimeout(() => {
+          prefetchCompanyUsers(company.id);
+        }, 2000); // Delay by 2 seconds to let the page finish loading first
+      });
+    }
+  }, [companies]);
 
   const value = {
     companies,
