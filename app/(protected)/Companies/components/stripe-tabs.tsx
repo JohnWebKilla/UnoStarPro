@@ -89,6 +89,74 @@ const paymentMethodsCache = new Map<
 // >();
 // const CACHE_TTL = 5 * 60 * 1000; // 5 minutes in milliseconds
 
+// Add plans cache with longer TTL
+const plansCache = {
+  data: [] as any[],
+  timestamp: 0,
+  TTL: 15 * 60 * 1000, // 15 minutes in milliseconds
+  isFetching: false,
+  fetchPromise: null as Promise<any[]> | null,
+};
+
+/**
+ * Optimized function to fetch plans with deduplication of in-flight requests
+ * and proper caching
+ */
+const fetchPlansWithCache = async (): Promise<any[]> => {
+  // If we have valid cached data, return it immediately
+  if (
+    plansCache.data.length &&
+    Date.now() - plansCache.timestamp < plansCache.TTL
+  ) {
+    console.log("Using memory-cached plans data");
+    return plansCache.data;
+  }
+
+  // If there's already a fetch in progress, return that promise
+  if (plansCache.isFetching && plansCache.fetchPromise) {
+    console.log("Reusing in-flight plans fetch request");
+    return plansCache.fetchPromise;
+  }
+
+  // Start a new fetch
+  console.log("Fetching fresh plans data");
+  plansCache.isFetching = true;
+
+  // Create the fetch promise
+  plansCache.fetchPromise = new Promise<any[]>(async (resolve, reject) => {
+    try {
+      const response = await fetch("/api/stripe/plans", {
+        cache: "force-cache", // Use Next.js cache
+        next: { revalidate: 900 }, // Revalidate every 15 minutes
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch plans: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      const plans = data.plans || [];
+
+      // Update the cache
+      plansCache.data = plans;
+      plansCache.timestamp = Date.now();
+
+      resolve(plans);
+    } catch (error) {
+      console.error("Error fetching plans:", error);
+      reject(error);
+    } finally {
+      plansCache.isFetching = false;
+      plansCache.fetchPromise = null;
+    }
+  });
+
+  return plansCache.fetchPromise;
+};
+
+// Add request deduplication for subscription updates
+const pendingUpdates = new Map<string, Promise<any>>();
+
 // Helper function to format currency
 const formatCurrency = (amount: number) => {
   const formatter = new Intl.NumberFormat("en-US", {
@@ -518,55 +586,25 @@ function UpdateSubscriptionDialog({
       try {
         setIsLoading(true);
 
-        // If we already preloaded plans, use them
-        if (plansRef.current.length > 0) {
-          setAvailablePlans(plansRef.current);
+        // Use the optimized plans fetching function
+        const plans = await fetchPlansWithCache();
+        setAvailablePlans(plans);
 
-          // Initialize subscription items from current subscription
-          if (subscription?.items) {
-            const currentItems = Array.isArray(subscription.items)
-              ? subscription.items.map((item: any) => ({
-                  priceId: item.price.id,
-                  quantity: item.quantity,
-                }))
-              : [];
-            setSubscriptionItems(currentItems);
-          }
-
-          setIsLoading(false);
-          return;
-        }
-
-        // Otherwise fetch plans
-        const response = await fetch("/api/stripe/plans");
-        const data = await response.json();
-
-        if (data.plans) {
-          setAvailablePlans(data.plans);
-          plansRef.current = data.plans;
-
-          // Initialize subscription items from current subscription
-          if (subscription?.items) {
-            const currentItems = Array.isArray(subscription.items)
-              ? subscription.items.map((item: any) => ({
-                  priceId: item.price.id,
-                  quantity: item.quantity,
-                }))
-              : [];
-            setSubscriptionItems(currentItems);
-          }
-        } else {
-          toast({
-            title: "Error",
-            description: "Failed to load subscription plans",
-            variant: "destructive",
-          });
+        // Initialize subscription items from current subscription
+        if (subscription?.items) {
+          const currentItems = Array.isArray(subscription.items)
+            ? subscription.items.map((item: any) => ({
+                priceId: item.price.id,
+                quantity: item.quantity,
+              }))
+            : [];
+          setSubscriptionItems(currentItems);
         }
       } catch (error) {
-        console.error("Error fetching plans:", error);
+        console.error("Error initializing dialog:", error);
         toast({
           title: "Error",
-          description: "Failed to load subscription plans",
+          description: "Failed to load subscription data",
           variant: "destructive",
         });
       } finally {
@@ -1013,6 +1051,13 @@ export function StripeTabs({
     useState(false);
   const [isCreateInvoiceOpen, setIsCreateInvoiceOpen] = useState(false);
 
+  // Add state for detailed loading states
+  const [updateProgress, setUpdateProgress] = useState({
+    stage: "",
+    progress: 0,
+    description: "",
+  });
+
   // Debug effect for dialog state
   useEffect(() => {
     console.log(
@@ -1346,113 +1391,186 @@ export function StripeTabs({
     async (items: SubscriptionItem[]) => {
       if (!subscriptionDetails?.subscription?.id) return;
 
-      try {
-        setIsProcessing(true);
+      // Generate a unique key for this update request
+      const updateKey = `${subscriptionDetails.subscription.id}:${JSON.stringify(items)}`;
 
-        // Get available plans first
-        const plansResponse = await fetch("/api/stripe/plans");
-        const plansData = await plansResponse.json();
-        const availablePlans = plansData.plans || [];
-
-        // Calculate total subscription amount in cents (Stripe uses cents)
-        const totalAmount = items.reduce((sum, item) => {
-          const plan = availablePlans.find(
-            (plan: { id: string }) => plan.id === item.priceId
-          );
-          return sum + (plan ? plan.unit_amount * item.quantity : 0);
-        }, 0);
-
-        console.log("Calculated new subscription total amount:", totalAmount);
-
-        // Optimistically update the UI
-        const updatedSubscription = {
-          ...subscriptionDetails.subscription,
-          items: items.map((item) => ({
-            id: Math.random().toString(), // Temporary ID
-            price: availablePlans.find(
-              (plan: { id: string }) => plan.id === item.priceId
-            ),
-            quantity: item.quantity,
-          })),
-        };
-
-        // Update both the subscription and cache
-        const updatedDetails = {
-          ...subscriptionDetails,
-          subscription: updatedSubscription,
-        };
-
-        setSubscriptionDetails(updatedDetails);
-        subscriptionDetailsCache.set(company.id, {
-          data: updatedDetails,
-          timestamp: Date.now(),
-        });
-
-        console.log("Updating subscription with items:", items);
-
-        // Call your API to update the subscription
-        const response = await fetch(
-          `/api/stripe/subscriptions/${subscriptionDetails.subscription.id}/update`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ items }),
-          }
+      // Check if there's already a pending update with the same key
+      if (pendingUpdates.has(updateKey)) {
+        console.log(
+          "Deduplicating subscription update request with same items"
         );
+        return pendingUpdates.get(updateKey);
+      }
 
-        if (!response.ok) {
-          const errorData = await response.json();
-          console.error("Subscription update failed:", errorData);
-          throw new Error(errorData.details || "Failed to update subscription");
-        }
-
-        const result = await response.json();
-        console.log("Subscription update successful:", result);
-
-        // Update the company's subscription amount in the database
+      const updatePromise = (async () => {
         try {
-          await fetch(`/api/companies/${company.id}/update`, {
+          setIsProcessing(true);
+          const startTime = Date.now();
+
+          // Start with cache clearing
+          setUpdateProgress({
+            stage: "preparing",
+            progress: 10,
+            description: "Preparing subscription update...",
+          });
+
+          // Clear any cached data to ensure fresh data
+          await clearCompanyCache(company.id);
+
+          setUpdateProgress({
+            stage: "loading_plans",
+            progress: 30,
+            description: "Loading subscription plans...",
+          });
+
+          // Get available plans efficiently (use cached plans if available)
+          let availablePlans;
+          if (
+            plansCache.data.length &&
+            Date.now() - plansCache.timestamp < plansCache.TTL
+          ) {
+            console.log("Using cached plans data for subscription update");
+            availablePlans = plansCache.data;
+          } else {
+            console.log("Fetching fresh plans data for subscription update");
+            const plansResponse = await fetch("/api/stripe/plans");
+            const plansData = await plansResponse.json();
+            availablePlans = plansData.plans || [];
+
+            // Update plans cache
+            plansCache.data = availablePlans;
+            plansCache.timestamp = Date.now();
+          }
+
+          setUpdateProgress({
+            stage: "calculating",
+            progress: 40,
+            description: "Calculating subscription changes...",
+          });
+
+          // Calculate total subscription amount in cents (Stripe uses cents)
+          const totalAmount = items.reduce((sum, item) => {
+            const plan = availablePlans.find(
+              (plan: { id: string }) => plan.id === item.priceId
+            );
+            return sum + (plan ? plan.unit_amount * item.quantity : 0);
+          }, 0);
+
+          console.log("Calculated new subscription total amount:", totalAmount);
+
+          setUpdateProgress({
+            stage: "updating",
+            progress: 60,
+            description: "Updating subscription in Stripe...",
+          });
+
+          // Call the API endpoint to update the subscription
+          const response = await fetch(`/api/stripe/subscriptions/update`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              stripe_subscription_amount: totalAmount,
-              stripe_subscription_id: subscriptionDetails.subscription.id,
+              subscriptionId: subscriptionDetails.subscription.id,
+              items,
             }),
           });
-          console.log("Updated company subscription amount:", totalAmount);
-        } catch (updateError) {
-          console.error(
-            "Failed to update company subscription amount:",
-            updateError
+
+          if (!response.ok) {
+            const errorData = await response.json();
+            console.error("Subscription update failed:", errorData);
+            throw new Error(
+              errorData.details || "Failed to update subscription"
+            );
+          }
+
+          setUpdateProgress({
+            stage: "processing",
+            progress: 80,
+            description: "Processing update results...",
+          });
+
+          const result = await response.json();
+          const requestDuration = Date.now() - startTime;
+          console.log(
+            `Subscription update successful in ${requestDuration}ms:`,
+            result
           );
+
+          // Close the dialog before fetching fresh data
+          setIsUpdateSubscriptionOpen(false);
+
+          // Optimistically update the subscription UI to prevent flicker
+          if (result.subscription) {
+            setSubscriptionDetails((prev: any) => ({
+              ...prev,
+              subscription: result.subscription,
+            }));
+          }
+
+          setUpdateProgress({
+            stage: "refreshing",
+            progress: 90,
+            description: "Refreshing data...",
+          });
+
+          // Clear all caches to ensure fresh data
+          subscriptionDetailsCache.delete(company.id);
+
+          // Force refresh data to ensure we have the latest, with slight delay
+          // Use a shorter delay since our backend is already optimized
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          await fetchData();
+
+          setUpdateProgress({
+            stage: "complete",
+            progress: 100,
+            description: "Update completed successfully!",
+          });
+
+          // Tell the user we're done
+          toast({
+            title: "Success",
+            description: "Subscription updated successfully",
+          });
+
+          return result;
+        } catch (error) {
+          console.error("Error updating subscription:", error);
+          // Revert optimistic update on error
+          await fetchData();
+
+          setUpdateProgress({
+            stage: "error",
+            progress: 100,
+            description: "Update failed",
+          });
+
+          toast({
+            title: "Error",
+            description: "Failed to update subscription",
+            variant: "destructive",
+          });
+          throw error;
+        } finally {
+          setIsProcessing(false);
+          // Reset progress after a short delay
+          setTimeout(() => {
+            setUpdateProgress({
+              stage: "",
+              progress: 0,
+              description: "",
+            });
+          }, 3000);
+          // Remove this update from pending updates
+          pendingUpdates.delete(updateKey);
         }
+      })();
 
-        // Close the dialog before fetching fresh data
-        setIsUpdateSubscriptionOpen(false);
+      // Store the promise in the pendingUpdates map
+      pendingUpdates.set(updateKey, updatePromise);
 
-        // Refresh data in the background to ensure consistency
-        fetchData().catch(console.error);
-
-        toast({
-          title: "Success",
-          description: "Subscription updated successfully",
-        });
-      } catch (error) {
-        console.error("Error updating subscription:", error);
-        // Revert optimistic update on error
-        await fetchData();
-        toast({
-          title: "Error",
-          description: "Failed to update subscription",
-          variant: "destructive",
-        });
-      } finally {
-        setIsProcessing(false);
-      }
+      return updatePromise;
     },
     [company.id, fetchData, subscriptionDetails, toast]
   );

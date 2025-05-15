@@ -47,24 +47,52 @@ const COMPANY_USERS_PROGRESS_KEY = (companyId: number) =>
 
 export async function getCompaniesAction(): Promise<{
   data: Company[];
-  source: "cache" | "database";
+  source: "cache" | "database" | "error";
   timing: { total: number; database?: number };
 }> {
   const startTime = Date.now();
 
   try {
     // Try to get from cache first
-    const cachedCompanies = (await getCachedCompanyList()) as Company[] | null;
-    if (cachedCompanies) {
-      console.log("Using cached companies data from Redis");
-      return {
-        data: cachedCompanies,
-        source: "cache",
-        timing: { total: Date.now() - startTime },
-      };
+    const cachedResult = await getCachedCompanyList();
+
+    if (cachedResult) {
+      console.log("Cache hit for companies list");
+      // Check if we have the new format with _meta
+      if (
+        typeof cachedResult === "object" &&
+        cachedResult !== null &&
+        "_meta" in cachedResult &&
+        "data" in cachedResult &&
+        Array.isArray(cachedResult.data)
+      ) {
+        console.log(
+          `Using cached companies data from Redis (${cachedResult.data.length} items)`
+        );
+        return {
+          data: cachedResult.data,
+          source: "cache",
+          timing: { total: Date.now() - startTime },
+        };
+      }
+      // Handle legacy format (direct array)
+      else if (Array.isArray(cachedResult)) {
+        console.log(
+          `Using cached companies data from Redis (legacy format: ${cachedResult.length} items)`
+        );
+        return {
+          data: cachedResult,
+          source: "cache",
+          timing: { total: Date.now() - startTime },
+        };
+      }
+
+      console.log("Unexpected cache format, fetching from database");
+    } else {
+      console.log("No cached companies data found");
     }
 
-    // If not in cache, fetch from database
+    // If not in cache or invalid format, fetch from database
     const supabase = await createClient();
     const {
       data: { user },
@@ -84,9 +112,17 @@ export async function getCompaniesAction(): Promise<{
 
     if (error) throw error;
 
+    if (!Array.isArray(companies)) {
+      console.warn("Database returned non-array companies:", companies);
+      throw new Error("Invalid database response format");
+    }
+
     // Cache the results
     await setCompanyListCache(companies);
-    console.log("Companies data cached in Redis with key:", COMPANY_LIST_KEY);
+    console.log(
+      `Cached ${companies.length} companies with key:`,
+      COMPANY_LIST_KEY
+    );
 
     return {
       data: companies,
@@ -98,7 +134,12 @@ export async function getCompaniesAction(): Promise<{
     };
   } catch (error) {
     console.error("Error in getCompaniesAction:", error);
-    throw error;
+    // Return empty array instead of throwing
+    return {
+      data: [],
+      source: "error",
+      timing: { total: Date.now() - startTime },
+    };
   }
 }
 
@@ -310,86 +351,140 @@ export async function clearCompanyCachesAction(): Promise<boolean> {
 }
 
 export async function getCompanyUsersAction(companyId: number) {
-  const startTime = Date.now();
-  console.log(`Fetching users for company ${companyId}...`);
-
   try {
-    // Try to get from cache first
-    const cacheKey = COMPANY_USERS_KEY(companyId);
-    const cachedUsers = (await getCachedCompany(companyId)) as any[] | null;
-
-    if (cachedUsers) {
-      console.log(`Using cached users for company ${companyId}`);
-      return cachedUsers;
-    }
+    console.log(`Fetching users for company ${companyId}...`);
+    const startTime = Date.now();
 
     const supabase = await createClient();
 
-    // Get users from user_companies junction table
-    console.log(`Querying user_companies table for company ${companyId}`);
-    const { data: userCompanies, error: junctionError } = await supabase
-      .from("user_companies")
-      .select("user_id")
-      .eq("company_id", companyId);
+    // Check auth before proceeding
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
-    if (junctionError) {
-      console.error(
-        `Error fetching from user_companies: ${junctionError.message}`
-      );
-      throw junctionError;
+    if (!user) {
+      throw new Error("Not authenticated");
+    }
+
+    // Use efficient COUNT query first to get total size
+    const { count, error: countError } = await withRetry(async () => {
+      return await supabase
+        .from("users")
+        .select("*", { count: "exact", head: true })
+        .eq("company_id", companyId);
+    });
+
+    if (countError) {
+      throw countError;
+    }
+
+    // If there are too many users, use pagination
+    const PAGE_SIZE = 50;
+    const isLargeSet = count && count > PAGE_SIZE;
+
+    console.log(
+      `Company ${companyId} has ${count} users. Large set: ${isLargeSet}`
+    );
+
+    let users;
+    if (isLargeSet) {
+      // For large sets, fetch first page efficiently
+      const { data: firstPageUsers, error } = await withRetry(async () => {
+        return await supabase
+          .from("users")
+          .select("*")
+          .eq("company_id", companyId)
+          .order("created_at", { ascending: false })
+          .limit(PAGE_SIZE);
+      });
+
+      if (error) throw error;
+      users = firstPageUsers;
+
+      // Set metadata for client to know there's more
+      users._pagination = {
+        total: count,
+        hasMore: count > PAGE_SIZE,
+        page: 1,
+        pageSize: PAGE_SIZE,
+      };
+    } else {
+      // For small sets, fetch all at once
+      const { data: allUsers, error } = await withRetry(async () => {
+        return await supabase
+          .from("users")
+          .select("*")
+          .eq("company_id", companyId)
+          .order("created_at", { ascending: false });
+      });
+
+      if (error) throw error;
+      users = allUsers;
     }
 
     console.log(
-      `Found ${userCompanies?.length || 0} user associations for company ${companyId}`
+      `Fetched ${users.length} users for company ${companyId} in ${Date.now() - startTime}ms`
     );
 
-    if (!userCompanies || userCompanies.length === 0) {
-      console.log(`No users found for company ${companyId}`);
-      return [];
-    }
-
-    // Get user details
-    const userIds = userCompanies.map((uc) => uc.user_id);
-    console.log(
-      `Fetching details for ${userIds.length} users: ${userIds.join(", ")}`
-    );
-
-    const { data: users, error } = await supabase
-      .from("users")
-      .select(
-        `
-        id,
-        email,
-        first_name,
-        last_name,
-        role,
-        status,
-        created_at
-      `
-      )
-      .in("id", userIds);
-
-    if (error) {
-      console.error(`Error fetching user details: ${error.message}`);
-      throw error;
-    }
-
-    console.log(
-      `Retrieved ${users.length} user details out of ${userIds.length} associations`
-    );
-
-    // Cache the result
-    if (users.length > 0) {
-      await setCompanyDetailCache(companyId, users);
-      console.log(`Cached ${users.length} users for company ${companyId}`);
-    }
-
-    const endTime = Date.now();
-    console.log(`Fetched ${users.length} users in ${endTime - startTime}ms`);
-
-    return users;
+    return {
+      users,
+      count,
+      isPartial: isLargeSet,
+      timing: Date.now() - startTime,
+    };
   } catch (error) {
     console.error(`Error fetching users for company ${companyId}:`, error);
+    throw error;
+  }
+}
+
+export async function getCompanyUsersPage(
+  companyId: number,
+  page: number,
+  pageSize: number = 50
+) {
+  try {
+    console.log(`Fetching users page ${page} for company ${companyId}...`);
+    const startTime = Date.now();
+
+    const supabase = await createClient();
+
+    // Check auth before proceeding
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      throw new Error("Not authenticated");
+    }
+
+    // Calculate offset
+    const offset = (page - 1) * pageSize;
+
+    // Fetch the specific page
+    const { data: users, error } = await withRetry(async () => {
+      return await supabase
+        .from("users")
+        .select("*")
+        .eq("company_id", companyId)
+        .order("created_at", { ascending: false })
+        .range(offset, offset + pageSize - 1);
+    });
+
+    if (error) throw error;
+
+    console.log(
+      `Fetched page ${page} of users (${users.length} items) for company ${companyId} in ${Date.now() - startTime}ms`
+    );
+
+    return {
+      users,
+      page,
+      pageSize,
+      timing: Date.now() - startTime,
+    };
+  } catch (error) {
+    console.error(`Error fetching users page for company ${companyId}:`, error);
     throw error;
   }
 }
@@ -548,5 +643,115 @@ export async function addTestUserToCompany(companyId: number) {
       error:
         error instanceof Error ? error.message : "An unknown error occurred",
     };
+  }
+}
+
+export async function invalidateCompanySubscriptionCaches(
+  companyId: number
+): Promise<boolean> {
+  try {
+    console.log(
+      `[Cache] Invalidating all caches for company ${companyId} after subscription update`
+    );
+
+    // Clear the cached company details
+    await clearCompanyCache(companyId, true);
+
+    // Clear the company list cache to ensure updated subscription values appear in lists
+    await clearCompanyListCache(true);
+
+    // Force revalidation of all company-related pages
+    revalidatePath(`/Companies/${companyId}`);
+    revalidatePath("/Companies");
+
+    console.log(
+      `[Cache] Successfully invalidated all caches for company ${companyId}`
+    );
+
+    return true;
+  } catch (error) {
+    console.error(
+      `[Cache] Error invalidating caches for company ${companyId}:`,
+      error
+    );
+    return false;
+  }
+}
+
+/**
+ * Optimized batch cache invalidation that performs all necessary invalidations
+ * in a single operation, reducing network overhead and improving performance
+ */
+export async function batchInvalidateCompanyData(
+  companyId: number
+): Promise<boolean> {
+  try {
+    console.log(`[Cache] Batch invalidating all data for company ${companyId}`);
+
+    const startTime = Date.now();
+
+    // Create a Redis pipeline to execute all operations in a single request
+    const supabase = await createClient();
+    const redisUrl =
+      process.env.REDIS_URL || process.env.UPSTASH_REDIS_REST_URL;
+
+    if (redisUrl) {
+      try {
+        // Create an array of cache keys to invalidate
+        const keysToInvalidate = [
+          COMPANY_DETAIL_KEY(companyId),
+          COMPANY_LIST_KEY,
+          `company_users:${companyId}`,
+          `company_users_inprogress:${companyId}`,
+          `stripe_data:${companyId}`,
+        ];
+
+        // Make a single request to clear all keys
+        const baseUrl =
+          process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
+        const response = await fetch(`${baseUrl}/api/cache/batch-invalidate`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ keys: keysToInvalidate }),
+        });
+
+        if (!response.ok) {
+          throw new Error(
+            `Failed to batch invalidate cache: ${response.statusText}`
+          );
+        }
+      } catch (redisError) {
+        console.error(
+          "Redis batch invalidation failed, falling back to individual clears:",
+          redisError
+        );
+        // Fall back to individual cache clearing
+        await clearCompanyCache(companyId, true);
+        await clearCompanyListCache(true);
+      }
+    } else {
+      // Fall back to individual cache clearing
+      await clearCompanyCache(companyId, true);
+      await clearCompanyListCache(true);
+    }
+
+    // Force revalidation of all company-related pages
+    revalidatePath(`/Companies/${companyId}`);
+    revalidatePath("/Companies");
+
+    const duration = Date.now() - startTime;
+    console.log(
+      `[Cache] Successfully batch invalidated all data for company ${companyId} in ${duration}ms`
+    );
+
+    return true;
+  } catch (error) {
+    console.error(
+      `[Cache] Error batch invalidating data for company ${companyId}:`,
+      error
+    );
+    return false;
   }
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { Company } from "../../types";
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, Suspense } from "react";
 import {
   Sheet,
   SheetContent,
@@ -25,19 +25,62 @@ import {
   Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { CompanyUsers } from "../company-users";
 import dynamic from "next/dynamic";
+
+// Lazy load all secondary components with dynamic imports to improve initial load time
+const CompanyUsers = dynamic(
+  () =>
+    import("../company-users").then((mod) => ({ default: mod.CompanyUsers })),
+  {
+    ssr: false,
+    loading: () => <div className="p-6 animate-pulse">Loading users...</div>,
+  }
+);
+
 // Import CompanyDrivers with dynamic to prevent SSR issues
 const CompanyDrivers = dynamic(
   () =>
     import("../company-drivers").then((mod) => ({
       default: mod.CompanyDrivers,
     })),
-  { ssr: false }
+  {
+    ssr: false,
+    loading: () => <div className="p-6 animate-pulse">Loading drivers...</div>,
+  }
 );
-import { CompanySettings } from "../company-settings";
-import { CompanyEditForm } from "../company-edit-form";
-import { StripeTabs } from "../stripe-tabs";
+
+const CompanySettings = dynamic(
+  () =>
+    import("../company-settings").then((mod) => ({
+      default: mod.CompanySettings,
+    })),
+  {
+    ssr: false,
+    loading: () => <div className="p-6 animate-pulse">Loading settings...</div>,
+  }
+);
+
+const CompanyEditForm = dynamic(
+  () =>
+    import("../company-edit-form").then((mod) => ({
+      default: mod.CompanyEditForm,
+    })),
+  {
+    ssr: false,
+    loading: () => <div className="p-6 animate-pulse">Loading form...</div>,
+  }
+);
+
+const StripeTabs = dynamic(
+  () => import("../stripe-tabs").then((mod) => ({ default: mod.StripeTabs })),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="p-6 animate-pulse">Loading billing info...</div>
+    ),
+  }
+);
+
 import { useToast } from "@/components/ui/use-toast";
 import {
   getStripeSubscriptionDetails,
@@ -69,14 +112,56 @@ export function CompanySideDialog({
   const [stripeData, setStripeData] = useState<any>(null);
   const [stripeError, setStripeError] = useState<string | null>(null);
   const [isDialogContentLoading, setIsDialogContentLoading] = useState(false);
+  // Add prefetch state to track if we've already started loading Stripe data
+  const [stripePrefetchStarted, setStripePrefetchStarted] = useState(false);
   const { toast } = useToast();
 
   // Update local company state when initialCompany changes
   useEffect(() => {
     if (initialCompany?.id !== company?.id) {
       setCompany(initialCompany);
+      // Reset prefetch flag when company changes
+      setStripePrefetchStarted(false);
     }
   }, [initialCompany, company?.id]);
+
+  // Prefetch Stripe data when opening the dialog
+  useEffect(() => {
+    if (open && initialCompany?.stripe_customer_id && !stripePrefetchStarted) {
+      // Set the flag to prevent duplicate prefetching
+      setStripePrefetchStarted(true);
+
+      // Start background prefetch without blocking UI
+      const prefetchData = async () => {
+        try {
+          const startTime = performance.now();
+          console.log(
+            `Prefetching Stripe data for company ${initialCompany.id}...`
+          );
+
+          // Use Promise.all to fetch both in parallel
+          const [stripeDetails] = await Promise.all([
+            getStripeSubscriptionDetails(initialCompany.id),
+          ]);
+
+          const endTime = performance.now();
+          console.log(
+            `Prefetched Stripe data in ${Math.round(endTime - startTime)}ms`
+          );
+
+          // Save the result for when user clicks on billing tab
+          setStripeData(stripeDetails);
+        } catch (error) {
+          console.error("Error prefetching Stripe data:", error);
+          // Don't show error to user until they actually try to view the tab
+          setStripeError("Failed to load Stripe subscription details");
+        }
+      };
+
+      // Start prefetch in background
+      prefetchData();
+    }
+  }, [open, initialCompany, stripePrefetchStarted]);
 
   // This useEffect runs when the dialog opens/closes or the company changes
   useEffect(() => {
@@ -93,48 +178,42 @@ export function CompanySideDialog({
       if (initialCompany) {
         setCompany(initialCompany);
       }
-
-      // Start fetching Stripe data in the background immediately when dialog opens
-      if (initialCompany?.stripe_customer_id) {
-        loadStripeData();
-        loadAvailablePlans();
-      }
     }
   }, [open, initialCompany, initialEditMode]);
 
-  // This useEffect watches for tab changes to load Stripe data
+  // This useEffect watches for tab changes to load Stripe data if not already loaded
   useEffect(() => {
     const fetchStripeData = async () => {
       if (!company?.id) return;
 
-      try {
-        setIsLoadingStripe(true);
-        // Add a small delay to allow UI to render first
-        await new Promise((resolve) => setTimeout(resolve, 100));
+      // Only fetch if we don't already have data and aren't currently loading
+      if (!stripeData && !isLoadingStripe) {
+        try {
+          setIsLoadingStripe(true);
+          console.log(`Fetching Stripe data for company ${company.id}...`);
+          const startTime = performance.now();
 
-        console.log(`Fetching Stripe data for company ${company.id}...`);
-        const startTime = performance.now();
+          const stripeDetails = await getStripeSubscriptionDetails(company.id);
 
-        const stripeDetails = await getStripeSubscriptionDetails(company.id);
+          const endTime = performance.now();
+          console.log(
+            `Stripe data loaded in ${Math.round(endTime - startTime)}ms`
+          );
 
-        const endTime = performance.now();
-        console.log(
-          `Stripe data loaded in ${Math.round(endTime - startTime)}ms`
-        );
-
-        setStripeData(stripeDetails);
-      } catch (error) {
-        console.error("Error fetching Stripe data:", error);
-        setStripeError("Failed to load Stripe subscription details");
-      } finally {
-        setIsLoadingStripe(false);
+          setStripeData(stripeDetails);
+        } catch (error) {
+          console.error("Error fetching Stripe data:", error);
+          setStripeError("Failed to load Stripe subscription details");
+        } finally {
+          setIsLoadingStripe(false);
+        }
       }
     };
 
     if (company?.stripe_customer_id && activeTab === "billing") {
       fetchStripeData();
     }
-  }, [company, activeTab]);
+  }, [company, activeTab, stripeData, isLoadingStripe]);
 
   // Early return if no company is provided
   if (!company) {

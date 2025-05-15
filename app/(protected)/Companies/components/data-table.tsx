@@ -230,8 +230,29 @@ export function DataTable<TData, TValue>({
                 <TableRow
                   key={row.id}
                   data-state={row.getIsSelected() && "selected"}
-                  onClick={() => handleRowClick((row.original as Company).id)}
-                  className="cursor-pointer"
+                  onClick={(e) => {
+                    if (
+                      (e.target as HTMLElement).closest(
+                        'input[type="checkbox"]'
+                      )
+                    ) {
+                      e.stopPropagation();
+                      return;
+                    }
+
+                    console.log("Row clicked:", row.original);
+                    const company = row.original as any;
+                    console.log(
+                      `Handling row click for company ID: ${company.id}, Name: ${company.name}`
+                    );
+
+                    if (company && typeof company.id === "number") {
+                      handleRowClick(company.id);
+                    } else {
+                      console.error("Invalid company data in row:", company);
+                    }
+                  }}
+                  className="cursor-pointer hover:bg-muted/50"
                 >
                   {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id}>
@@ -249,7 +270,7 @@ export function DataTable<TData, TValue>({
                   colSpan={columns.length}
                   className="h-24 text-center"
                 >
-                  No results.
+                  No results found. Try adjusting your filters.
                 </TableCell>
               </TableRow>
             )}

@@ -1,6 +1,6 @@
 "use client";
 
-import { RefreshCw, Plus, Database, Settings, Trash } from "lucide-react";
+import { RefreshCw, Plus, Database, Settings, Trash, Bug } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useCompanies } from "../components/CompaniesClientProvider";
@@ -12,11 +12,39 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { toast } from "sonner";
 
 export function PageHeader() {
-  const { syncWithServer, clearCache, isSyncing, handleCreateCompany } =
-    useCompanies();
+  const {
+    syncWithServer,
+    clearCache,
+    isSyncing,
+    handleCreateCompany,
+    refreshCompanies,
+  } = useCompanies();
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Force refresh data bypassing all caches
+  const handleForceRefresh = async () => {
+    try {
+      setIsRefreshing(true);
+      console.log("Force refreshing companies data...");
+
+      // First clear the cache
+      await clearCache();
+
+      // Then refresh the data with cache skipping
+      await refreshCompanies(true);
+
+      toast.success("Companies data refreshed successfully");
+    } catch (error) {
+      console.error("Force refresh failed:", error);
+      toast.error("Failed to refresh data");
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   return (
     <>
@@ -31,6 +59,21 @@ export function PageHeader() {
             </p>
           </div>
           <div className="flex items-center gap-3">
+            {process.env.NODE_ENV === "development" && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleForceRefresh}
+                disabled={isRefreshing}
+                className="h-9 border-amber-500 text-amber-600 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-400 dark:hover:bg-amber-950/50"
+              >
+                <Bug
+                  className={cn("h-4 w-4 mr-2", isRefreshing && "animate-spin")}
+                />
+                Debug Refresh
+              </Button>
+            )}
+
             <Button
               size="sm"
               onClick={() => setDialogOpen(true)}

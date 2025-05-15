@@ -315,7 +315,7 @@ export function CompanyUsers({ company }: { company: Company }) {
 }
 
 // Function to prefetch company users data
-export function prefetchCompanyUsers(companyId: number) {
+export function prefetchCompanyUsers(companyId: number): Promise<void> {
   if (typeof window !== "undefined") {
     console.log(`[Prefetch] Starting prefetch for company ${companyId}`);
 
@@ -327,14 +327,21 @@ export function prefetchCompanyUsers(companyId: number) {
       console.log(
         `[Prefetch] Already prefetched data for company ${companyId}`
       );
-      return;
+      return Promise.resolve();
     }
 
     // Prefetch data in the background
-    getCompanyUsersOptimized(companyId)
+    return getCompanyUsersOptimized(companyId)
       .then((data) => {
+        // Handle both legacy and new API format
+        const userCount = Array.isArray(data)
+          ? data.length
+          : data?.users
+            ? data.users.length
+            : 0;
+
         console.log(
-          `[Prefetch] Successfully prefetched ${data?.length || 0} users for company ${companyId}`
+          `[Prefetch] Successfully prefetched ${userCount} users for company ${companyId}`
         );
         // Mark as prefetched
         sessionStorage.setItem(prefetchKey, "true");
@@ -343,4 +350,6 @@ export function prefetchCompanyUsers(companyId: number) {
         console.error(`[Prefetch] Error prefetching company users: ${err}`);
       });
   }
+
+  return Promise.resolve();
 }

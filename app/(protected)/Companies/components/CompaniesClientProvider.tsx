@@ -6,6 +6,7 @@ import React, {
   useState,
   useCallback,
   useEffect,
+  useMemo,
 } from "react";
 import { toast } from "sonner";
 import { Company, RealtimePayload } from "../types";
@@ -50,6 +51,11 @@ const CompaniesContext = createContext<CompaniesContextType | undefined>(
   undefined
 );
 
+// Constants for throttling
+const REFRESH_THROTTLE = 2000; // Min time between refreshes (2 seconds)
+const REALTIME_DEBOUNCE = 500; // Debounce realtime updates
+const AUTO_REFRESH_INTERVAL = 5 * 60 * 1000; // Auto refresh every 5 min
+
 interface CompaniesClientProviderProps {
   children: React.ReactNode;
   initialCompanies: Company[];
@@ -88,7 +94,12 @@ export function CompaniesClientProvider({
   children,
   initialCompanies,
 }: CompaniesClientProviderProps) {
-  const [companies, setCompanies] = useState<Company[]>(initialCompanies);
+  // Ensure initialCompanies is an array
+  const safeInitialCompanies = Array.isArray(initialCompanies)
+    ? initialCompanies
+    : [];
+
+  const [companies, setCompanies] = useState<Company[]>(safeInitialCompanies);
   const [error, setError] = useState<Error | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -100,10 +111,32 @@ export function CompaniesClientProvider({
   const router = useRouter();
   const supabase = getRealTimeClient();
   const [lastUpdateTime, setLastUpdateTime] = useState<number>(Date.now());
+  const [lastRefreshTime, setLastRefreshTime] = useState<number>(0);
   const REFRESH_THRESHOLD = 5 * 60 * 1000; // Only refresh after 5 minutes of inactivity
   const [deletedCompanyIds, setDeletedCompanyIds] = useState<Set<number>>(
     new Set()
   );
+  const [pendingRealtimeUpdates, setPendingRealtimeUpdates] = useState<
+    RealtimePayload[]
+  >([]);
+  const [realtimeDebounceTimer, setRealtimeDebounceTimer] =
+    useState<NodeJS.Timeout | null>(null);
+  const [autoRefreshTimer, setAutoRefreshTimer] =
+    useState<NodeJS.Timeout | null>(null);
+
+  // Memoize frequently accessed values to prevent unnecessary re-renders
+  const companyMap = useMemo(() => {
+    const map = new Map<number, Company>();
+    // Ensure companies is an array before using forEach
+    if (Array.isArray(companies)) {
+      companies.forEach((company) => {
+        if (company && typeof company.id === "number") {
+          map.set(company.id, company);
+        }
+      });
+    }
+    return map;
+  }, [companies]);
 
   const setProcessingCompany = useCallback(
     (id: number, processing: boolean) => {
@@ -117,9 +150,17 @@ export function CompaniesClientProvider({
       console.log(`Optimistically updating company ${id} with:`, updates);
 
       setCompanies((prevCompanies) => {
+        // Ensure prevCompanies is an array
+        if (!Array.isArray(prevCompanies)) {
+          console.warn(
+            "Previous companies is not an array, initializing to empty array"
+          );
+          return []; // Return empty array as a fallback
+        }
+
         // Find the company to update
         const companyIndex = prevCompanies.findIndex(
-          (company) => company.id === id
+          (company) => company?.id === id
         );
 
         if (companyIndex === -1) {
@@ -189,37 +230,99 @@ export function CompaniesClientProvider({
     }
   };
 
-  const refreshCompanies = async (skipCache?: boolean) => {
-    try {
-      setIsLoading(true);
-      const result = await getCompaniesAction();
-      setCompanies(result.data);
-      setLastUpdateTime(Date.now());
-    } catch (error) {
-      console.error("Error refreshing companies:", error);
-      setError(error instanceof Error ? error : new Error(String(error)));
-      toast.error("Failed to refresh companies");
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  // Throttled refresh to prevent too many refreshes in quick succession
+  const refreshCompanies = useCallback(
+    async (skipCache?: boolean) => {
+      const now = Date.now();
+
+      // Skip if we refreshed too recently, unless forced
+      if (!skipCache && now - lastRefreshTime < REFRESH_THROTTLE) {
+        console.log("Skipping refresh, too soon since last refresh");
+        return;
+      }
+
+      try {
+        setLastRefreshTime(now);
+        setIsLoading(true);
+        const result = await getCompaniesAction();
+
+        // Ensure data is an array before setting state
+        const companiesData = Array.isArray(result.data) ? result.data : [];
+        setCompanies(companiesData);
+
+        setLastUpdateTime(now);
+        console.log(
+          `Refreshed companies in ${Date.now() - now}ms, source: ${result.source}`
+        );
+      } catch (error) {
+        console.error("Error refreshing companies:", error);
+        setError(error instanceof Error ? error : new Error(String(error)));
+        toast.error("Failed to refresh companies");
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [lastRefreshTime]
+  );
 
   const getCompanyById = useCallback(
     (id: number): Company | null => {
-      return companies.find((company) => company.id === id) || null;
+      // Use memoized map for O(1) lookup instead of find (O(n))
+      return companyMap.get(id) || null;
     },
-    [companies]
+    [companyMap]
   );
 
   const handleRowClick = useCallback(
     (companyId: number) => {
+      console.log(`Row clicked for company ID: ${companyId}`);
+
+      // Try to find the company in our local state
       const company = getCompanyById(companyId);
+
       if (company) {
+        console.log(`Company found in local state: ${company.name}`);
         setSelectedCompany(company);
+
+        // Prefetch users data for this company when clicked
+        if (company.id) {
+          try {
+            prefetchCompanyUsers(company.id);
+          } catch (error) {
+            console.error(`Error prefetching users: ${error}`);
+          }
+        }
+      } else {
+        console.error(`Company with ID ${companyId} not found in local state`);
+        // If the company isn't in local state, try to fetch it
+        fetchCompanyById(companyId);
       }
     },
     [getCompanyById]
   );
+
+  // Helper function to fetch a company by ID if not in local state
+  const fetchCompanyById = async (companyId: number) => {
+    console.log(`Fetching company ${companyId} from server...`);
+    try {
+      setIsLoading(true);
+      const response = await fetch(`/api/companies/${companyId}`);
+      const data = await response.json();
+
+      if (data.company) {
+        console.log(`Company ${companyId} fetched:`, data.company);
+        setSelectedCompany(data.company);
+      } else {
+        console.error(`Company ${companyId} not found in API response`);
+        toast.error(`Couldn't find company with ID ${companyId}`);
+      }
+    } catch (error) {
+      console.error(`Error fetching company ${companyId}:`, error);
+      toast.error("Error loading company details");
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const syncStripeCompany = async (company: Company) => {
     try {
@@ -243,16 +346,18 @@ export function CompaniesClientProvider({
       // Perform actual update
       await updateCompanyAction(id, data);
 
-      // Refresh the data
-      await refreshCompanies();
+      // Update selected company if it's the one being edited
+      if (selectedCompany?.id === id) {
+        setSelectedCompany((prev) => (prev ? { ...prev, ...data } : null));
+      }
 
+      // No need to refresh immediately - the realtime subscription will handle it
       toast.success("Company updated successfully");
     } catch (error) {
       console.error("Error updating company:", error);
+      // Refresh to ensure we have the correct data
+      refreshCompanies(true);
       toast.error("Failed to update company");
-
-      // Revert optimistic update by refreshing
-      await refreshCompanies();
     }
   };
 
@@ -376,40 +481,115 @@ export function CompaniesClientProvider({
 
   // When page loads, prefetch data for the first few companies
   useEffect(() => {
-    if (companies.length > 0) {
+    const prefetchTopCompanies = async () => {
+      if (!Array.isArray(companies) || companies.length === 0) return;
+
       // Prefetch users for the first 3 companies (most likely to be viewed)
-      companies.slice(0, 3).forEach((company) => {
-        setTimeout(() => {
-          prefetchCompanyUsers(company.id);
-        }, 2000); // Delay by 2 seconds to let the page finish loading first
-      });
-    }
+      for (const company of companies.slice(0, 3)) {
+        if (!company || typeof company.id !== "number") continue;
+
+        try {
+          // Delay prefetching to let the page finish loading first
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+          await prefetchCompanyUsers(company.id);
+        } catch (error) {
+          console.error(
+            `Error prefetching users for company ${company.id}:`,
+            error
+          );
+        }
+      }
+    };
+
+    prefetchTopCompanies();
   }, [companies]);
 
-  const value = {
-    companies,
-    error,
-    isLoading,
-    isSyncing,
-    syncWithServer,
-    clearCache,
-    updateCompanyOptimistically,
-    processingCompanies,
-    setProcessingCompany,
-    showImportDialog,
-    setShowImportDialog,
-    handleRowClick,
-    refreshCompanies,
-    selectedCompany,
-    setSelectedCompany,
-    getCompanyById,
-    syncStripeCompany,
-    handleUpdateCompany,
-    handleCreateCompany,
-  };
+  // Add a useEffect to properly initialize companies from props or refresh data if needed
+  useEffect(() => {
+    // Log the initial data received from the server
+    console.log(
+      "CompaniesClientProvider: Initializing with data:",
+      initialCompanies
+    );
+
+    // Ensure companies state is updated with initial data if it has valid entries
+    if (Array.isArray(initialCompanies) && initialCompanies.length > 0) {
+      setCompanies(initialCompanies);
+      setLastUpdateTime(Date.now());
+      console.log(
+        `CompaniesClientProvider: Initialized with ${initialCompanies.length} companies`
+      );
+    }
+    // If companies is empty but we previously had companies, keep the old state
+    else if (
+      Array.isArray(initialCompanies) &&
+      initialCompanies.length === 0 &&
+      companies.length > 0
+    ) {
+      console.log(
+        "CompaniesClientProvider: Received empty initialCompanies but keeping existing state"
+      );
+    }
+    // If both are empty, try to fetch
+    else if (
+      Array.isArray(initialCompanies) &&
+      initialCompanies.length === 0 &&
+      companies.length === 0
+    ) {
+      console.log(
+        "CompaniesClientProvider: No companies data, will attempt to fetch"
+      );
+      // Small delay before fetching to let UI render first
+      const timer = setTimeout(() => {
+        refreshCompanies(true);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [initialCompanies]);
+
+  // Memoize the context value to prevent unnecessary re-renders
+  const contextValue = useMemo(
+    () => ({
+      companies,
+      error,
+      isLoading,
+      isSyncing,
+      syncWithServer,
+      clearCache,
+      updateCompanyOptimistically,
+      processingCompanies,
+      setProcessingCompany,
+      showImportDialog,
+      setShowImportDialog,
+      handleRowClick,
+      refreshCompanies,
+      selectedCompany,
+      setSelectedCompany,
+      getCompanyById,
+      syncStripeCompany,
+      handleUpdateCompany,
+      handleCreateCompany,
+    }),
+    [
+      companies,
+      error,
+      isLoading,
+      isSyncing,
+      processingCompanies,
+      showImportDialog,
+      selectedCompany,
+      handleRowClick,
+      refreshCompanies,
+      getCompanyById,
+      updateCompanyOptimistically,
+      setProcessingCompany,
+      handleUpdateCompany,
+      handleCreateCompany,
+    ]
+  );
 
   return (
-    <CompaniesContext.Provider value={value}>
+    <CompaniesContext.Provider value={contextValue}>
       {children}
     </CompaniesContext.Provider>
   );
